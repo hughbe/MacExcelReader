@@ -341,8 +341,8 @@ public class ExperimentTests
         // Excel 1.00: Chart > Axes, "Overlay Chart Axis" under Category Axes, on the Combination sample. The overlay's
         // category axis line pattern becomes 1; its option flags do not change (spec §16.5).
         var overlay = ChartDocument.Load(SamplePath("Overlay Axis")).OverlayChart!;
-        Assert.Equal(1, overlay.CategoryAxis.AxisLinePattern);
-        Assert.Equal(0, overlay.ValueAxis.AxisLinePattern);
+        Assert.Equal(ChartPattern.Solid, overlay.CategoryAxis.AxisLinePattern);
+        Assert.Equal(ChartPattern.None, overlay.ValueAxis.AxisLinePattern);
         Assert.Equal(0x0F, overlay.Record[22]);
     }
 
@@ -372,7 +372,7 @@ public class ExperimentTests
     {
         // Pie format 3 pulls out the first slice: the override's series byte holds point 0 (spec §16.8).
         var chart = ChartDocument.Load(SamplePath("Pie Exploded")).MainChart;
-        Assert.Equal(0, chart.GetPointFormat(0).SeriesNumber);
+        Assert.Equal(0, chart.GetPointFormat(0).SeriesOrPoint);
     }
 
     [Fact]
@@ -423,17 +423,28 @@ public class ExperimentTests
     }
 
     [Theory]
-    [InlineData("Arrow", 4, 1, 0, 1, 0, true, false)]            // PROFIT CHART's arrow: solid, filled head
-    [InlineData("Arrow Patterns", 5, 2, 1, 0, 2, true, true)]    // set in Format > Patterns in Excel 1.00
-    public void Arrows_PatternWeightAndHead(string name, int index, int pattern, int weight, int width, int length, bool head, bool open)
+    [InlineData("Arrow", 4, ChartPattern.Solid, ChartLineWeight.Hairline, ArrowHeadWidth.Medium, ArrowHeadLength.Short, ArrowHeadStyle.Filled)]
+    [InlineData("Arrow Patterns", 5, ChartPattern.DarkGray, ChartLineWeight.Medium, ArrowHeadWidth.Narrow, ArrowHeadLength.Long, ArrowHeadStyle.Open)]
+    public void Arrows_PatternWeightAndHead(string name, int index, ChartPattern pattern, ChartLineWeight weight, ArrowHeadWidth width, ArrowHeadLength length, ArrowHeadStyle style)
     {
+        // PROFIT CHART's arrow, and an arrow set in Format > Patterns in Excel 1.00 (spec §16.7).
         var arrow = ChartDocument.Load(SamplePath(name)).MainChart.Texts[index];
         Assert.True(arrow.IsArrow);
         Assert.Equal(pattern, arrow.ArrowPattern);
         Assert.Equal(weight, arrow.ShaftWeight);
         Assert.Equal(width, arrow.HeadWidth);
         Assert.Equal(length, arrow.HeadLength);
-        Assert.Equal(head, arrow.HasHead);
-        Assert.Equal(open, arrow.OpenHead);
+        Assert.Equal(style, arrow.HeadStyle);
+    }
+
+    [Fact]
+    public void PointMarkers_OverridesAreKeyedByPoint()
+    {
+        // Excel 1.00: Format > Patterns on two markers of PROFIT CHART's single series, choosing X. Each override
+        // record holds the point number and marker 7; the series keeps its hollow diamonds (spec §16.8).
+        var chart = ChartDocument.Load(SamplePath("Point Markers")).MainChart;
+        Assert.Equal(ChartMarker.Diamond, chart.DefaultSeriesFormat.Marker);
+        Assert.Equal([8, 10], Enumerable.Range(0, chart.PointFormats.Count).Select(i => (int)chart.GetPointFormat(i).SeriesOrPoint));
+        Assert.All(Enumerable.Range(0, chart.PointFormats.Count), i => Assert.Equal(ChartMarker.X, chart.GetPointFormat(i).Marker));
     }
 }

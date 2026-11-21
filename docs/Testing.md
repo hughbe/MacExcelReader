@@ -164,6 +164,7 @@ Things to know:
 | Nov 2026 | 1.00 | Charts built with `dumper newchart`, and Chart > Add Arrow | Excel re-saves library charts unchanged apart from its code segment and memory leftovers; fixed two series-header constants and the label strings; arrows are text objects (spec §16.7, §16.9) |
 | Nov 2026 | 1.00 | A table saved with a non-zero list link | Open relinks it but does not calculate it, and Save writes 0 (spec §12.6) |
 | Nov 2026 | 1.00 | Format > Patterns on an arrow, twice | Arrow pattern, shaft weight, head width, length and style (spec §16.7) |
+| Nov 2026 | 1.00 | Format > Patterns on two markers of a line series | Marker values and point-keyed overrides (spec §16.8); the 15 fill patterns came from `PCOD` 0 |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

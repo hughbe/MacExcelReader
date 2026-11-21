@@ -665,7 +665,7 @@ sealed class ChartCommand : Command<FileSettings>
                     texts.AddRow(text.Kind.ToString(), Program.Escape(text.IsArrow ? "(arrow)" : text.Text ?? "(automatic)"),
                         text.Kind == ChartTextKind.DataLabel ? $"series {text.SeriesNumber}, point {(text.PointNumber == 255 ? "all" : text.PointNumber)}" : string.Empty,
                         text.IsArrow
-                            ? $"pattern {text.ArrowPattern}, shaft weight {text.ShaftWeight}, head {(text.HasHead ? (text.OpenHead ? "open" : "filled") : "none")}, width {text.HeadWidth}, length {text.HeadLength}"
+                            ? $"pattern {text.ArrowPattern}, shaft {text.ShaftWeight}, head {text.HeadStyle}, width {text.HeadWidth}, length {text.HeadLength}"
                             : $"{(text.IsVertical ? "vertical" : "horizontal")}, show key {Program.YesNo(text.ShowKey)}, show value {Program.YesNo(text.ShowValue)}");
                 }
 
@@ -695,12 +695,12 @@ sealed class ChartCommand : Command<FileSettings>
     private static string Box(ChartBox box) => $"top {box.Top}, left {box.Left}, {box.Height} × {box.Width}";
 
     private static string PointFormat(ChartPointFormat format)
-        => $"series {format.SeriesNumber}; line pattern {format.LinePattern}{(format.AutomaticLine ? " (auto)" : string.Empty)}, weight {format.LineWeight}; area pattern {format.AreaPattern}{(format.AutomaticArea ? " (auto)" : string.Empty)}; marker {format.Marker}{(format.AutomaticMarker ? " (auto)" : string.Empty)}"
+        => $"series or point {format.SeriesOrPoint}; line pattern {format.LinePattern}{(format.AutomaticLine ? " (auto)" : string.Empty)}, weight {format.LineWeight}; area pattern {format.AreaPattern}{(format.AutomaticArea ? " (auto)" : string.Empty)}; marker {format.Marker}{(format.AutomaticMarker ? " (auto)" : string.Empty)}"
             + (format.SeriesLabel ? "; series label" : string.Empty) + (format.PointLabels ? "; point labels" : string.Empty) + (format.PercentLabels ? " (percentages)" : string.Empty)
             + (format.Explosion != 0 ? $"; pulled out {format.Explosion}%" : string.Empty);
 
     private static string Axis(ChartAxis axis)
-        => $"ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition} (drawn at {axis.TickLabelsAt}); line {(axis.AxisLinePattern == 0 ? "hidden" : $"shown at {axis.LineAt}")}; gridlines major {(axis.MajorGridlinePattern == 0 ? "off" : "on")}, minor {(axis.MinorGridlinePattern == 0 ? "off" : "on")}";
+        => $"ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition} (drawn at {axis.TickLabelsAt}); line {(axis.AxisLinePattern == ChartPattern.None ? "hidden" : $"{axis.AxisLinePattern} at {axis.LineAt}")}; gridlines major {axis.MajorGridlinePattern}, minor {axis.MinorGridlinePattern}";
 
     private static string Scale(ChartScale scale)
         => $"min {(scale.AutoMinimum ? "auto" : scale.Minimum)}, max {(scale.AutoMaximum ? "auto" : scale.Maximum)}, major {(scale.AutoMajorUnit ? "auto" : scale.MajorUnit)}, minor {(scale.AutoMinorUnit ? "auto" : scale.MinorUnit)}, crosses {(scale.AutoCrossesAt ? "auto" : scale.CrossesAt)}{(scale.Logarithmic ? ", log" : string.Empty)}{(scale.ReverseOrder ? ", reversed" : string.Empty)}";

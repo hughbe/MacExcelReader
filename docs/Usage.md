@@ -300,13 +300,16 @@ foreach (var series in chart.Series)
     Console.WriteLine($"{series.Name} ({series.FirstReference}): {string.Join(", ", series.SecondValues)}");
 }
 
-var format = main.DefaultSeriesFormat;      // and main.GetPointFormat(i) for per-point overrides
+var format = main.DefaultSeriesFormat;      // and main.GetPointFormat(i) for per-series or per-point overrides
 Console.WriteLine($"marker {format.Marker}, pie slices pulled out {format.Explosion}%, point labels {format.PointLabels}");
 if (chart.OverlayChart is { } overlay)
 {
     Console.WriteLine($"overlay {overlay.Type}, shares the main value axis: {overlay.SharesValueAxisScale}");
 }
 ```
+
+Patterns, markers, line weights and arrowheads are enums (`ChartPattern`, `ChartMarker`, `ChartLineWeight`,
+`ArrowHeadWidth`, `ArrowHeadLength`, `ArrowHeadStyle`) named after Excel 1.00's Patterns dialogs.
 
 A chart file stores a copy of the plotted data, so the values are available without the worksheet. Numbers
 in chart files use Microsoft's 8-byte decimal format; `MicrosoftDecimal` converts them. `CategoryCount`,

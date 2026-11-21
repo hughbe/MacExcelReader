@@ -1286,8 +1286,29 @@ Line weight:
 | 6 | Word: bit 15: set when a chart is loaded; bit 14: automatic size (text boxes), also set on load; bits 11–8: shadow when non-zero |
 | 8 | Four words: the box as top, left, height and width, in twips, worked out when the chart is drawn (`37.03` in 1.00). The chart area's is (0, 0, height, width) of the drawing rectangle (§16.5); the plot area's is relative to it. `PROFIT CHART`'s chart area is (0, 0, 4784, 9075) and its plot area (996, 1336, 2824, 7213). |
 
-Pattern bytes index Excel's 15-entry pattern palette, 1-based, with 0 meaning "invisible". "Automatic" is a
-separate flag where the object supports it.
+Pattern bytes index Excel's 15 patterns, in the order the Patterns dialogs show them, with 0 meaning
+invisible. "Automatic" is a separate flag where the object supports it. The patterns are 8-byte QuickDraw
+patterns at `PCOD` 0 offset `0x254C` in Excel 1.00:
+
+| Value | Pattern | QuickDraw pattern (rows top to bottom, bit 7 leftmost) |
+|---:|---|---|
+| 0 | Invisible: not drawn |  |
+| 1 | Solid black | `FF FF FF FF FF FF FF FF` |
+| 2 | 75% grey | `EE BB EE BB EE BB EE BB` |
+| 3 | 50% grey | `55 AA 55 AA 55 AA 55 AA` |
+| 4 | 25% grey | `88 22 88 22 88 22 88 22` |
+| 5 | White | `00 00 00 00 00 00 00 00` |
+| 6 | Horizontal stripes | `FF FF 00 00 FF FF 00 00` |
+| 7 | Vertical stripes | `CC CC CC CC CC CC CC CC` |
+| 8 | Diagonal stripes, down to the right (\\) | `CC 66 33 99 CC 66 33 99` |
+| 9 | Diagonal stripes, up to the right (/) | `99 33 66 CC 99 33 66 CC` |
+| 10 | Square grid | `80 80 80 FF 80 80 80 80` |
+| 11 | Diagonal lattice | `80 41 22 14 08 14 22 41` |
+| 12 | Mostly black, thin white lines up to the right | `FC F9 F3 E7 CF 9F 3F 7E` |
+| 13 | Thin black lines up to the right | `03 06 0C 18 30 60 C0 81` |
+| 14 | Mostly black, thin white lines down to the right | `3F 9F CF E7 F3 F9 FC 7E` |
+| 15 | Thin black lines down to the right | `C0 60 30 18 0C 06 03 81` |
+
 
 ### 16.5 Chart record (378 bytes)
 
@@ -1534,11 +1555,26 @@ record by its byte 6 (`3c.01` in 1.00).
 | 1 | Line or border pattern |
 | 2 | Word: bits 15–12: weight; bit 10: automatic line/border |
 | 4 | Area pattern |
-| 6 | Series number; in a chart with one series, the point (category) number (`33.10`) |
-| 7 | Marker |
+| 6 | Series number; in a chart with one series, the point (category) number, from 0 (`33.10`; the `Point Markers` sample's overrides are points 8 and 10) |
+| 7 | Marker (below) |
 | 8 | Word: bit 15: automatic marker; bit 13: set when a format is made (`0f.12`), never read; bit 12: automatic area; bit 11: a data label for the series, made from built-in text object −2; bit 10: a data label on each data point, made from built-in text object −1 (`33.10` in 1.00; §16.5); bit 9: the labels show percentages (for a pie the label code totals the series, `33.00`); Pie format 6 sets it with bit 10 |
 | 11 | Byte: how far a pie slice is pulled out, as a percentage of the radius: 25 for the first slice of Pie format 3 (a point record), 20 for every slice of Pie format 4 (the default series format) |
 | 0, 5, 9–10 | Not identified: byte 0 is the line format's unused byte, and nothing in Excel 1.00's chart code reads 5, 9 or 10 **(unknown)** |
+
+Marker, in the order of the Marker Pattern dialog (`Point Markers` sample, Excel 1.00):
+
+| Value | Marker |
+|---:|---|
+| 0 | None |
+| 1 | Filled diamond |
+| 2 | Hollow diamond |
+| 3 | Filled square |
+| 4 | Hollow square |
+| 5 | Filled triangle |
+| 6 | Hollow triangle |
+| 7 | X |
+| 8 | Asterisk |
+| 9 | Short horizontal dash |
 
 ### 16.9 Series records
 

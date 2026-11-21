@@ -279,8 +279,8 @@ public sealed class Chart
         chart.ValueAxis.TickLabelPosition = TickLabelPosition.NextToAxis;
         chart.CategoryAxis.MajorTickMarks = TickMarkType.Outside;
         chart.ValueAxis.MajorTickMarks = TickMarkType.Outside;
-        chart.CategoryAxis.AxisLinePattern = 1;
-        chart.ValueAxis.AxisLinePattern = 1;
+        chart.CategoryAxis.AxisLinePattern = ChartPattern.Solid;
+        chart.ValueAxis.AxisLinePattern = ChartPattern.Solid;
         var scale = chart.ValueScale;
         scale.AutoMinimum = scale.AutoMaximum = scale.AutoMajorUnit = scale.AutoMinorUnit = scale.AutoCrossesAt = true;
         if (type == ChartType.Scatter)
@@ -326,7 +326,7 @@ public sealed class ChartAxis
     public TickLabelPosition TickLabelPosition { get => (TickLabelPosition)((Word >> 4) & 0xF); set => SetField(4, (int)value); }
 
     /// <summary>Gets or sets the axis line pattern; 0 hides the axis.</summary>
-    public byte AxisLinePattern { get => _data[_offset + 13]; set => _data[_offset + 13] = value; }
+    public ChartPattern AxisLinePattern { get => (ChartPattern)_data[_offset + 13]; set => _data[_offset + 13] = (byte)value; }
 
     /// <summary>Gets where Excel last drew the tick labels, in twips; 0 when the axis has no tick labels.</summary>
     public short TickLabelsAt => unchecked((short)BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + 8)));
@@ -338,10 +338,10 @@ public sealed class ChartAxis
     public short TickLength => unchecked((short)BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + 6)));
 
     /// <summary>Gets or sets the major gridline pattern; 0 hides them.</summary>
-    public byte MajorGridlinePattern { get => _data[_offset + 17]; set => _data[_offset + 17] = value; }
+    public ChartPattern MajorGridlinePattern { get => (ChartPattern)_data[_offset + 17]; set => _data[_offset + 17] = (byte)value; }
 
     /// <summary>Gets or sets the minor gridline pattern; 0 hides them.</summary>
-    public byte MinorGridlinePattern { get => _data[_offset + 21]; set => _data[_offset + 21] = value; }
+    public ChartPattern MinorGridlinePattern { get => (ChartPattern)_data[_offset + 21]; set => _data[_offset + 21] = (byte)value; }
 
     /// <summary>Gets the tick-label font descriptor bytes (on disk, Microsoft Chart codes).</summary>
     public ReadOnlySpan<byte> Font => _data.AsSpan(_offset + 2, 4);
@@ -375,26 +375,29 @@ public sealed class ChartPointFormat
     }
 
     /// <summary>Gets or sets the line or border pattern; 0 means none.</summary>
-    public byte LinePattern { get => _data[_offset + 1]; set => _data[_offset + 1] = value; }
+    public ChartPattern LinePattern { get => (ChartPattern)_data[_offset + 1]; set => _data[_offset + 1] = (byte)value; }
 
     /// <summary>Gets or sets the line or border weight (bits 15–12 of the word at offset 2).</summary>
-    public int LineWeight
+    public ChartLineWeight LineWeight
     {
-        get => GetWord(2) >> 12;
-        set => BinaryPrimitives.WriteUInt16BigEndian(_data.AsSpan(_offset + 2), (ushort)((GetWord(2) & 0x0FFF) | ((value & 0xF) << 12)));
+        get => (ChartLineWeight)(GetWord(2) >> 12);
+        set => BinaryPrimitives.WriteUInt16BigEndian(_data.AsSpan(_offset + 2), (ushort)((GetWord(2) & 0x0FFF) | (((int)value & 0xF) << 12)));
     }
 
     /// <summary>Gets or sets whether the line or border is automatic.</summary>
     public bool AutomaticLine { get => (GetWord(2) & 0x0400) != 0; set => SetBit(2, 10, value); }
 
     /// <summary>Gets or sets the area pattern.</summary>
-    public byte AreaPattern { get => _data[_offset + 4]; set => _data[_offset + 4] = value; }
+    public ChartPattern AreaPattern { get => (ChartPattern)_data[_offset + 4]; set => _data[_offset + 4] = (byte)value; }
 
-    /// <summary>Gets or sets the series number the record applies to.</summary>
-    public byte SeriesNumber { get => _data[_offset + 6]; set => _data[_offset + 6] = value; }
+    /// <summary>
+    /// Gets or sets which series the record applies to, or which point (category) in a chart with one series, such
+    /// as a pie.
+    /// </summary>
+    public byte SeriesOrPoint { get => _data[_offset + 6]; set => _data[_offset + 6] = value; }
 
     /// <summary>Gets or sets the marker; 0 means none.</summary>
-    public byte Marker { get => _data[_offset + 7]; set => _data[_offset + 7] = value; }
+    public ChartMarker Marker { get => (ChartMarker)_data[_offset + 7]; set => _data[_offset + 7] = (byte)value; }
 
     /// <summary>Gets or sets whether the marker is automatic.</summary>
     public bool AutomaticMarker { get => (GetWord(8) & 0x8000) != 0; set => SetBit(8, 15, value); }
