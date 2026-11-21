@@ -263,7 +263,7 @@ public class DocumentWriterTests
     public void Document_SaveWriteAndOptionalMetadataPaths()
     {
         var document = ExcelDocument.CreateWorksheet();
-        document.NumberFormats.Add(new ExcelNumberFormat(new byte[7], [1]));
+        document.NumberFormats.Add(new ExcelNumberFormat(new byte[7], []));
         document.HasExternalDocumentTable = true;
         document.PrintSetup = new ExcelPrintSetup(new byte[ExcelPrintSetup.RecordSize])
         {
@@ -288,6 +288,20 @@ public class DocumentWriterTests
 
         Assert.Throws<ArgumentNullException>(() => document.Write(null!));
         Assert.Null(ExcelDocument.CreateWorksheet().ToString() is null ? null : null);
+    }
+
+    [Fact]
+    public void NumberFormats_RejectInvalidFixedSizeRecords()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.NumberFormats.Add(new ExcelNumberFormat(new byte[6], []));
+        Assert.Throws<InvalidOperationException>(() => document.ToArray());
+
+        document.NumberFormats.Clear();
+        var descriptor = new byte[7];
+        descriptor[0] = 1;
+        document.NumberFormats.Add(new ExcelNumberFormat(descriptor, []));
+        Assert.Throws<InvalidOperationException>(() => document.ToArray());
     }
 
     [Fact]

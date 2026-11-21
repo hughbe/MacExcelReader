@@ -214,6 +214,19 @@ public sealed class ChartDocument
             throw new InvalidOperationException("A chart document has one or two charts.");
         }
 
+        RequireLength(CodeSegment, null, "Code segment");
+        RequireLength(ChartSetHeader, 8, "Chart-set header");
+        RequireLength(Window, 12, "Window");
+        RequireLength(PageSetup, PageSetupBodySize, "Page setup", allowNull: true);
+        foreach (var chart in Charts)
+        {
+            RequireLength(chart.XAxisScale, Chart.ScaleSize, "Chart X-axis scale", allowNull: true);
+            foreach (var format in chart.PointFormats)
+            {
+                RequireLength(format, 12, "Chart point format");
+            }
+        }
+
         var writer = new BigEndianWriter();
         writer.WriteUInt16(Magic);
         writer.WriteUInt16(Version);
@@ -261,6 +274,24 @@ public sealed class ChartDocument
 
         writer.WriteUInt16(0);
         return writer.ToArray();
+    }
+
+    private static void RequireLength(byte[]? data, int? length, string name, bool allowNull = false)
+    {
+        if (data is null)
+        {
+            if (allowNull)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException($"{name} cannot be null.");
+        }
+
+        if (length is { } expected && data.Length != expected)
+        {
+            throw new InvalidOperationException($"{name} must be {expected} bytes, not {data.Length}.");
+        }
     }
 
     private static void WriteChart(BigEndianWriter writer, Chart chart)

@@ -197,6 +197,30 @@ public class ChartDocumentTests
     }
 
     [Fact]
+    public void ChartDocument_RejectsInvalidFixedSizeBuffers()
+    {
+        var chartHeader = ChartDocument.Create(ChartType.Line);
+        chartHeader.ChartSetHeader = new byte[7];
+        Assert.Throws<InvalidOperationException>(() => chartHeader.ToArray());
+
+        var window = ChartDocument.Create(ChartType.Line);
+        window.Window = new byte[11];
+        Assert.Throws<InvalidOperationException>(() => window.ToArray());
+
+        var pageSetup = ChartDocument.Create(ChartType.Line);
+        pageSetup.PageSetup = new byte[663];
+        Assert.Throws<InvalidOperationException>(() => pageSetup.ToArray());
+
+        var scale = ChartDocument.Create(ChartType.Scatter);
+        scale.MainChart.XAxisScale = new byte[Chart.ScaleSize - 1];
+        Assert.Throws<InvalidOperationException>(() => scale.ToArray());
+
+        var pointFormat = ChartDocument.Create(ChartType.Line);
+        pointFormat.MainChart.PointFormats.Add(new byte[11]);
+        Assert.Throws<InvalidOperationException>(() => pointFormat.ToArray());
+    }
+
+    [Fact]
     public void Create_WriteAndRead_RoundTrips()
     {
         var document = ChartDocument.Create(ChartType.ColumnOrBar);

@@ -434,6 +434,22 @@ public sealed class ExcelDocument
         writer.WriteByte(checked((byte)NumberFormats.Count));
         foreach (var format in NumberFormats)
         {
+            if (format.Descriptor is null || format.Descriptor.Length != 7)
+            {
+                throw new InvalidOperationException("A number-format descriptor must be exactly 7 bytes.");
+            }
+
+            int bodyLength = 0;
+            for (int section = 0; section < 3; section++)
+            {
+                bodyLength = Math.Max(bodyLength, format.Descriptor[section] + format.Descriptor[3 + section]);
+            }
+
+            if (format.Body is null || format.Body.Length != bodyLength)
+            {
+                throw new InvalidOperationException($"A number-format body must be exactly {bodyLength} bytes for its descriptor, not {format.Body?.Length.ToString() ?? "null"}.");
+            }
+
             writer.WriteBytes(format.Descriptor);
             writer.WriteBytes(format.Body);
         }
