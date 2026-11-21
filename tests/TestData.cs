@@ -42,9 +42,24 @@ internal static class TestData
     public static ExcelVersion SavedBy(byte[] file) => ((file[14] << 8) | file[15]) switch
     {
         0x326 or 0x38A => ExcelVersion.Excel100,
-        0x3FC => ExcelVersion.Excel104,
         _ => ExcelVersion.Excel150,
     };
+
+    /// <summary>
+    /// Gets whether a sample was saved by the pre-release Excel 1.5 build (spec §2.3), recognised by a hash of its
+    /// embedded code. That build wrote FORMULA with one argument in the variable-count form.
+    /// </summary>
+    public static bool IsPreRelease15(byte[] file)
+    {
+        int length = (file[14] << 8) | file[15];
+        if (length != 0x32A)
+        {
+            return false;
+        }
+
+        var hash = System.Security.Cryptography.MD5.HashData(file.AsSpan(28, length - 14));
+        return Convert.ToHexString(hash, 0, 4) == "63CE4783";
+    }
 
     public static byte[] Sample(string name) => File.ReadAllBytes(SamplePath(name));
 

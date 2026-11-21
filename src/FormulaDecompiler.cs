@@ -104,18 +104,23 @@ public static class FormulaDecompiler
                     stack.Push(arrays is not null && arrayIndex < arrays.Count ? ArrayText(arrays[arrayIndex++]) : "{array}");
                     break;
                 case 0x21:
+                case 0x39:
                 {
-                    var function = ExcelFunctions.Get(expression[p]);
-                    stack.Push(CallText(stack, function, expression[p], function?.MinArguments ?? 0));
+                    // 0x39: Excel 1.5's form for functions numbered 256 and up.
+                    int number = expression[p] + (token.Code == 0x39 ? 256 : 0);
+                    var function = ExcelFunctions.Get(number);
+                    stack.Push(CallText(stack, function, number, function?.MinArguments ?? 0));
                     break;
                 }
 
                 case 0x22:
+                case 0x3A:
                 {
                     // Bit 7 of the argument count marks a command's dialog-box form, such as RUN?().
-                    var function = ExcelFunctions.Get(expression[p + 1]);
+                    int number = expression[p + 1] + (token.Code == 0x3A ? 256 : 0);
+                    var function = ExcelFunctions.Get(number);
                     bool dialog = (expression[p] & 0x80) != 0;
-                    var call = CallText(stack, function, expression[p + 1], expression[p] & 0x7F);
+                    var call = CallText(stack, function, number, expression[p] & 0x7F);
                     stack.Push(dialog ? call.Insert(call.IndexOf('('), "?") : call);
                     break;
                 }

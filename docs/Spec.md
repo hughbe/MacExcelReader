@@ -114,17 +114,19 @@ table, where the writer replaces them with section-relative offsets (§9).
 |---------|--------------------------|-----------|--------------|
 | 1.00 (September 1985) | 17 | 0–207 | — |
 | 1.03 | 17 | 0–207 | Adds a one-byte extra header (§5). Function table identical to 1.00's. |
-| 1.04 | 17 | 0–208 | Adds CHANGE.LINK (208). Changes the token class of function calls inside IF and CHOOSE (§15.4) **(inferred: the samples saved by a build with a 0x3FC-byte code segment behave this way, and Excel 1.5's messages name 1.04)**. |
-| 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291, changes the argument rules of twelve functions (Appendix A), adds token `0x38` (§15.2), four-section number formats and 129-byte window states in version-18 files |
+| 1.04 | 17 | 0–208 | Adds CHANGE.LINK (208), known only from Excel 1.5's messages. No 1.04 sample or code is available; its encoding is **(assumed)** to be 1.03's. |
+| 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of twelve functions (Appendix A) and the token class of function calls inside IF and CHOOSE (§15.4). Adds frozen panes and gridline colours to windows (§13) and text sections, `@` and colours to number formats (§7). |
 
 The format version is header word 2 (§4). Excel 1.03's Open accepts only version 17 (1.00's and 1.04's are
-**(assumed)** to do the same). Excel 1.5 writes 17
-unless the document needs something only it can read, then 18 and the warning "This file will only be
-readable by Excel 1.5 or greater" (`47.0d`). Its Save switches to 18 when:
+**(assumed)** to do the same). Excel 1.5 writes 17 unless the document needs something only it can read,
+then 18 and the warning "This file will only be readable by Excel 1.5 or greater" (`47.0d`). Its Save
+switches to 18 when:
 
-* a window has either of two new window-record flags set (§13); or
-* a check on the document's contents (`47.10`) succeeds. What it tests is **(unknown)**; the one version-18
-  sample has both four-section number formats and a window flag set.
+* a window has frozen panes, or a gridline and heading colour other than automatic (§13); or
+* a user number format uses `@` or a colour, which only Excel 1.5 formats have (§7; `47.10`, `0d.1a`).
+
+`SIMUL EQUATIONS`, the one version-18 sample, has neither in its window, so a number format must have set it
+**(inferred)**.
 
 A version-17 document can also need a later release without changing its version, because it uses a
 function the reader lacks. The function count at the start of the data area (§5) records that, and Excel
@@ -145,11 +147,13 @@ Each document embeds a copy of part of the saving build's code (§4.1), so the c
 |-----------------:|---------|---------|
 | `0x038A` | A build earlier than 1.00, without the p-code compiler's shared-sequence optimisation | `Expenses` |
 | `0x0326` | Excel 1.00 (and, with different bytes, Excel 1.03) | 1.00 disk; `Worksheet1` (1.03) |
-| `0x03FC` | An intermediate build: 1.03's function table with 1.04's class rule (taken to be 1.04) | `ACCOUNTS MACROS`, `COMMISSION MACROS` |
-| `0x032A` | Excel 1.5 (two variants; one is byte-identical to the 1.5 application's code) | the other 1.5 samples |
+| `0x032A` | Excel 1.5: byte-identical to the 1.5 application's code | ten of the 1.5 samples |
+| `0x03FC` | Another Excel 1.5 build, encoding formulas exactly as the 1.5 application's code does | `ACCOUNTS MACROS`, `COMMISSION MACROS` |
+| `0x032A` (different bytes) | A pre-release Excel 1.5 build | the other 14 of the 1.5 samples |
 
-One `0x032A` variant uses 1.5's rule for FORMULA but 1.03's for ACTIVATE (`INVOICE MACROS` A8), so it is a
-build between 1.04 and the released 1.5.
+The pre-release build differs from the released one in one respect the samples show: it writes FORMULA with
+one argument in the variable-count form (`42 01 39`), where the released 1.5 keeps the fixed-count form
+(`41 39`, §15.4). It treats ACTIVATE like the released 1.5.
 
 ---
 
@@ -238,7 +242,7 @@ The segment is a copy of the saving build's own code, so its length and bytes id
 The 0x38A-byte segment in `Expenses` holds the same three procedures as 1.00's 0x326-byte one, with the same
 logic, but without the p-code compiler's shared-sequence opcodes that fold repeated instruction runs. So
 `Expenses` was saved by an earlier build compiled without that size optimisation, which nevertheless used
-the same code signature `0xAB27`. Excel 1.5's chart files carry signature `0x13E8` (§16.2).
+the same code signature `0xAB27`. Chart files carry signature `0x13E8` (§16.2).
 
 ---
 
@@ -252,7 +256,7 @@ At `header.dataOffset`:
 | 2 | 630 bytes | Sheet state block (§6) |
 | 632 | byte | **Document kind**: `0x10` worksheet, `0x40` macro sheet. (`0x20` is the in-memory kind for charts, which never reach this writer.) |
 | 633 | 8 longs | Section table: stream positions (§1.2) of sections 0…7. Written last, by seeking back. Open *skips* this table and reads sequentially; it is redundant but reliable. |
-| 665 | word | `n` = number of extra header bytes that follow: 0 from Excel 1.00, 1 from 1.03 onwards (every 1.04 and 1.5 sample). |
+| 665 | word | `n` = number of extra header bytes that follow: 0 from Excel 1.00, 1 from 1.03 and 1.5. |
 | 667 | n bytes | Extra header. Byte 0, when present, is a system/locale code (high byte of an application global; 0 in every sample); Open warns with alert 0x106 if it differs from the reader's. Open skips any further bytes, so this is the format's forward-compatibility hook. |
 
 Section 0 begins immediately after the extra header.
@@ -275,11 +279,11 @@ the start of the block.
 | 0x012 | word | 0 | Iteration enabled (0 / 1) |
 | 0x014 | word | | **Last row** of the grid; see §6.1 |
 | 0x016 | word | 255 | Index of the last column whose width is not zero. Starts at 255; the column-width routine lowers it when the last such column is set to width 0 and raises it when a higher column is given a width. (A column width of 0 is how a column is hidden.) |
-| 0x018 | word | 0 / 1 | Recalculation state: 0 clean, 1 needs recalculation, 2 a distinct pending state the code never downgrades to 1 |
+| 0x018 | word | 0 / 1 | Recalculation state: 0 clean, 1 needs recalculation, 2 a distinct pending state the code never downgrades to 1. Open loads it unchanged, and the recalculation driver (`25.0e`) recalculates the sheet when it is set; the external-link reader (`72.0d`) also checks it before trusting a closed file's stored values. |
 | 0x01A | word | 0 | Pending-work flag: when set, the next pass re-applies an operation to the whole sheet (rows 0–16383, columns 0–255) and clears it |
 | 0x01C | word | 0 | Set to 1 by the formula compiler when a formula uses a function at or above the base function count. It selects which count Save writes at the start of the data area (§5). Cleared for a new sheet. |
 | 0x01E | word | 0 / 1 | **Document protected.** Selects the "Protect Document…" / "Unprotect Document…" menu text and is checked by ~50 editing routines. 1 only in `DB.FORM`. |
-| 0x020 | word | 0 / 1 | Added to 0x014 and 0x274 to give the grid size (§6.1) |
+| 0x020 | word | 0 / 1 | Which form 0x014 and 0x274 are in: 1 = last indices, 0 = counts (§6.1) |
 | 0x022 | word | | Number of defined names that have a definition (0 for a new sheet, 6 in `REPLACE`) |
 | 0x024 | word | | Number of those whose definition passes a "simple reference" test (5 in `REPLACE`) |
 | 0x026 | long | | memory pointer — garbage |
@@ -324,10 +328,11 @@ nRows = word[0x014] + word[0x020]
 nCols = word[0x274] + word[0x020]
 ```
 
-These size the row index (§8) and the cell table (§9). Usually 0x014 and 0x274 hold the last row and
-column index and 0x020 is 1, but `CLOCK.WS`, `CLOCK.MS` (1.00) and `LOAN1` (1.5) store the counts and 0.
-Only the sums matter; what decides between the two forms is **(unknown)**. An empty sheet has
-`nRows = nCols = 0`.
+These size the row index (§8) and the cell table (§9). A new sheet starts with all three words 0, so 0x014
+and 0x274 hold the row and column counts. The first time the grid grows, the grid-sizing routine (`22.08`)
+converts them: it sets 0x020 to 1 and subtracts 1 from both, so they hold the last row and column index from
+then on. Most samples are in the second form; `CLOCK.WS`, `CLOCK.MS` (1.00) and `LOAN1` (1.5) are in the
+first. An empty sheet has `nRows = nCols = 0`.
 
 ### 6.2 Password hash
 
@@ -422,6 +427,10 @@ are the US defaults.
 | `1D`, `1E` | 1 byte | Exponent sign `+` / `-`; the byte is the exponent digit count |
 | `21` | 2 bytes `n1 n2`, `n1` chars, `n2` chars | AM/PM designator, written as the two strings joined by `/` (`AM/PM`, `A/P`) |
 | `22` | | Currency symbol |
+| `23` | | Excel 1.5: `@`, the text placeholder **(inferred: the character comes from a locale table filled in at run time)** |
+| `24` | 1 byte `n` | Excel 1.5: a colour, written `[name]` with the name `n` from `STR#` 263 (`black`, `white`, `red`, `green`, `blue`, `yellow`, `magenta`, `cyan`) |
+
+A format that uses `23` or `24` makes Excel 1.5 save the file as version 18 (§2.1).
 
 So `#,##0` is `03 04 00 00 | 07 | 04 03 | 06 01`: header, thousands on,
 `###`, `0`. Literals and strings sit wherever they print: `0.0" S"` is
@@ -564,8 +573,8 @@ The defined names, then the data of the array constants their definitions contai
 |-----:|---------|
 | byte | `cch` = name length (never 0; 0 is the terminator) |
 | byte | `cce` = definition length |
-| byte | Flags: `0x04` = defined on a macro sheet as a function or command; `0x20` = the definition is array-valued, so formulas using the name get cell word 2 bit 13 (§9); `0x40` = command macro, two extra bytes follow. Open keeps only bits `0x64`; the samples also have `0x01`, `0x02` and `0x80` set **(unknown)**. |
-| 2 bytes | Only if flag `0x40`: the shortcut key (the character typed with Option-Command), then a byte that is always `0x40`–`0x4E` or `0x80`–`0x8A` in the samples **(unknown)** |
+| byte | Flags: `0x04` = defined on a macro sheet as a function or command; `0x20` = the definition is array-valued, so formulas using the name get cell word 2 bit 13 (§9); `0x40` = command macro, two extra bytes follow. Open keeps only bits `0x64`, so the `0x01`, `0x02` and `0x80` some samples have are in-memory marks Save writes out and Open discards. |
+| 2 bytes | Only if flag `0x40`: the shortcut key (the character typed with Option-Command), then a flags byte. Open keeps its bits `0x80` and `0x40`, counting the command macros that have each, and discards the low nibble (junk in the samples, `0x40`–`0x4E`, `0x80`–`0x8A`). What the two bits mean is **(unknown)**. |
 | cce bytes | Definition, a parsed expression (§15) |
 | byte | Copy of `cce` |
 | cch bytes | Name characters |
@@ -659,7 +668,7 @@ alone.
 | word | `0x4000`, a marker that cannot be a row number |
 | byte | 0 |
 | 10 bytes | Shared record header: first row word, last row word, first column, last column, three bytes left over from memory, then (offset 9) the length of the shared expression for an array formula |
-| n bytes | Array formula: the shared expression, `n` = header byte 9. TABLE: 8 bytes. |
+| n bytes | Array formula: the shared expression, `n` = header byte 9. TABLE: 8 bytes, the row input cell and the column input cell, each a row word and a column word, with row `0x4000` meaning none **(inferred from the TABLE command, `4a.05`)**. |
 | … | Array formula only: the shared expression's fix-ups, as in §12.5 |
 
 *Any other cell* of the range:
@@ -672,20 +681,6 @@ alone.
 Example (`SIMUL EQUATIONS` B3, `{=SET.VALUE(solution,data)}`): the cell's expression is `01 77 51 0A`, and
 its trailer `40 00 00 | 00 02 00 04 01 01 … 0A | 23 … 63 … 42 02 C2`, a range of rows 2–4 in column B. The
 shared expression follows the array-formula class rules of §15.4.
-
------:|---------|
-| word | Anchor row |
-| byte | Anchor column |
-
-*Anchor cell*:
-
-| Size | Meaning |
-|-----:|---------|
-| word | `0x4000` — marker; cannot be a row number |
-| byte | 0 |
-| 10 bytes | Shared record header: first row word, last row word, first column byte, last column byte, then 4 bytes of which the last (offset 9) is the expression length for an array formula |
-| n bytes | Array formula: the shared expression, `n` = header byte 9. TABLE: 8 bytes. |
-| … | Array formula only: fix-ups for the shared expression, as in §12.5 |
 
 ---
 
@@ -751,11 +746,18 @@ Check against `Worksheet1`: offset 0 is 3 and offset 35 is 4, and its single
 selection is row 4, column 3. Every sample has exactly one window.
 
 **Version 18.** Excel 1.5's window record is longer, and version-18 files save
-88 more bytes of it after the 41, giving a 129-byte state. Save writes version 18
-when the bytes at window-record offsets 304 or 310 (state offsets 121 and 127)
-are non-zero (`47.0d`); `SIMUL EQUATIONS` has state byte 127 set to 1 and the
-rest of the extension zero. What the extension holds is **(unknown)**; Excel 1.5
-added FREEZE.PANES and SPLIT, which fit.
+88 more bytes of it after the 41, giving a 129-byte state. Three of the new bytes
+are identified, by state offset (window-record offset − 183):
+
+| Offset | Size | New window | Meaning |
+|-------:|-----:|-----------|---------|
+| 121 | byte | 0 | **Panes frozen.** FREEZE.PANES toggles it; SPLIT does nothing while it is set (`0f.3e`, `0f.47`). |
+| 127 | byte | 1 | **Gridline and heading colour is automatic** (the DISPLAY dialog shows "automatic" when it is set, `0d.20`) |
+| 128 | byte | 0 | Gridline and heading colour, used when offset 127 is 0 |
+
+The rest are **(unknown)**; they are zero in `SIMUL EQUATIONS`. Excel 1.5's Save
+writes version 18 when any window has panes frozen or a non-automatic colour
+(`47.0d`); a version-17 file cannot hold either.
 
 ---
 
@@ -834,9 +836,17 @@ which class the compiler chooses.
 
 ### 15.1 Tokens with no operands (`0x03`–`0x16`)
 
-Meanings follow BIFF **(inferred; consistent with every sample formula)**. All
-occur in the samples except `07`, `0F`, `12` and `14`. `01` and `02` are
-described in §12.6.
+All occur in the samples except `07`, `0F`, `12` and `14`. `01` and `02` are
+described in §12.6. The binary operators are confirmed by Excel's own operator
+table (`PCOD` 0 at `0xCE9` in 1.03), which pairs tokens `03 04 0B 0D 07 06 05 08
+11 09 10 0E 0A 0C 0F` with the characters `+ - = > ^ / * & : < , < < >` and space
+(the second character of `<>`, `<=` and `>=` comes from elsewhere). So `07` is `^`
+and `0F` is the space, Excel's intersection operator. `12` and `14` follow BIFF
+**(inferred)**.
+
+Excel 1.03 and 1.5 accept the operator characters `+-^*/,&:<>= (){};!`. Excel
+1.00 accepts only `+-^*/,&:<>=!`, so a formula typed into 1.00 cannot contain an
+intersection or an array constant **(inferred from the character sets)**.
 
 | Token | Meaning | Token | Meaning |
 |------:|---------|------:|---------|
@@ -853,10 +863,9 @@ described in §12.6.
 
 ### 15.2 Tokens with operands
 
-Operand sizes for `0x19`–`0x38` come from the applications' size tables
-(Excel 1.5's has one more entry, for `0x38`) and were verified by walking every
-formula in the samples. Tokens not listed (`0x00`, `0x18`, `0x39` and up) do not
-exist.
+Operand sizes for `0x19`–`0x37` come from the applications' size tables and
+were verified by walking every formula in the samples; `0x38`–`0x3A` are Excel
+1.5's. Tokens not listed (`0x00`, `0x18`, `0x3B` and up) do not exist.
 
 | Token | Operand bytes | Meaning |
 |------:|--------------:|---------|
@@ -889,7 +898,9 @@ exist.
 | 33, 34, 35 | 4 | Marked copies of `26`, `27`, `28` |
 | 36 | 1 | Marked copy of `29` |
 | 37 | 3 | Second marked copy of `24` |
-| 38 | 2 | Excel 1.5 only: a function call with an argument count, like `22`. In memory the function is the operand byte plus 178 (Excel 1.5's internal numbering); how files use it is **(unknown)**, as no sample contains it. |
+| 38 | 2 | Excel 1.5's in-memory form of a call with an argument count to a function it numbers internally from 178. Its Save translates it; it does not appear in files. |
+| 39 | 1 | Excel 1.5: function with a fixed argument count, numbered 256 or more: the number minus 256 (Save, `47`) |
+| 3A | 2 | Excel 1.5: function with an argument count, numbered 256 or more: argument count, then the number minus 256 |
 
 **Attributes** (token `19`). The flags byte says which kind:
 
@@ -940,13 +951,13 @@ at `0x1C92` in 1.5 (in internal order).
 
 | Byte | Meaning |
 |-----:|---------|
-| 0 | **(unknown)**; with byte 1's high nibble it rises steadily through the table |
+| 0 | **(unknown)**; with byte 1's high nibble it rises steadily through the table, like a code address |
 | 1 | Low nibble: flags. `0x01` = macro sheets only. `0x04` = has a dialog-box form: the compiler accepts `NAME?(…)` only for functions with this flag (`0f.00`). `0x08` = volatile; it is set on INDEX, RAND, NOW, AREAS, ROWS and COLUMNS, and formulas that call these start with `19 01`. `0x02` is set on SERIES (a chart-only function) and on functions 176, 203 and 204; it probably marks functions that cannot be used in cell formulas **(inferred)**. High nibble **(unknown)**. |
 | 2 | Low nibble = minimum arguments; high nibble − 1 = maximum arguments |
 | 3 | Return type |
 | 4 | Type the first argument accepts |
 | 5 | Type the other arguments accept |
-| 6–9 | **(unknown)** |
+| 6–9 | How the function is implemented. Byte 7 selects a family of routines (in 1.03, `0x1C` for commands, `0x11` for SUM-like aggregates, `0x12` for IF and CHOOSE, `0x16` for date and financial functions); byte 6 is an argument to it; for commands bytes 8–9 are the segment and procedure that carry them out (PROTECT.DOCUMENT is `22.07`, TABLE `4a.05`). Excel 1.5's families are renumbered (`0x28` for commands). |
 
 Type bytes are bit masks: `0x01` number, `0x02` text, `0x04` logical, `0x08` reference, `0x10` error,
 `0x20` command, `0x40` array, `0x80` **(unknown)**.
@@ -957,8 +968,8 @@ A writer that wants Excel's exact bytes must follow these rules. Rules read from
 (`0f.00`) are marked *(code)*; the others come from the function tables and the samples. They were checked
 by decompiling all 1,282 cell formulas (including array formulas) and 206 name definitions in the samples and
 compiling the text again for the release that saved each file (§2.3): the tokens match byte for byte, apart
-from the bytes §15.2 describes as left over from memory, in every case but one (`INVOICE MACROS` A8, saved by
-an intermediate build, §2.3). Rules no sample exercises are marked **(assumed)**.
+from the bytes §15.2 describes as left over from memory, in every case except the pre-release 1.5 build's
+FORMULA calls (§2.3). Rules no sample exercises are marked **(assumed)**.
 
 **Token classes.** For a reference, area or name operand:
 
@@ -973,8 +984,8 @@ an intermediate build, §2.3). Rules no sample exercises are marked **(assumed)*
 For a function call:
 
 * Reference class when it is in one of the first three places above.
-* In Excel 1.00–1.03, reference class as any argument of `IF` or `CHOOSE`. From 1.04 these arguments follow
-  the next two rules, like any other argument (§2.1).
+* In Excel 1.00–1.03, reference class as any argument of `IF` or `CHOOSE`. In Excel 1.5 these arguments
+  follow the next two rules, like any other argument (§2.1).
 * Array class (`0x6x`) when it is an argument that accepts arrays and the function returns an array.
 * Reference class when it is an argument that accepts references and the function can return a reference.
 * Value class everywhere else.
@@ -987,9 +998,14 @@ subtraction in array class, AVERAGE itself in value class); the definition `rads
 `61 13  1E 00 B4  06`.
 
 **Function tokens** *(code)*. `21 fn` when the function's minimum and maximum argument counts are equal and
-it is not written in its dialog-box form; otherwise `22 argc fn`. The counts are those of the release saving
-the file, so `FORMULA(A1)` is `41 39` from 1.00–1.04 and `42 01 39` from 1.5, which allows a second argument
-(Appendix A).
+it is not written in its dialog-box form; otherwise `22 argc fn`. Functions numbered 256 and up use `39 fn`
+and `3A argc fn`, with *fn* the number minus 256 (Excel 1.5's Save, `47`). The counts are those of the release
+saving the file, with one exception: Excel 1.5 gave FORMULA, ACTIVATE, CLOSE, VSCROLL, HSCROLL, FORMULA.ARRAY
+and FORMULA.FILL an optional argument, but its Save writes a call with only the old minimum number of
+arguments in the fixed-count form, so older releases can still read it. `FORMULA(A1)` is `41 39` in every
+release and `FORMULA(A1,B1)` is `42 02 39`, readable only by 1.5 (Save warns, and records that in the function
+count, §5). Its Save also warns for DISPLAY with four or more arguments, PRINT with six or more, and OPEN with
+three or more. The pre-release 1.5 build in the samples lacks the exception (§2.3).
 
 **Dialog-box forms** *(code)*. A `?` directly after a function name, as in `RUN?()`, sets bit 7 of the
 argument count. That forces the `22` form: `RUN?()` is `42 80 91`. It is a syntax error unless the function
@@ -1470,25 +1486,24 @@ None of these affects reading the samples or writing valid files.
 **Worksheets and macro sheets**
 
 * Six bytes at the start of each external-document entry; zero in every sample (§8).
-* The second shortcut byte of a command-macro name, and name flags `0x01`, `0x02` and `0x80` (§11).
-* What decides whether the grid size is stored as last index plus 1 or as count plus 0 (§6.1).
+* What bits `0x80` and `0x40` of a command macro's shortcut flags byte mean (§11).
 * Calculation mode values other than 1 (§6, 0x002): mapped from dialog item order only; every sample uses 1.
-* The 88 extra window-state bytes of version 18 (§13), and the second condition under which Excel 1.5 writes
-  version 18 (§2.1).
-* Function table: byte 0, bytes 6–9, the high nibble of byte 1, type bit `0x80` (§15.3), and what flag
-  `0x02` (SERIES and three unnamed functions) means exactly.
-* How Excel 1.5 stores function numbers above 255, and token `0x38` (§15.2).
-* The rule for function calls inside IF in the one sample saved by an intermediate 1.5 build (§2.3).
+* Most of the 88 extra window-state bytes of version 18 (§13).
+* Function table bytes 0–1 (§15.3) and type bit `0x80`.
+* Tokens `12` and `14` (unary plus and percent) and the memory tokens `26`–`28`, `2F` (§15.1, §15.2), whose
+  meanings follow BIFF.
+* What Excel 1.04 changed besides adding CHANGE.LINK; no 1.04 code or sample is available (§2.1).
 
 **Described from code alone**
 
 No sample contains these, so they could not be checked against data:
 
 * tables made with the Table command (§12.6);
-* memory areas (`26`) and the error/no-memory tokens (§15.2);
-* array constants in cell formulas, and unions in cell formulas (§15.4);
 * page breaks (§14);
-* tokens `07`, `0F`, `12` and `14` (§15.1).
+* array constants and unions in cell formulas (§15.4);
+* functions numbered 256 and up (tokens `39`, `3A`), number-format tokens `23` and `24`, frozen panes and
+  gridline colours (§7, §13, §15.2);
+* the intersection operator (§15.1).
 
 **Charts** (§16)
 
@@ -1512,8 +1527,9 @@ rules from the function tables (§15.3), and numbers 208–291 from Excel 1.5's 
 * **Flags**: **M** macro sheets only, **D** has a dialog-box form (`NAME?(…)`), **V** volatile (formulas start
   with `19 01`), **X** flag `0x02` (§15.3).
 * **Since**: the first release with the function (§2.1).
-* **Changed in 1.5**: argument rules Excel 1.5's table gives instead. A file saved by 1.5 follows them; one
-  saved by an earlier release follows the main columns.
+* **Changed in 1.5**: argument rules Excel 1.5's table gives instead. A file saved by 1.5 follows them, except
+  that a call using only the old arguments keeps the old encoding (§15.4); one saved by an earlier release
+  follows the main columns.
 
 Numbers marked unused are never assigned. Function 255 is not in the table: it calls a user-defined function
 (§15.4).

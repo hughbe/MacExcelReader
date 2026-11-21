@@ -43,10 +43,25 @@ public class FormulaParserTests
         return copy;
     }
 
-    // One formula in INVOICE MACROS was saved by a build between 1.04 and 1.5 that used Excel 1.5's rule for
-    // FORMULA but not for ACTIVATE (spec §9.4); no single version reproduces it.
-    private static bool IsKnownException(string sample, ExcelCellAddress address)
-        => sample.EndsWith("INVOICE MACROS", StringComparison.Ordinal) && address.ToString() == "A8";
+    // The pre-release Excel 1.5 build wrote FORMULA with one argument in the variable-count form, where the
+    // released 1.5 keeps the fixed-count form (spec §2.3, §15.4).
+    private static bool IsKnownException(byte[] file, ExcelFormula formula)
+    {
+        if (!IsPreRelease15(file))
+        {
+            return false;
+        }
+
+        foreach (var token in FormulaTokens.Enumerate(formula.Expression))
+        {
+            if (token.Code == 0x22 && formula.Expression[token.Offset + 2] == 57)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     [Theory]
     [MemberData(nameof(Sheets))]
@@ -58,7 +73,7 @@ public class FormulaParserTests
         foreach (var (row, column, cell) in document.Cells.NonEmptyCells)
         {
             var address = new ExcelCellAddress(row, column);
-            if (cell.Formula is not { } formula || IsKnownException(sample, address) || (formula.IsArrayFormula && !formula.IsSharedAnchor))
+            if (cell.Formula is not { } formula || IsKnownException(bytes, formula) || (formula.IsArrayFormula && !formula.IsSharedAnchor))
             {
                 continue;
             }

@@ -29,15 +29,33 @@ public class VersionTests
         Assert.Equal(1, ExcelFunctions.Get(57, ExcelVersion.Excel100)!.MaxArguments);   // FORMULA
         Assert.Equal(2, ExcelFunctions.Get(57, ExcelVersion.Excel150)!.MaxArguments);
         Assert.Equal("4139", Convert.ToHexString(ExcelFormula.Parse("=FORMULA(A1)").Expression)[^4..]);
-        Assert.Equal("420139", Convert.ToHexString(ExcelFormula.Parse("=FORMULA(A1)", null, ExcelVersion.Excel150).Expression)[^6..]);
+
+        // Excel 1.5 keeps the old fixed-count form when the old number of arguments is used, so 1.0x can read it.
+        Assert.Equal("4139", Convert.ToHexString(ExcelFormula.Parse("=FORMULA(A1)", null, ExcelVersion.Excel150).Expression)[^4..]);
+        Assert.Equal("420239", Convert.ToHexString(ExcelFormula.Parse("=FORMULA(A1,B1)", null, ExcelVersion.Excel150).Expression)[^6..]);
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=FORMULA(A1,B1)"));
     }
 
     [Fact]
-    public void FunctionsInsideIf_ChangeClassAfterExcel103()
+    public void FunctionsInsideIf_ChangeClassInExcel15()
     {
-        // GOTO inside IF: reference class (21) in 1.00–1.03, value class (41) from 1.04.
+        // GOTO inside IF: reference class (21) in 1.00–1.03, value class (41) in 1.5.
         Assert.Contains("2135", Convert.ToHexString(ExcelFormula.Parse("=IF(A1,GOTO(B1))").Expression));
-        Assert.Contains("4135", Convert.ToHexString(ExcelFormula.Parse("=IF(A1,GOTO(B1))", null, ExcelVersion.Excel104).Expression));
+        Assert.Contains("4135", Convert.ToHexString(ExcelFormula.Parse("=IF(A1,GOTO(B1))", null, ExcelVersion.Excel150).Expression));
+    }
+
+    [Fact]
+    public void FunctionsAbove255_UseTokens39And3A()
+    {
+        // LEFT is file number 256: 0x3A (value class 0x5A), two arguments, 256 - 256. CELL is 291.
+        var sheet = ExcelDocument.CreateWorksheet();
+        var left = ExcelFormula.Parse("=LEFT(\"abc\",2)", sheet, ExcelVersion.Excel150);
+        Assert.EndsWith("5A0200", Convert.ToHexString(left.Expression));
+        Assert.Equal("=LEFT(\"abc\",2)", left.ToText());
+        Assert.Equal(257, sheet.FunctionCount);
+        var trim = ExcelFormula.Parse("=TRIM(\"a\")", null, ExcelVersion.Excel150);
+        Assert.EndsWith("5903", Convert.ToHexString(trim.Expression));
+        Assert.Equal("=TRIM(\"a\")", trim.ToText());
     }
 
     [Fact]

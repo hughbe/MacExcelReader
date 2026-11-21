@@ -344,6 +344,10 @@ sealed class CellCommand : Command<CellSettings>
         {
             case 0x21:
                 return ExcelFunctions.Get(operands[0])?.Name ?? $"function {operands[0]}";
+            case 0x39:
+                return ExcelFunctions.Get(operands[0] + 256)?.Name ?? $"function {operands[0] + 256}";
+            case 0x3A:
+                return $"{ExcelFunctions.Get(operands[1] + 256)?.Name ?? $"function {operands[1] + 256}"}, {operands[0] & 0x7F} argument(s)";
             case 0x22:
             {
                 int count = operands[0] & 0x7F;
