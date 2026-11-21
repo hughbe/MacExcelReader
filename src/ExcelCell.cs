@@ -61,10 +61,20 @@ public sealed class ExcelCell
 
     private double ReadNumber() => _payload switch
     {
-        byte[] source => System.Buffers.Binary.BinaryPrimitives.ReadDoubleBigEndian(source.AsSpan(_dataOffset)),
+        byte[] source => ReadLazyDouble(source),
         double value => value,
         _ => 0,
     };
+
+    private double ReadLazyDouble(byte[] source)
+    {
+        if ((uint)_dataOffset > (uint)source.Length || source.Length - _dataOffset < 8)
+        {
+            throw new ExcelFormatException($"A numeric cell's data at file offset {_dataOffset} runs past the end of the file.");
+        }
+
+        return System.Buffers.Binary.BinaryPrimitives.ReadDoubleBigEndian(source.AsSpan(_dataOffset));
+    }
 
     /// <summary>
     /// Gets the numeric value of an integer, number or numeric-formula cell without allocating.
@@ -83,7 +93,7 @@ public sealed class ExcelCell
             case ExcelCellType.NumericFormula:
                 // The formula's value is the first 8 bytes of its record.
                 value = _payload is byte[] source
-                    ? System.Buffers.Binary.BinaryPrimitives.ReadDoubleBigEndian(source.AsSpan(_dataOffset))
+                    ? ReadLazyDouble(source)
                     : DecodeFormula().Result.Number;
                 return true;
             default:

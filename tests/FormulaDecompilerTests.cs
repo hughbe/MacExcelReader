@@ -49,6 +49,7 @@ public class FormulaDecompilerTests
         number[0] = 0x1F;
         BinaryPrimitives.WriteDoubleBigEndian(number.AsSpan(1), 3.5);
         Assert.Equal("3.5", Decompile(number));
+        Assert.Equal("{array}", Decompile([0x20, 0, 0, 0, 0, 0, 0]));
     }
 
     [Theory]
@@ -125,6 +126,19 @@ public class FormulaDecompilerTests
         document.ExternalDocuments.Add(new ExcelExternalDocument("Budget"));
         var expression = Concat([0x1A, 0, 0, 0, 0, 0, 0, 0], Reference(0, 0), [0x1B, 0, 0, 0]);
         Assert.Equal("Budget!A1", Decompile(expression, document, 1));
+
+        document.ExternalDocuments[0].Name = "Budget Plan's";
+        Assert.Equal("'Budget Plan''s'!A1", Decompile(expression, document, 1));
+    }
+
+    [Fact]
+    public void PrivateFallbacksRemainDefined()
+    {
+        var method = typeof(FormulaDecompiler).GetMethod(
+            "BinaryOperator", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        Assert.Equal("?", method.Invoke(null, [(byte)0]));
+        Assert.Equal(" ", method.Invoke(null, [(byte)0x0F]));
+        Assert.Equal(",", method.Invoke(null, [(byte)0x10]));
     }
 
     [Theory]

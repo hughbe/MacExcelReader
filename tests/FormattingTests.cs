@@ -62,6 +62,34 @@ public class FormattingTests
         Assert.Equal(expected, ExcelValueFormatter.Format(value, format));
     }
 
+    [Theory]
+    [InlineData(0.5, 15, "12:00:00 PM")]
+    [InlineData(0.75, 17, "18:00:00")]
+    [InlineData(-1, 10, "-1")]
+    [InlineData(3_000_000, 10, "3000000")]
+    [InlineData(1E+30, 0, "1E+30")]
+    [InlineData(1.25, 19, "1.25")]
+    public void Format_HandlesAdditionalAndFallbackFormats(double value, int format, string expected)
+    {
+        Assert.Equal(expected, ExcelValueFormatter.Format(value, format));
+    }
+
+    [Fact]
+    public void FormatCell_HandlesAllBasicKinds()
+    {
+        Assert.Throws<ArgumentNullException>(() => ExcelValueFormatter.FormatCell(null!));
+        Assert.Equal(string.Empty, ExcelValueFormatter.FormatCell(new ExcelCell()));
+
+        var cell = new ExcelCell();
+        cell.SetText("text");
+        Assert.Equal("text", ExcelValueFormatter.FormatCell(cell));
+
+        var formula = new ExcelFormula([0x1D, 1]);
+        formula.SetResult(false);
+        cell.SetFormula(formula);
+        Assert.Equal("FALSE", ExcelValueFormatter.FormatCell(cell));
+    }
+
     [Fact]
     public void Dates_Use1904System()
     {
@@ -125,4 +153,33 @@ public class FormattingTests
         var bytes = Enumerable.Range(0, 256).Select(i => (byte)i).ToArray();
         Assert.Equal(bytes, MacRoman.GetBytes(MacRoman.GetString(bytes)));
     }
-}
+
+    [Fact]
+    public void SupportingTypes_ExposeAndValidateState()
+    {
+        var external = new ExcelExternalDocument("Book");
+        Assert.Equal("Book", external.ToString());
+        Assert.Throws<ArgumentNullException>(() => new ExcelExternalDocument(null!));
+
+        var inner = new InvalidOperationException("inner");
+        var exception = new ExcelFormatException("message", inner);
+        Assert.Equal("message", exception.Message);
+        Assert.Same(inner, exception.InnerException);
+
+        var state = new ExcelSheetState(new byte[ExcelSheetState.Size])
+        {
+            ReferenceStyle = 1,
+            LastVisibleColumn = 255,
+            RecalculationState = 2,
+            StandardFont = 3,
+        };
+        Assert.Equal(1, state.ReferenceStyle);
+        Assert.Equal(255, state.LastVisibleColumn);
+        Assert.Equal(2, state.RecalculationState);
+        Assert.Equal(3, state.StandardFont);
+            Assert.Throws<ArgumentException>(() => new ExcelSheetState(new byte[ExcelSheetState.Size - 1]));
+
+            Assert.True(ExcelFunctions.Get(53)?.IsMacroOnly ?? false);
+            Assert.Throws<ArgumentOutOfRangeException>(() => FormulaDecompiler.ColumnName(-1));
+        }
+    }

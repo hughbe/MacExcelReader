@@ -161,4 +161,74 @@ public class CellTests
         Assert.Equal(ExcelCellType.Integer, grid.GetCellType(1, 1));
         Assert.Equal(ExcelCellType.Empty, grid.GetCellType(100, 100));
     }
+
+    [Fact]
+    public void CellRefs_ReadLazyValuesAndMetadata()
+    {
+        var source = ExcelDocument.CreateWorksheet();
+        source.Cells["B2"].SetNumber(2.5);
+        var number = source.Cells["B2"];
+        number.NumberFormat = 6;
+        number.Alignment = ExcelAlignment.Center;
+        number.Bold = true;
+        number.Italic = true;
+        source.Cells["C2"].SetText("hello");
+        var document = ExcelDocument.Read(source.ToArray());
+
+        var refs = document.Cells.EnumerateNonEmpty();
+        Assert.True(refs.MoveNext());
+        var numberRef = refs.Current;
+        Assert.Equal("B2", numberRef.Address.ToString());
+        Assert.Equal(ExcelCellType.Number, numberRef.Type);
+        Assert.Equal(6, numberRef.NumberFormat);
+        Assert.Equal(ExcelAlignment.Center, numberRef.Alignment);
+        Assert.True(numberRef.Bold);
+        Assert.True(numberRef.Italic);
+        Assert.NotEqual((ushort)0, numberRef.RawAttributes);
+        Assert.Equal("B2 (Number)", numberRef.ToString());
+        Assert.True(numberRef.TryGetNumber(out double value));
+        Assert.Equal(2.5, value);
+
+        Assert.True(refs.MoveNext());
+        Assert.Equal("hello", refs.Current.GetText());
+        Assert.Null(source.Cells["A1"].Value);
+        Assert.Null(numberRef.GetText());
+        Assert.False(refs.MoveNext());
+    }
+
+    [Fact]
+    public void Cells_ExposeLazyAndStringRepresentations()
+    {
+        var lazy = new ExcelCell();
+        lazy.SetNumber(0);
+        Assert.Equal(0, lazy.NumberValue);
+        Assert.Equal("0", lazy.ToString());
+
+        lazy.SetText("text");
+        Assert.Equal("text", lazy.ToString());
+        lazy.Clear();
+        Assert.Equal(string.Empty, lazy.ToString());
+        Assert.Throws<FormatException>(() => ExcelCellAddress.Parse("invalid"));
+
+        var integer = new ExcelCell();
+        integer.SetInteger(3);
+        Assert.Equal("3", integer.ToString());
+        var formula = new ExcelCell();
+        var expression = new ExcelFormula([0x1D, 0]);
+        expression.SetResult("result");
+        formula.SetFormula(expression);
+        Assert.Equal("result", formula.ToString());
+    }
+
+    [Fact]
+    public void LazyText_CorruptionThrowsFormatException()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.Cells["A1"].SetText("hello");
+        var bytes = document.ToArray();
+        var layout = ExcelFileLayout.Read(bytes);
+        bytes[layout.GetSectionOffset(ExcelSection.CellData)] = 255;
+        var corrupt = ExcelDocument.Read(bytes);
+        Assert.Throws<ExcelFormatException>(() => corrupt.Cells["A1"].TextValue);
+    }
 }

@@ -194,10 +194,67 @@ public class FormulaParserTests
     [InlineData("=SUM?(1)", 1)]
     [InlineData("=Other!A1", 1)]
     [InlineData("=UnknownName", 1)]
+    [InlineData("=@", 1)]
     public void RejectsInvalidText(string text, int position)
     {
         var exception = Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse(text));
         Assert.Equal(position, exception.Position);
+    }
+
+    [Theory]
+    [InlineData("=#NULL!")]
+    [InlineData("=#DIV/0!")]
+    [InlineData("=#VALUE!")]
+    [InlineData("=#REF!")]
+    [InlineData("=#NAME?")]
+    [InlineData("=#NUM!")]
+    [InlineData("=#N/A")]
+    public void ParsesAllErrorTokens(string text)
+    {
+        Assert.Equal(text, ExcelFormula.Parse(text).ToText());
+    }
+
+    [Fact]
+    public void RejectsAdditionalParserLimits()
+    {
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=\"" + new string('x', 256) + "\""));
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=!"));
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=!A1:B"));
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=" + new string('(', 300) + "1" + new string(')', 300)));
+
+        var document = ExcelDocument.CreateWorksheet();
+        var name = new ExcelDefinedName("Macro");
+        document.Names.Add(name);
+        var arguments = string.Join(",", Enumerable.Repeat("1", 255));
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse($"=Macro({arguments})", document));
+    }
+
+    [Fact]
+    public void ParsesExternalRangesAndUserMacros()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        var externalDocument = new ExcelExternalDocument("Book") { Names = { "Missing" } };
+        document.ExternalDocuments.Add(externalDocument);
+        var external = ExcelFormula.Parse("='Book'!A1:B2", document);
+        Assert.Equal([1], external.GetFixupWords());
+        Assert.Equal("=Book!A1:B2", external.ToText(document));
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=Book!A1:Missing", document));
+
+        document.Names.Add(new ExcelDefinedName("RunMe", flags: ExcelDefinedName.MacroFlag));
+        Assert.True(ExcelFormula.Parse("=RunMe(1)", document).Expression.Length > 0);
+    }
+
+    [Fact]
+    public void RejectsBranchOffsetsBeyondEncodingLimit()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.Names.Add(new ExcelDefinedName("RunMe", flags: ExcelDefinedName.MacroFlag));
+        var huge = "RunMe(" + string.Join(",", Enumerable.Repeat("1", 130)) + ")";
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse($"=IF(TRUE,{huge},0)", document));
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse($"={huge}:A1", document));
+        Assert.True(ExcelFormula.Parse("=(SUM(1)):A1", document).Expression.Length > 0);
+        Assert.True(ExcelFormula.Parse("=-SUM(1):A1", document).Expression.Length > 0);
+        Assert.True(ExcelFormula.Parse("=(-SUM(1)):A1", document).Expression.Length > 0);
     }
 
     [Fact]

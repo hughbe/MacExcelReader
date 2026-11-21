@@ -105,6 +105,14 @@ public class ReaderTests
     }
 
     [Fact]
+    public void Read_WrongCodeSegmentCount_Throws()
+    {
+        var bytes = Sample("Worksheet1.xls");
+        bytes[13] = 1;
+        Assert.Throws<ExcelFormatException>(() => ExcelDocument.Read(bytes));
+    }
+
+    [Fact]
     public void Read_TruncatedFile_Throws()
     {
         var bytes = Sample("Expenses.xls");
@@ -126,6 +134,83 @@ public class ReaderTests
         var corrupt = ExcelDocument.Read(bytes);
         Assert.Throws<ExcelFormatException>(() => corrupt.Cells["B20"].Formula);
         Assert.Throws<ExcelFormatException>(() => corrupt.ToArray());
+    }
+
+    [Fact]
+    public void Read_TruncatedNumber_ThrowsOnEveryAccessPath()
+    {
+        var source = ExcelDocument.CreateWorksheet();
+        source.Cells["A1"].SetNumber(42.5);
+        var bytes = source.ToArray();
+        var tableOffset = ExcelFileLayout.Read(bytes).GetSectionOffset(ExcelSection.CellTable);
+        var relativeOffset = bytes.Length - 4 - ExcelFileLayout.Read(bytes).GetSectionOffset(ExcelSection.CellData);
+
+        bytes[tableOffset] = (byte)(relativeOffset >> 12);
+        bytes[tableOffset + 1] = (byte)(relativeOffset >> 4);
+        bytes[tableOffset + 2] = (byte)((bytes[tableOffset + 2] & 0x0F) | ((relativeOffset & 0xF) << 4));
+
+        var document = ExcelDocument.Read(bytes);
+        Assert.Throws<ExcelFormatException>(() => document.Cells["A1"].NumberValue);
+        Assert.Throws<ExcelFormatException>(() => document.Cells["A1"].TryGetNumber(out _));
+        var references = document.Cells.EnumerateNonEmpty();
+        Assert.True(references.MoveNext());
+        var reference = references.Current;
+        Assert.Throws<ExcelFormatException>(() => reference.TryGetNumber(out _));
+        Assert.Throws<ExcelFormatException>(() => document.Cells["A1"].Value);
+        Assert.Throws<ExcelFormatException>(() => document.ToArray());
+    }
+
+    [Fact]
+    public void FileLayout_DescribesSample()
+    {
+        var bytes = Sample("Expenses.xls");
+        var layout = ExcelFileLayout.Read(bytes);
+
+        Assert.Equal(bytes.Length, layout.FileLength);
+        Assert.Equal(0x3B8, layout.DataOffset);
+        Assert.Equal(layout.DataOffset + 2, layout.StateOffset);
+        Assert.Equal(layout.StateOffset + ExcelSheetState.Size, layout.KindOffset);
+        Assert.Equal(layout.KindOffset + 1, layout.SectionTableOffset);
+        Assert.Equal(0x653, layout.ExtraHeaderOffset);
+        Assert.Equal(0, layout.ExtraHeaderLength);
+        Assert.Equal([(0x18, 906), (0x3A2, 22)], layout.CodeSegments);
+
+        int previousEnd = 0;
+        foreach (var section in Enum.GetValues<ExcelSection>())
+        {
+            int offset = layout.GetSectionOffset(section);
+            int length = layout.GetSectionLength(section);
+            Assert.InRange(offset, 0, bytes.Length);
+            Assert.InRange(length, 0, bytes.Length - offset);
+            Assert.True(offset >= previousEnd);
+            previousEnd = offset + length;
+        }
+
+        Assert.Equal(bytes.Length, previousEnd);
+    }
+
+    [Fact]
+    public void FileLayout_RejectsMalformedMetadata()
+    {
+        var tooShort = Sample("Expenses.xls").AsSpan(0, 24).ToArray();
+        Assert.Throws<ExcelFormatException>(() => ExcelFileLayout.Read(tooShort));
+
+        var badMagic = Sample("Expenses.xls");
+        badMagic[0] = 0;
+        Assert.Throws<ExcelFormatException>(() => ExcelFileLayout.Read(badMagic));
+
+        var badOffset = Sample("Expenses.xls");
+        badOffset[22] = badOffset[23] = 0xFF;
+        Assert.Throws<ExcelFormatException>(() => ExcelFileLayout.Read(badOffset));
+    }
+
+    [Fact]
+    public void Read_InvalidWindowMarker_ThrowsFormatException()
+    {
+        var bytes = ExcelDocument.CreateWorksheet().ToArray();
+        var layout = ExcelFileLayout.Read(bytes);
+        bytes[layout.GetSectionOffset(ExcelSection.Windows)] = 1;
+        Assert.Throws<ExcelFormatException>(() => ExcelDocument.Read(bytes));
     }
 
     [Fact]

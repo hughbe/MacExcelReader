@@ -126,10 +126,9 @@ public static class ExcelValueFormatter
 
         return cell.Value switch
         {
-            null => string.Empty,
             bool b => b ? "TRUE" : "FALSE",
             string s => s,
-            var other => Convert.ToString(other, CultureInfo.InvariantCulture) ?? string.Empty,
+            _ => string.Empty,
         };
     }
 }

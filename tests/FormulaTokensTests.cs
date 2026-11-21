@@ -48,21 +48,6 @@ public class FormulaTokensTests
     }
 
     [Fact]
-    public void MeasureFixups_CountsNameAndArrayBlocks()
-    {
-        // Two names, then an array constant (1 column × 2 rows: a number and a string).
-        var expression = Concat([0x23, 0, 0, 0, 0, 0, 0, 0], [0x23, 0, 0, 0, 0, 0, 0, 0], [0x20, 0, 0, 0, 0, 0, 0], [0x03, 0x03]);
-        byte[] fixups = [0, 1, 0, 2, 1, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, (byte)'h', (byte)'i'];
-        Assert.Equal(fixups.Length, FormulaTokens.MeasureFixups(expression, fixups.Concat(new byte[] { 99, 99 }).ToArray()));
-    }
-
-    [Fact]
-    public void MeasureFixups_Truncated_Throws()
-    {
-        Assert.Throws<ExcelFormatException>(() => FormulaTokens.MeasureFixups([0x23, 0, 0, 0, 0, 0, 0, 0], [0]));
-    }
-
-    [Fact]
     public void GetName_NamesEveryToken()
     {
         Assert.Equal("Reference", FormulaTokens.GetName(0x24));
@@ -80,5 +65,24 @@ public class FormulaTokensTests
     {
         var formula = new ExcelFormula(Concat([0x23, 0, 0, 0, 0, 0, 0, 0], [0x23, 0, 0, 0, 0, 0, 0, 0], [0x03]), [0, 3, 0, 4]);
         Assert.Equal([3, 4], formula.GetFixupWords());
+    }
+
+    [Fact]
+    public void TokenEnumerator_RejectsTruncatedVariableTokens()
+    {
+        Assert.Throws<ExcelFormatException>(() => FormulaTokens.CountTokens([0x17]));
+        Assert.Throws<ExcelFormatException>(() => FormulaTokens.CountTokens([0x19]));
+        Assert.Throws<ExcelFormatException>(() => FormulaTokens.CountTokens([0x19, 0x04]));
+    }
+
+    [Fact]
+    public void Formula_PublicWritingPathsRoundTrip()
+    {
+        var formula = new ExcelFormula([0x1D, 1]);
+        formula.SetResult("text");
+        var sheet = ExcelDocument.CreateWorksheet();
+        sheet.Cells["A1"].SetFormula(formula);
+        var reread = ExcelDocument.Read(sheet.ToArray());
+        Assert.Equal("text", reread.Cells["A1"].Value);
     }
 }

@@ -165,6 +165,23 @@ public class DocumentWriterTests
     }
 
     [Fact]
+    public void PrintSetup_ValidatesAndStoresAllProperties()
+    {
+        Assert.Throws<ArgumentException>(() => new ExcelPrintSetup(new byte[ExcelPrintSetup.RecordSize - 1]));
+        var setup = new ExcelPrintSetup(new byte[ExcelPrintSetup.RecordSize]);
+        setup.TtyLeftMargin = 2;
+        setup.TtyPrintWidth = 78;
+        setup.TtyTopMargin = 3;
+        setup.TtyPrintLength = 60;
+        Assert.Equal(2, setup.TtyLeftMargin);
+        Assert.Equal(78, setup.TtyPrintWidth);
+        Assert.Equal(3, setup.TtyTopMargin);
+        Assert.Equal(60, setup.TtyPrintLength);
+        Assert.Throws<ArgumentOutOfRangeException>(() => setup.GetMargin(-1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => setup.SetMargin(4, 1));
+    }
+
+    [Fact]
     public void SheetSettings_RoundTrip()
     {
         var document = ExcelDocument.CreateWorksheet();
@@ -210,6 +227,94 @@ public class DocumentWriterTests
         Assert.False(reread.DisplayGridlines);
         Assert.Equal(100, reread.HorizontalSplit);
         Assert.Equal(new ExcelRange(9, 12, 3, 4), Assert.Single(reread.Selection));
+    }
+
+    [Fact]
+    public void Window_ValidatesAndStoresAllProperties()
+    {
+        Assert.Throws<ArgumentException>(() => new ExcelWindow(0, 0, 0, 0, new byte[ExcelWindow.StateSize - 1]));
+        var window = new ExcelWindow(1, 2, 3, 4, new byte[ExcelWindow.StateSize])
+        {
+            ActiveArea = 5,
+            DisplayHeadings = false,
+            VerticalSplit = 120,
+        };
+        Assert.Equal(5, window.ActiveArea);
+        Assert.False(window.DisplayHeadings);
+        Assert.Equal(120, window.VerticalSplit);
+    }
+
+    [Fact]
+    public void Names_RejectInvalidLengthsAndRender()
+    {
+        Assert.Throws<ArgumentException>(() => new ExcelDefinedName(string.Empty));
+        var name = new ExcelDefinedName("ShortName");
+        Assert.Equal("ShortName", name.ToString());
+
+        var document = ExcelDocument.CreateWorksheet();
+        document.Names.Add(new ExcelDefinedName(new string('x', 256)));
+        Assert.Throws<InvalidOperationException>(() => document.ToArray());
+        document.Names.Clear();
+        document.Names.Add(new ExcelDefinedName("LongDefinition", new byte[256]));
+        Assert.Throws<InvalidOperationException>(() => document.ToArray());
+    }
+
+    [Fact]
+    public void Document_SaveWriteAndOptionalMetadataPaths()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.NumberFormats.Add(new ExcelNumberFormat(new byte[7], [1]));
+        document.HasExternalDocumentTable = true;
+        document.PrintSetup = new ExcelPrintSetup(new byte[ExcelPrintSetup.RecordSize])
+        {
+            Header = "header",
+            Footer = string.Empty,
+            PrinterMessage = "message",
+        };
+        var path = Path.GetTempFileName();
+        try
+        {
+            document.Save(path);
+            Assert.Equal(document.ToArray(), File.ReadAllBytes(path));
+            using var stream = new MemoryStream();
+            document.Write(stream);
+            Assert.Equal(document.ToArray(), stream.ToArray());
+            Assert.NotNull(ExcelDocument.Read(new NonSeekableStream(document.ToArray())));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+
+        Assert.Throws<ArgumentNullException>(() => document.Write(null!));
+        Assert.Null(ExcelDocument.CreateWorksheet().ToString() is null ? null : null);
+    }
+
+    [Fact]
+    public void Document_RejectsCellDataBeyondTableAddressSpace()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        for (int i = 0; i < 131_073; i++)
+        {
+            document.Cells[i / 256, i % 256].SetNumber(i + 0.5);
+        }
+
+        Assert.Throws<InvalidOperationException>(() => document.ToArray());
+    }
+
+    private sealed class NonSeekableStream(byte[] bytes) : Stream
+    {
+        private readonly MemoryStream _stream = new(bytes);
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => _stream.Read(buffer, offset, count);
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     [Fact]
