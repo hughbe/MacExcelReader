@@ -10,13 +10,13 @@ available.
 
 | Release | Disk | Used for |
 |---------|------|----------|
-| Excel 1.00 (1985) | "Excel Program" disk (400K MFS), in two copies whose code differs in 4 bytes (the copy protection) | Save (`47.0b`), Open (`46.06`), the formula compiler (`11.00`), chart writer and reader (`5d`, `5e`), workspace files (`64.00`, `64.01`), function table and names. Each was compared with its 1.03 counterpart instruction by instruction; the differences are noted where they matter. |
+| Excel 1.00 (1985) | "Excel Program" disk (400K MFS), in two copies whose code differs in 4 bytes (the copy protection) | Save (`47.0b`), Open (`46.06`), the formula compiler (`11.00`), recalculation (`25.01`), the TABLE command (`4b`), chart writer, reader and drawing code (`5d`, `5e`, `37`), workspace files (`64.00`, `64.01`), function table and names. Each was compared with its 1.03 counterpart instruction by instruction; the differences are noted where they matter. |
 | Excel 1.03 | `Microsoft Excel 1.03.dsk` (800K HFS) | Save (`45.0c`), Open (`44.08`), the external-link reader (`72.01`), the formula compiler (`0f.00`), chart reader and writer (`5d`, `5c`) |
 | Excel 1.5 (May 1988) | Excel 1.5 folder | Save (`47.0d`), format and token translation (`47.18`), function table and file-number table, version-18 rules |
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 27 files Excel saved in experiments, all of which a reader built from this spec reads, and a writer rebuilds byte for byte:
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 33 files Excel saved in experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
 |--------|-------|
@@ -24,10 +24,10 @@ Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 | Excel 1.00 program disk | `Resume Excel`, a workspace file (Appendix B) |
 | Excel 1.03 disk | `Worksheet1` (empty worksheet). The disk's other samples are byte-identical to the 1.00 disk's. |
 | Excel 1.5 sampler | 26 worksheets and macro sheets, including one version-18 file (`SIMUL EQUATIONS`), and 2 charts (`BREAK CHART`, `PROFIT CHART`) |
-| Experiments, saved by Excel itself in the test harness (docs/Testing.md) | Excel 1.03: `Recompiled`, `Intersections`, `Table`, `Table Row Input`, `Table One Argument`, `Errors`, `Memory Error`, `Recalculated`, `Column Widths`, `Calculation Manual`, `Calculation No Tables`, `Page Breaks`, `Macro Names`, `Links` (sheets); `Area Drop Lines`, `Area Labels`, `Bar Stacked`, `Combination`, `Line Log Scale`, `Pie Exploded`, `Pie Exploded All`, `Pie Percentages`, `Scatter` (charts). Excel 1.5: `Colour Formats`, `Gridline Colour`, `Frozen Panes`. Excel 1.00: `Resume Excel 2` (workspace). |
+| Experiments | Files Excel 1.00, 1.03 and 1.5 saved in the test harness (docs/Testing.md), each named for what it shows, such as `Literals`, `Errors`, `Column Widths`, `Table Deleted Input` and `Pie Exploded`. They are in `tests/Samples`, next to the release that saved them. |
 
-Together they hold 1,282 formulas and 206 name definitions. §2.3 explains how to tell which build saved each
-file.
+Microsoft's samples hold 1,282 formulas and 206 name definitions. §2.3 explains how to tell which build saved
+each file.
 
 Everything else is read from code, seen in the samples, or shown by Excel itself (docs/Testing.md). The rest is marked:
 
@@ -128,15 +128,11 @@ table, where the writer replaces them with section-relative offsets (§9).
 The format version is header word 2 (§4). Excel 1.00's Open accepts only version 17 (`46.06`), and so does
 1.03's; 1.04's is **(assumed)** to do the same. Excel 1.5 writes 17 unless the document needs something only it can read,
 then 18 and the warning "This file will only be readable by Excel 1.5 or greater" (`47.0d`). Its Save
-switches to 18 when:
-
-* a window has frozen panes, or a gridline and heading colour other than automatic (§13); or
-* a user number format uses `@` or a colour, which only Excel 1.5 formats have (§7; `47.10`, `0d.1a`).
-
-Save checks the windows first (state bytes 121 and 127, §13), then asks the number-format code whether any
-format needs version 18 (`47.10`, which decompiles each format and watches a flag the decompiler sets).
-`SIMUL EQUATIONS`, the one version-18 sample from Microsoft, has neither window setting and no `@` or colour in
-its formats, so the format check has a further condition that is **(unknown)**.
+switches to 18 when a window has frozen panes or a gridline and heading colour other than automatic (state
+bytes 121 and 127, §13), or when the number-format check (`47.10`) flags a format. That check decompiles each
+format and watches a flag the decompiler sets (`0d.19`, `0d.1a`); a format using `@` or a colour sets it (§7).
+`SIMUL EQUATIONS`, the one version-18 file among Microsoft's samples, has neither window setting and no `@`
+or colour, so the check flags something else as well **(unknown)**.
 
 A version-17 document can also need a later release without changing its version, because it uses a
 function the reader lacks. The function count at the start of the data area (§5) records that, and Excel
@@ -205,7 +201,7 @@ each.
 | Offset | Size | Value in samples | Meaning |
 |-------:|-----:|------------------|---------|
 | 0  | word | `0x5327` | Magic. Open rejects anything else. |
-| 2  | word | 17, or 18 | Format version (§2.1). Excel 1.03's Open rejects anything but 17. |
+| 2  | word | 17, or 18 | Format version (§2.1). Open rejects anything but 17 before Excel 1.5. |
 | 4  | word | `0xAB27` | Code signature of the writing build (see §4.1). |
 | 6  | 3 words | 0, 0, 0 | Written as zero; never read. |
 | 12 | word | 2 | Number of embedded code segments. Always 2; Open does not read it (see below). |
@@ -239,17 +235,17 @@ So a document is readable for linking by Excel builds that do not otherwise
 know its exact layout. A reader that only wants the data can **skip both
 segments**.
 
-Segment image layout (for completeness):
+Segment image layout:
 
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
-| 0 | word | Offset of the constant/import table end (`2 × nProcs + 8` — exactly one import word precedes it) |
-| 2 | word | LRU stamp from the running interpreter — garbage |
+| 0 | word | Offset of the constant/import table end (`2 × nProcs + 8`: exactly one import word precedes it) |
+| 2 | word | LRU stamp from the running interpreter (junk) |
 | 4 | word | Number of procedures (3 in segment 1, 1 in segment 2) |
 | 6 | word × n | Offset of each procedure |
 | … | word | Import: the host procedure, in the saving build's numbering: `0x730A` (segment `0x73`, procedure `0x0A`) in 1.00, `0x720A` in 1.03 (§2.3) |
 | … | | p-code |
-| last 10 bytes | | Header of whatever heap block followed in memory — garbage |
+| last 10 bytes | | Header of whatever heap block followed in memory (junk) |
 
 The stored length is the heap block size, which includes a 10-byte block header
 that is *not* written, so each image over-runs 10 bytes into the next block.
@@ -268,7 +264,7 @@ At `header.dataOffset`:
 
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
-| 0 | word | **Function count**: one more than the highest function number the document may use. Open refuses the file if this is larger than the number of functions it knows (208 in 1.00–1.03), since formulas could then use numbers it lacks. Excel 1.00's Save writes the length of its function table if a global flag is set, and otherwise a base count fixed at start-up (208); its formula compiler sets the flag when a formula uses a number at or above the base count. When the count is above 208 it also writes the names of the extra functions at the start of section 7 so that Open can check them (§14). Excel 1.03 keeps the flag per document, in state word `0x01C` (§6), and drops the names. Excel 1.5's Save writes 208, or one more than the highest function number any formula uses if that is higher. 208 in every sample but `INVOICE MACROS`, which uses GET.DOCUMENT (238) and has 239. |
+| 0 | word | **Function count**: one more than the highest function number the document may use (below) |
 | 2 | 630 bytes | Sheet state block (§6) |
 | 632 | byte | **Document kind**: `0x10` worksheet, `0x40` macro sheet. (`0x20` is the in-memory kind for charts, which never reach this writer.) |
 | 633 | 8 longs | Section table: stream positions (§1.2) of sections 0…7. Written last, by seeking back. Open *skips* this table and reads sequentially; it is redundant but reliable. |
@@ -276,6 +272,15 @@ At `header.dataOffset`:
 | 667 | n bytes | Extra header. Byte 0, when present, is a system/locale code (high byte of an application global; 0 in every sample); Open warns with alert 0x106 if it differs from the reader's. Open skips any further bytes, so this is the format's forward-compatibility hook. |
 
 Section 0 begins immediately after the extra header.
+
+**Function count.** Open refuses a file whose count is larger than the number of functions it knows (208 in
+1.00–1.03), since its formulas could use numbers the reader lacks. Excel 1.00's Save writes the length of its
+function table if a global flag is set, and otherwise a base count fixed at start-up (208); the formula
+compiler sets the flag when a formula uses a number at or above the base count. When the count is above 208,
+1.00 also writes the names of the extra functions at the start of section 7, so that Open can check them (§14).
+Excel 1.03 keeps the flag per document, in state word `0x01C` (§6), and drops the names. Excel 1.5's Save
+writes 208, or one more than the highest function number any formula uses if that is higher. Every sample has
+208 except `INVOICE MACROS`, which uses GET.DOCUMENT (238) and has 239.
 
 ---
 
@@ -290,23 +295,23 @@ the start of the block.
 | 0x002 | word | 1 | Calculation mode: 1 = automatic, −1 = automatic except tables, 0 = manual (`CALCULATION(2)` saves −1, `CALCULATION(3)` saves 0). Like 0x006 it is a global setting: every sheet Excel saves gets the current one. |
 | 0x004 | word | 1 | Precision: 1 = full precision, 0 = precision as displayed (results are rounded through the cell format when 0) |
 | 0x006 | word | 1 | Reference style: 1 = A1, 0 = R1C1 (`A1.R1C1(FALSE)` saves 0). It is saved and restored around formula parsing, and is global like 0x002. |
-| 0x008 | word | 0 | Unused — no code in the application reads or writes it |
+| 0x008 | word | 0 | Unused: no code in the application reads or writes it |
 | 0x00A | double | 0.001 | Maximum change (iteration) |
 | 0x012 | word | 0 | Iteration enabled (0 / 1) |
 | 0x014 | word | | **Last row** of the grid; see §6.1 |
 | 0x016 | word | 255 | Index of the last column whose width is not zero. Starts at 255; the column-width routine lowers it when the last such column is set to width 0 and raises it when a higher column is given a width. (A column width of 0 is how a column is hidden.) |
-| 0x018 | word | 0 / 1 | Recalculation state: 0 clean, 1 needs recalculation, 2 a distinct pending state the code never downgrades to 1. Open loads it unchanged, and the recalculation driver (`25.0e`) recalculates the sheet when it is set, so a file saved with 1 or 2 is recalculated as soon as Excel opens it (`Recalculated` sample). With 0, Excel 1.03 keeps the stored values of the formulas it loads, even after CALCULATE.NOW, until something they depend on changes; the external-link reader (`72.0d`) also checks it before trusting a closed file's stored values. |
+| 0x018 | word | 0 / 1 | Recalculation state: 0 clean, 1 needs recalculation, 2 a pending state the code never lowers to 1. Open loads it as it is and the recalculation driver (`25.0e`) acts on it, so Excel recalculates a file saved with 1 or 2 as soon as it opens it (`Recalculated` sample). With 0 it keeps the stored results, even after CALCULATE.NOW, until something they depend on changes. The external-link reader (`72.0d`) checks it before trusting a closed file's stored values. |
 | 0x01A | word | 0 | Pending-work flag: when set, the next pass re-applies an operation to the whole sheet (rows 0–16383, columns 0–255) and clears it |
 | 0x01C | word | 0 | Set to 1 by the formula compiler when a formula uses a function at or above the base function count. It selects which count Save writes at the start of the data area (§5). Cleared for a new sheet. |
 | 0x01E | word | 0 / 1 | **Document protected.** Selects the "Protect Document…" / "Unprotect Document…" menu text and is checked by ~50 editing routines. 1 only in `DB.FORM`. |
 | 0x020 | word | 0 / 1 | Which form 0x014 and 0x274 are in: 1 = last indices, 0 = counts (§6.1) |
 | 0x022 | word | | Number of defined names that have a definition (0 for a new sheet, 6 in `REPLACE`). Define Name counts it up; Open and Save carry it through unchanged, so a file written with 0 keeps 0 when Excel re-saves it. Every sample has the true count. |
 | 0x024 | word | | Number of names whose definition is a reference (flag `0x04`, §11; 5 in `REPLACE`). Excel recomputes it when it saves. |
-| 0x026 | long | | memory pointer — garbage |
-| 0x02A | long | | head of the in-memory name list — garbage |
-| 0x02E | 4 longs | | memory pointers / `FFFF` markers — garbage |
+| 0x026 | long | | memory pointer (junk) |
+| 0x02A | long | | head of the in-memory name list (junk) |
+| 0x02E | 4 longs | | memory pointers / `FFFF` markers (junk) |
 | 0x03E | word | 0 / 1 / 2 | 1-based position of the active-sheet external entry (the one named `\0`, §8), or 0 if there is none. Link refresh skips that entry. Excel 1.00 and 1.03 recompute it when they save. |
-| 0x040 | word | 1 | Window counter for the document — set to 1 for a new sheet and updated as windows are opened and closed |
+| 0x040 | word | 1 | Window counter for the document: set to 1 for a new sheet and updated as windows are opened and closed |
 | 0x042 | 256 words | 75 | **Column widths** in pixels, columns 0…255. Default 75. COLUMN.WIDTH(*w*) stores *w* × the width of `0` in the standard font (`0x254`, 7) + 5, rounded: 1 → 12, 2.5 → 23, 10 → 75, 20 → 145; 0 hides the column (`Column Widths` sample). |
 | 0x242 | word | 0 | **Protection password hash**; 0 = none. Unprotect hashes the typed password and refuses on mismatch. See §6.2. |
 | 0x244 | word | 3 | Standard font number (passed to `TextFont`; 3 = Geneva) |
@@ -318,12 +323,12 @@ the start of the block.
 | 0x250 | word | | Cached: packed font metric |
 | 0x252 | word | 8 | Cached: width of `0` in bold |
 | 0x254 | word | 7 | Cached: width of `0` in plain |
-| 0x256 | long | | memory pointer — garbage |
+| 0x256 | long | | memory pointer (junk) |
 | 0x25A | long | 0 | Head of the row page-break list in memory (rebuilt from §14) |
 | 0x25E | long | 0 | Head of the column page-break list in memory (rebuilt from §14) |
 | 0x262 | word | 0 | Cached: 1 if a print area is defined |
 | 0x264 | word | 0 | Cached: pixel width of the print-title columns |
-| 0x266 | long | | memory pointer — garbage |
+| 0x266 | long | | memory pointer (junk) |
 | 0x26A | word | 0 | Cached: number of print-title rows |
 | 0x26C | word | 0 | Cached print-titles value |
 | 0x26E | 6 bytes | 0 | Cached print-titles range (first row word, last row word, first column byte, last column byte) |
@@ -346,16 +351,9 @@ nCols = word[0x274] + word[0x020]
 
 These size the row index (§8) and the cell table (§9). Excel itself uses only rows `0 … word[0x014] − 1` and
 columns `0 … word[0x274] − 1`, so in the last-index form (0x020 = 1) the table's last row and column are a
-**blank margin**. Every sample in that form has no values there. Excel 1.03 misbehaves when a file breaks this:
-
-* values in the margin are not drawn;
-* cells in the last column load on top of one another (D1:F1 all become F1's formula);
-* rows can be lost from the end of the sheet;
-* a one-row table hangs it while it draws the window.
-
-A writer using the last-index form must therefore leave one blank row and column after the last value. See
-[Excel bugs and quirks](ExcelBugs.md#files-that-break-the-cell-table-margin-excel-103). A new
-sheet starts with all three words 0, so 0x014 and 0x274 hold the row and column counts. The first time the grid grows, the grid-sizing routine (`22.08`)
+**blank margin**. Every sample in that form has no values there, and a writer using it must leave one blank
+row and column after the last value: Excel 1.03 loses, misdraws or hangs on values in the margin ([Excel bugs
+and quirks](ExcelBugs.md#files-that-break-the-cell-table-margin-excel-103)). A new sheet starts with all three words 0, so 0x014 and 0x274 hold the row and column counts. The first time the grid grows, the grid-sizing routine (`22.08`)
 converts them: it sets 0x020 to 1 and subtracts 1 from both, so they hold the last row and column index from
 then on. Most samples are in the second form; `CLOCK.WS`, `CLOCK.MS` (1.00) and `LOAN1` (1.5) are in the
 first. An empty sheet has `nRows = nCols = 0`.
@@ -465,8 +463,8 @@ for the space.
 
 The compiler shows what the header bytes are: it writes the integer-position count,
 the decimal count, and decimals plus twice the number of percent signs. It
-also shows how the hour tokens are chosen — `h`/`hh` compile to `13`/`14`,
-and are bumped by 12 to `1F`/`20` when an AM/PM designator follows — and that
+also shows how the hour tokens are chosen: `h`/`hh` compile to `13`/`14`,
+and are bumped by 12 to `1F`/`20` when an AM/PM designator follows. And it shows that
 `m` is compiled as minutes rather than month when it directly follows an hour
 token.
 
@@ -487,12 +485,12 @@ Entry:
 | Size | Meaning |
 |-----:|---------|
 | 6 bytes | First 6 bytes of the in-memory entry, which Excel 1.00's Save writes as they are (`47.0b`), followed by the name the 3-byte pointer at entry offset 6 points to. Zero in every file seen, including links Excel had just made and links saved while the linked document was open; what they hold in memory is **(unknown)**. |
-| Pascal string | Document name: usually a file name (`CASHBUDGET`, `GREAT BRITAIN`), but it can be a full path (`::sampler files - current 1/13:Files:DATA`). Excel 1.00's Save always writes the entry's name; Excel 1.03's writes a zero-length name for an entry that refers to this document itself. `DB.FORM` has one entry whose name is the single character `0x00`. Its macros use it as `!DATABASE` and `!FORM`, the names on whichever sheet is active. Excel 1.03 makes such an entry for `=!A1` (`Links` sample), and the test harness's `GET.FORMULA(!B4)` reads B4 of whichever document is active (docs/Testing.md). |
+| Pascal string | Document name: usually a file name (`CASHBUDGET`, `GREAT BRITAIN`), but it can be a full path (`::sampler files - current 1/13:Files:DATA`). Excel 1.00's Save always writes the entry's name; Excel 1.03's writes a zero-length name for an entry that refers to this document itself. An entry named with the single character `0x00` stands for whichever sheet is active: `DB.FORM`'s macros use it as `!DATABASE` and `!FORM`, Excel 1.03 makes one for `=!A1` (`Links` sample), and the test harness's `GET.FORMULA(!B4)` reads B4 of the active document. |
 
 An external reference names its document by the entry's 1-based position in
 this table (§15.2, token `1A`).
 
-**Row index** — immediately after, `nRows` words, one per row. Mostly zero; 35
+**Row index.** Immediately after, `nRows` words, one per row. Mostly zero; 35
 rows across the samples have a small non-zero value.
 
 In memory each row has a 4-byte slot that may point at a per-row auxiliary
@@ -504,7 +502,7 @@ writer can emit 0 and a reader can ignore it.
 
 The structure is the recalculation dependency index. A row's slot records
 which rows hold formulas that refer to cells in this row; its top two bits tag
-the form — 1 for a single row held inline, 2 for an inline pair, 3 for a
+the form: 1 for a single row held inline, 2 for an inline pair, 3 for a
 pointer to a table (count word, capacity word, then row numbers whose own top
 two bits are flags). Open rebuilds it by calling the dependency routine once
 per formula as the cell data is read. The transient bits 12–6 of cell word 2
@@ -544,7 +542,7 @@ Cell types:
 
 | Type | Meaning | word 0 / data |
 |-----:|---------|---------------|
-| 0 | Empty (formatting only) | word 0 is a stale memory pointer — ignore |
+| 0 | Empty (formatting only) | word 0 is a stale memory pointer; ignore it |
 | 1 | Integer | word 0 = signed 16-bit value, stored inline. Bits 15–12 of word 1 are not meaningful (always `0xD` in the sample). |
 | 2 | Number | 8-byte double in cell data |
 | 3 | Text | Pascal string in cell data |
@@ -683,8 +681,8 @@ is `09 00 01` and nine type-1 elements.
 If the first token of the expression is `0x01` (array formula) or `0x02` (TABLE), the cell does not own its
 expression: the token's three operand bytes are a stale pointer to a shared record, and the trailer replaces
 the fix-ups of §12.5. Every cell of the range carries the token; the top-left cell, the *anchor*, holds the
-shared record. Array formulas occur in `MATRIX`, `SIMUL EQUATIONS` and `ACCOUNTS DATA`; tables in the `Table`,
-`Table Row Input` and `Table One Argument` samples, which Excel 1.03 made.
+shared record. Array formulas occur in `MATRIX`, `SIMUL EQUATIONS` and `ACCOUNTS DATA`; tables in the experiment
+samples `Table`, `Table Row Input`, `Table One Argument` and `Table Deleted Input`.
 
 *Anchor cell* of an array formula:
 
@@ -713,13 +711,13 @@ as it is (`46.06` in 1.00) and the TABLE command builds (`4b.06` in 1.00):
 | 15 | byte | Column of the second input cell |
 | 16 | word | Bits 15–2: row of the second input cell. Bits 1–0 as in the word at offset 10. |
 
-`TABLE(Y7,X5)` on B2:C3 is `00 01 00 02 01 02 00 00 00 18 00 18 FF FF C0 17 00 10`. `TABLE(,X1)` on B2:B3 has X1
-as its first input with byte 14 = 0, and `TABLE(Y7,)` has Y7 as its first input with byte 14 = `40`; bytes 15–17
-are then left over from memory. The macro command `TABLE(Y7)`, with one argument, stores byte 14 = `C0` and a
-second input that is whatever was left in its argument buffer: the command reads its arguments into a stack
-buffer it does not clear and takes a slot that does not hold the "missing" marker `0x4000` as a second input
-(`4b.05` in 1.00). It was P1 (column 15, row 0) every time here. See [Excel bugs and quirks](ExcelBugs.md). GET.FORMULA
-gives a table's inputs as absolute references, `=TABLE(R7C25,R5C24)`, so the library writes `{=TABLE($Y$7,$X$5)}`.
+`TABLE(Y7,X5)` on B2:C3 is `00 01 00 02 01 02 00 00 00 18 00 18 FF FF C0 17 00 10`. `TABLE(,X1)` has X1 as its
+first input and byte 14 = 0; `TABLE(Y7,)` has Y7 as its first input and byte 14 = `40`, and bytes 15–17 are
+left over from memory. The macro command `TABLE(Y7)`, with one argument, also sets bit 7 and takes a second
+input from stale memory ([Excel bugs and quirks](ExcelBugs.md); `4b.05` in 1.00).
+
+GET.FORMULA gives the inputs as absolute references, `=TABLE(R7C25,R5C24)`, and a deleted one as `#REF!`:
+`=TABLE(#REF!,R5C24)` after Y7 is deleted.
 
 *Any other cell* of the range:
 
@@ -774,7 +772,7 @@ command:
 | 27 | byte | 1 | **Display gridlines** |
 | 28 | byte | 1 | **Display row and column headings** |
 | 29 | 3 bytes | | Stale pointer to the document |
-| 32 | byte | | Padding — never initialised or read; whatever was in memory |
+| 32 | byte | | Padding: never initialised or read, so whatever was in memory |
 | 33 | word | 0 | **Index of the active area** within the selection list that follows (the area containing the active cell) |
 | 35 | word | 0 | **Active cell row** |
 | 37 | word | 0 | Vertical pixel position of the horizontal split (between upper and lower panes); 0 = not split |
@@ -801,20 +799,20 @@ are identified, by state offset (window-record offset − 183):
 
 | Offset | Size | New window | Meaning |
 |-------:|-----:|-----------|---------|
-| 121 | byte | 0 | **Panes frozen.** FREEZE.PANES toggles it; SPLIT does nothing while it is set (`0f.3e`, `0f.47`). A file with it set is saved as version 18. |
+| 121 | byte | 0 | **Panes frozen.** FREEZE.PANES toggles it; SPLIT does nothing while it is set (`0f.3e`, `0f.47`). |
 | 127 | byte | 1 | **Gridline and heading colour is automatic** (the DISPLAY dialog shows "automatic" when it is set, `0d.20`) |
 | 128 | byte | 0 | Gridline and heading colour, used when offset 127 is 0: 0–7 in the order of `STR#` 263 (§7). DISPLAY's colour argument counts from 1: `DISPLAY(FALSE,TRUE,TRUE,TRUE,3)` saves 2, red. |
 
-The rest are **(unknown)**; they are zero in `SIMUL EQUATIONS`. Excel 1.5's Save
-writes version 18 when any window has panes frozen or a non-automatic colour
-(`47.0d`); a version-17 file cannot hold either.
+The rest are **(unknown)**; they are zero in `SIMUL EQUATIONS`. A window with panes frozen (121) or a colour
+that is not automatic (127 = 0) makes Excel 1.5 save version 18 (§2.1), since a version-17 file cannot hold
+either.
 
 ---
 
 ## 14. Section 7 — page breaks and print settings
 
-Three parts, each self-terminating. No sample has page breaks (Excel 1.03 made one to check them);
-three have a print record (`MATRIX`, `BEARINGS`, `JAPAN`) and the rest a single `0x00` for it.
+Three parts, each self-terminating. Only the `Page Breaks` experiment sample has page breaks; three of
+Microsoft's samples have a print record (`MATRIX`, `BEARINGS`, `JAPAN`) and the rest a single `0x00` for it.
 
 **Excel 1.00: extra function names.** In a file without an extra header (§5, `n = 0`), when the function
 count is above 208, section 7 starts with one Pascal string per function from 208 up to the count: the names of
@@ -824,10 +822,10 @@ difference (`46.06`). This guards against a later build numbering new functions 
 exactly 208 functions, so it never writes the list, and no sample has one. Excel 1.03 dropped it in both Save
 and Open, and later files carry no names even when their count is higher.
 
-1. **Column page breaks** — a sequence of chunks, each a count byte `n`
+1. **Column page breaks**: a sequence of chunks, each a count byte `n`
    (1…5) followed by `n` bytes, one column number per byte. Terminated by
    `0x00`.
-2. **Row page breaks** — a sequence of chunks, each a count byte `n` (1…5)
+2. **Row page breaks**: a sequence of chunks, each a count byte `n` (1…5)
    followed by `n` words, one row number per word. Terminated by `0x00`.
 
    In memory both are linked lists of 14-byte nodes holding five word slots;
@@ -836,7 +834,7 @@ and Open, and later files carry no names even when their count is higher.
    from the value ranges. `SET.PAGE.BREAK` with C5 selected saves column break 1
    and row break 3: each number is the 0-based
    index of the last column or row **before** the break.
-3. **Print record** — `0x00` if the document has none. Otherwise `0xFF`, then
+3. **Print record**: `0x00` if the document has none. Otherwise `0xFF`, then
    a 122-byte page-setup structure, then three strings, each either `0x00`
    (absent) or a Pascal string.
 
@@ -850,16 +848,16 @@ and Open, and later files carry no names even when their count is higher.
    |-------:|-----:|---------|
    | 0 | 62 bytes | The first 62 bytes of the Toolbox print record (`TPrint`: version, `TPrInfo`, paper rectangle, `TPrStl`, `prInfoPT`, `TPrXInfo`), copied in and out around the system print dialogs |
    | 62 | 4 doubles | Left, right, top and bottom margins in inches (Excel's defaults 0.75, 0.75, 1, 1 in the 1.5 samples; 0.25 all round in `MATRIX`) |
-   | 94 | 3 bytes | Stale pointer — page header |
+   | 94 | 3 bytes | Stale pointer to the page header |
    | 97 | byte | Print row and column headings |
-   | 98 | 3 bytes | Stale pointer — page footer |
+   | 98 | 3 bytes | Stale pointer to the page footer |
    | 101 | byte | Print gridlines |
    | 102 | 4 words | Printable-area rectangle (top, left, bottom, right) in pixels; Excel derives print width and rows per page from it |
    | 110 | word | TTY left margin, in characters (0…256) |
    | 112 | word | TTY print width, in characters |
    | 114 | word | TTY top margin, in lines |
    | 116 | word | TTY print length, in lines |
-   | 118 | 3 bytes | Stale pointer — printer message |
+   | 118 | 3 bytes | Stale pointer to the printer message |
    | 121 | byte | Padding after the 3-byte pointer, bringing the record to an even 122 bytes |
 
    Offsets 97, 101, 110–118 and the three pointers are read directly from the
@@ -896,7 +894,7 @@ which class the compiler chooses.
 
 ### 15.1 Tokens with no operands (`0x03`–`0x16`)
 
-All occur in the samples except `07`, `0F`, `12` and `14`. `01` and `02` are
+All occur in Microsoft's samples except `07`, `0F`, `12` and `14`, which Excel compiled in experiments. `01` and `02` are
 described in §12.6. The binary operators come from Excel's own operator
 table (`PCOD` 0 at `0xCE9` in 1.03), which pairs tokens `03 04 0B 0D 07 06 05 08
 11 09 10 0E 0A 0C 0F` with the characters `+ - = > ^ / * & : < , < < >` and space
@@ -1012,7 +1010,7 @@ at `0x1C92` in 1.5 (in internal order).
 | Byte | Meaning |
 |-----:|---------|
 | 0–1 | Bits 15–4: the offset of the function's name in the name list. In Excel 1.00 the list is the Pascal strings at `PCOD` 0 offset `0x14FA` (COUNT is at `0x00B`, TRUE at 0); Save's function-name list (§14) reads names this way. Excel 1.03 and 1.5 build the list at start-up and use the same field as an offset into it (`g0812` in 1.03), with different values. Bits 3–0: flags, below. |
-| 1 | Low nibble: flags. `0x01` = macro sheets only. `0x04` = has a dialog-box form: the compiler accepts `NAME?(…)` only for functions with this flag (`0f.00`). `0x08` = volatile; it is set on INDEX, RAND, NOW, AREAS, ROWS and COLUMNS, and formulas that call these start with `19 01`. `0x02` is set on SERIES (a chart-only function) and on functions 176, 203 and 204; it probably marks functions that cannot be used in cell formulas **(inferred)**. The high nibble belongs to the name offset. |
+| 1 | Low nibble: flags. `0x01` = macro sheets only. `0x04` = has a dialog-box form: the compiler accepts `NAME?(…)` only for functions with this flag (`0f.00`). `0x08` = volatile; it is set on INDEX, RAND, NOW, AREAS, ROWS and COLUMNS, and formulas that call these start with `19 01`. `0x02` is set on SERIES (a chart-only function) and on functions 176, 203 and 204; it marks functions that cannot be used in cell formulas **(inferred)**. The high nibble belongs to the name offset. |
 | 2 | Low nibble = minimum arguments; high nibble − 1 = maximum arguments |
 | 3 | Return type |
 | 4 | Type the first argument accepts |
@@ -1034,7 +1032,7 @@ exceptions, which Excel kept from an earlier version of the library or which A1 
 
 Excel 1.03's compiler produces the same tokens as 1.00's (`11.00`); the two differ only in reading text. 1.00
 always separates arguments and array elements with a comma (character 44 in its tokeniser); 1.03 reads
-the separator from a global, presumably set from the system's international settings **(inferred)**.
+the separator from a global set from the system's international settings **(inferred)**.
 
 **Token classes.** For a reference, area or name operand:
 
@@ -1111,9 +1109,8 @@ CHOOSE whose code would be longer than 255 bytes. `=CHOOSE(A1,1,2)` is:
 index         jump       table      choice 1   skip       choice 2   skip       CHOOSE
 ```
 
-**Numbers.** Whole numbers 0–65535 are `1E` words; other numbers are `1F` doubles. The samples contain no
-constants above 65535; Excel 1.00 compiles `=65535` to `1E FF FF` and `=65536` to a `1F` double (`Literals`). A minus sign directly on
-a number constant is folded into it: `-1` is `1F BF F0 00 00 00 00 00 00`, not `1E 00 01 13`. A minus sign on
+**Numbers.** Whole numbers 0–65535 are `1E` words; other numbers are `1F` doubles (`=65535` is `1E FF FF`,
+`=65536` a double, `Literals`). A minus sign directly on a number constant is folded into it: `-1` is `1F BF F0 00 00 00 00 00 00`, not `1E 00 01 13`. A minus sign on
 anything else is `13`.
 
 **TRUE and FALSE** without parentheses are `1D` constants.
@@ -1142,17 +1139,20 @@ including its last `0F`, `10` or `11`. Ranges, unions and intersections nested i
 * Otherwise (a name, a function result, another sheet) it is a **memory function**, `29 n` (`2E n` in a name
   definition).
 
-Both take the class a reference would in their place: `46` and `49` at the top of a cell formula, `26` and
-`29` as a function's reference argument. The `Recompiled` and `Intersections` samples hold formulas Excel 1.03
+Each takes the class a reference would in its place: `46` and `49` at the top of a cell formula, `26` and `29`
+as a function's reference argument. The `Recompiled` and `Intersections` samples hold formulas Excel 1.03
 compiled this way. Examples:
 
 * `INDEX(A1:C3,1,1):C3` is `29 15` and 21 bytes: `25… 1E… 1E… 22 03 1D 24… 11`;
 * `matrix:inverse` (two names) is `29 11 23… 23… 11`;
 * the definition `=$C$9,$E$9,…,$C$6` (ten areas) is `2E 3A` and one 58-byte union chain.
 
-**Signs and `#REF!`.** A plus sign on a number constant is dropped (`=+1` is `1E 00 01`), like a minus sign
-folded into it; on anything else it is token `12`. A typed `#REF!` compiles to a deleted-reference token,
-`4A 00 00 00` at the top of a cell formula, not to error constant `1C 17`.
+**Signs.** A plus sign on a number constant is dropped (`=+1` is `1E 00 01`); on anything else it is token
+`12`.
+
+**`#REF!`.** A typed `#REF!` compiles to `2A`, a deleted cell reference, not the error constant `1C 17`. It
+takes the operand class: `=#REF!` is `4A 00 00 00` (`Literals`, `Errors`), and a name defined as `#REF!` holds
+`2A`.
 
 **External references.**
 
@@ -1171,25 +1171,19 @@ folded into it; on anything else it is token `12`. A typed `#REF!` compiles to a
 3. `22 (argc + 1) FF`.
 
 **Function count.** A formula that uses a function numbered above 207 needs the document's function count
-(§5) raised to at least one more than that number. Excel 1.5 writes functions numbered 256 and up with
-tokens `39` and `3A` and the number less 256 (§15.2).
-
-**Deleted references.** `#REF!` typed as a constant compiles to `2A`, a deleted cell reference, not the error
-constant `1C 17`: in a name definition (`2A`) and in a cell formula, where it takes the operand class (`=#REF!`
-is `4A`, Excel 1.00's `Literals` and 1.03's `Errors`).
+(§5) raised to at least one more than that number.
 
 ---
 
 ## 16. Chart files
 
-Charts are not written in the worksheet format. Save hands them to a separate
-writer (Excel 1.03 segment `0x5C`) that produces a Microsoft Chart document,
-Finder type `MCBN`; Open reads them with segment `0x5D`. This chapter comes from
-those two routines and from the chart dialogs (segments `0x57`–`0x5A`), which
-show what each field means, and checked against three samples: `CLOCK.CH` (from
-a build before Excel 1.00, an overlay and a main chart, with free text for a clock face) and
-`BREAK CHART` and `PROFIT CHART` (Excel 1.5, line charts with titles, legends
-and up to five series). All three are read and rebuilt byte for byte.
+Charts are not written in the worksheet format. Save hands them to a separate writer (`5d` in Excel 1.00,
+`5c` in 1.03) that produces a Microsoft Chart document, Finder type `MCBN`; Open reads them with `5e` (1.00) or
+`5d` (1.03). This chapter comes from those routines, the chart dialogs (segments `0x57`–`0x5A` in 1.03), which
+show what each field means, and the drawing code (`37` in 1.00), which works out the layout fields. Microsoft's
+samples are `CLOCK.CH` (from a build before Excel 1.00: an overlay and a main chart, with free text for a clock
+face), `BREAK CHART` and `PROFIT CHART` (Excel 1.5, line charts with titles, legends and up to five series).
+The experiment samples are `PROFIT CHART` put through the Gallery formats (§16.10) and Chart > Axes.
 
 ### 16.1 Layout
 
@@ -1269,7 +1263,7 @@ number and size in spare bits nearby (listed with each record) and restores
 them on load when the version has bit 2 set; for other versions it converts
 the codes back.
 
-**Line format** (4 bytes) — axis lines, gridlines, drop lines, hi-lo lines:
+**Line format** (4 bytes), for axis lines, gridlines, drop lines, hi-lo lines:
 
 | Offset | Meaning |
 |-------:|---------|
@@ -1277,7 +1271,7 @@ the codes back.
 | 1 | Pattern; **0 = line not shown** |
 | 2 | Word: bits 15–12 = weight (0–2, hairline to thick, in dialog order) |
 
-**Area format** (16 bytes) — chart area, plot area, legend, text boxes:
+**Area format** (16 bytes), for the chart area, plot area, legend, text boxes:
 
 | Offset | Meaning |
 |-------:|---------|
@@ -1298,7 +1292,7 @@ Offsets are within the on-disk record; "mem" is the offset in Excel's
 | Offset | mem | Size | Meaning |
 |-------:|----:|-----:|---------|
 | 0 | 0 | 18 | Chart header (below) |
-| 18 | — | 6 | Built for the file: two words — (0, 0) for a lone chart, (1, 0) for the overlay, (0, 2) for a main chart that has an overlay (ignored on load) — then a word whose bits 11–8 are four chart option flags (mem 18, bits 15–12). Excel sets all four when it makes an overlay chart, and hides the overlay's axes (axis line pattern 0) at the same time (`0f.04` in 1.00); they are clear in every main chart. Bit 9 (mem bit 13): the overlay's value axis is scaled over the data of both charts, so the overlay plots against the main chart's value axis (`37.0a`, which then works out one minimum and maximum over both charts); bit 8 (mem bit 12): the same for the X axis of a scatter overlay. Nothing in Excel 1.00 reads bits 11–10 (mem bits 15–14) **(unknown)**. Showing the overlay's axes with Chart > Axes changes their axis line patterns, not these bits. Its low byte is 0 from Excel 1.03 and `0x0F` in the 1.5 samples. |
+| 18 | — | 6 | Built for the file: two words, (0, 0) for a lone chart, (1, 0) for the overlay and (0, 2) for a main chart that has an overlay (ignored on load); then a word whose bits 11–8 are the overlay option flags (below) |
 | 24 | 20 | 16 | **Chart area** format |
 | 40 | 36 | 24 | **Category axis** (axis record, below) |
 | 64 | 62 | 24 | **Value axis** (axis record) |
@@ -1307,15 +1301,23 @@ Offsets are within the on-disk record; "mem" is the offset in Excel's
 | 176 | — | 78 | Zero; skipped on load |
 | 254 | 178 | 4 | **Drop lines** line format (line and area charts) |
 | 258 | 182 | 4 | **Hi-lo lines** line format (line charts) |
-| 262 | 186 | 2 | Memory pointer — junk |
+| 262 | 186 | 2 | Memory pointer (junk) |
 | 264 | 188 | 2 | **Number of text objects** that follow (§16.7), including the titles |
 | 266 | 190 | 46 | Built-in text object −2 (§16.7) |
 | 312 | 250 | 46 | Built-in text object −1 |
-| 358 | 310 | 2 | Memory pointer — skipped on load |
+| 358 | 310 | 2 | Memory pointer, skipped on load |
 | 360 | 312 | 2 | Number of words in the series word list |
-| 362 | 314 | 2 | Memory pointer — junk |
+| 362 | 314 | 2 | Memory pointer (junk) |
 | 364 | 316 | 2 | **Number of data-point format records** |
 | 366 | 318 | 12 | **Default series format** (point-format record, §16.8) |
+
+**Overlay option flags** (offset 22, bits 11–8; mem 18, bits 15–12). Excel sets all four when it makes an
+overlay chart, and hides the overlay's axes at the same time (`0f.04` in 1.00); they are clear in every main
+chart. Bit 9 scales the overlay's value axis over the data of both charts, so the overlay plots against the
+main chart's axis (`37.0a`); bit 8 does the same for the X axis of a scatter overlay. Nothing in Excel 1.00
+reads bits 11–10 **(unknown)**. Showing an overlay axis with Chart > Axes sets that axis's line pattern
+(`Overlay Axis` sample), not these bits. The word's low byte is 0 from Excel 1.00 and 1.03 and `0x0F` in the
+1.5 samples.
 
 The two built-in text objects are addressed as indices −2 and −1 of the
 chart's text list and are formatted together with the axis labels by "apply
@@ -1330,7 +1332,7 @@ label per point) (§16.8).
 | Offset | Meaning |
 |-------:|---------|
 | 0 | Word of flags: bit 14 = 100%; bit 13 = stacked; bit 12 = bars (horizontal) rather than columns; bit 11 = vary colours by category; overlay chart only: bit 10 = automatic series distribution, bits 9–2 = first series in the overlay chart |
-| 2 | Word: **chart type** — 1 column or bar, 2 line, 3 pie, 4 area, 5 scatter |
+| 2 | Word: **chart type**: 1 column or bar, 2 line, 3 pie, 4 area, 5 scatter |
 | 4 | Byte: the number of categories, the largest point count of the chart's series, worked out when the chart is drawn (`37.13` in 1.00; 12 for `PROFIT CHART` once Excel has drawn it, 0 in overlays). The drawing code divides it by the categories between tick labels to place them (`37.2b`). |
 | 5 | Byte: 12 in every main chart Excel 1.00 or 1.03 saves, 0 in overlays **(unknown)** |
 | 6 | Word: how much narrower the plot became when Excel laid out the axis and tick labels, the width before layout less the width after (`37.03` in 1.00): 266 for `PROFIT CHART`'s column, line, area and scatter forms, 116 for its bar forms, 300 or 405 for its pie forms. |
@@ -1348,13 +1350,13 @@ Column → 1, Line → 2, Pie → 3, Scatter → 5.
 |-------:|---------|
 | 0 | Word: bits 15–12 = major tick marks, bits 11–8 = minor tick marks (0 invisible, 1 inside, 2 outside, 3 cross); bits 7–4 = tick label position (0 none, 1 next to axis, 2 low, 3 high); bit 3 is set on load |
 | 2 | Font descriptor for the tick labels |
-| 6 | Word: tick-mark length in twips, a seventieth of the smaller side of the plot rectangle (`37.03` in 1.00) |
+| 6 | Word: tick-mark length in twips, worked out when the chart is drawn as the smaller side of the area being laid out divided by 70 (`37.03` in 1.00) |
 | 8 | Two words worked out when the chart is drawn, changing with the gallery format: the space the tick labels take and the axis's position **(inferred)**. In a column chart the value axis's second word is the plot area's left edge. |
 | 12 | **Axis line** format; 0 pattern = axis hidden. Bits 9–2 of its word at +2 hold the saved Macintosh font number. |
 | 16 | **Major gridlines** format. Bits 9–2 of its word at +2 hold the saved font size. |
 | 20 | **Minor gridlines** format |
 
-**Scale record** (44 bytes) — the value axis, and for scatter charts also the
+**Scale record** (44 bytes), for the value axis, and for scatter charts also the
 X axis:
 
 | Offset | Meaning |
@@ -1365,7 +1367,7 @@ X axis:
 | 24 | Minor unit |
 | 32 | Category axis crosses at |
 | 40 | Word: bit 15 auto minimum, 14 auto maximum, 13 auto major unit, 12 auto minor unit, 11 auto crossing point, 10 logarithmic scale, 9 values in reverse order |
-| 42 | Memory pointer — zeroed on load |
+| 42 | Memory pointer, zeroed on load |
 
 **Category-axis options, plot area and legend** (44 bytes, mem 134):
 
@@ -1419,15 +1421,15 @@ Each 46-byte record is four slices of the 60-byte memory structure: bytes
 
 | mem | Meaning |
 |----:|---------|
-| 2 | Word: bits 3–0 = **kind** — 1 chart title, 2 category-axis title, 3 value-axis title, 4 data label, 6 unattached text (the hour labels of `CLOCK.CH`, "Break-even Point" in `BREAK CHART`); bits 15–14 are cleared on load |
+| 2 | Word: bits 3–0 = **kind**: 1 chart title, 2 category-axis title, 3 value-axis title, 4 data label, 6 unattached text (the hour labels of `CLOCK.CH`, "Break-even Point" in `BREAK CHART`); bits 15–14 are cleared on load |
 | 4 | Byte: series number (data labels) |
 | 5 | Byte: point number, 255 = the whole series (data labels) |
-| 8 | Memory pointer to the string — junk |
+| 8 | Memory pointer to the string (junk) |
 | 10 | Word: bit 13 = **automatic text**; bit 12 = vertical orientation; bits 11–9 = horizontal alignment (0 centre, 1 left, 2 right); bits 8–6 = vertical alignment (0 bottom, 1 centre, 2 top); bit 5 = show key; bit 4 = show value |
 | 12 | Font descriptor |
 | 20 | Bytes 20 and 21 hold the saved Macintosh font number and size |
 | 22 | Area format of the text box; its word at +6 bit 14 = automatic size |
-| 38, 46 | Not identified (likely position) |
+| 38, 46 | The position **(inferred)** |
 
 On load the titles (kinds 1–3) of the main chart are moved out of the list
 into Excel's three title slots.
@@ -1585,8 +1587,8 @@ version 17 and uses only functions 0–207:
 
 Compile formulas with the rules of §15.4 for Excel 1.00–1.03 unless the file is meant for a later release.
 
-This recipe reproduces the samples byte for byte. It has not been tested by opening newly written files in
-Excel itself. A formula's stored value is what Excel shows until it recalculates, and Excel 1.03 does not
+This recipe reproduces the samples byte for byte, and files written with it open in Excel 1.00, 1.03 and 1.5
+(docs/Testing.md). A formula's stored value is what Excel shows until it recalculates, and Excel does not
 recalculate a loaded formula until something it depends on changes. Set state word `0x018` to 1 to have Excel
 recalculate the sheet when it opens it (§6; five 1.00 samples and seven 1.5 samples are saved that way).
 
@@ -1599,17 +1601,16 @@ None of these affects reading the samples or writing valid files.
 **Worksheets and macro sheets**
 
 * What the six bytes at the start of an external-document entry hold in memory; Excel writes zeros (§8).
-* Most of the 88 extra window-state bytes of version 18 (§13).
+* Most of the 88 extra window-state bytes of version 18 (§13), and what else in a number format makes Excel
+  1.5 save version 18 (§2.1).
 * What Excel 1.04 changed besides adding CHANGE.LINK; no 1.04 code or sample is available (§2.1).
-
-**Checked in Excel but not kept as samples**
-
-Functions numbered 256 and up, compiled by Excel 1.5 from `tests/Data/formulas-1.5.txt` (§15.4).
 
 **Charts** (§16)
 
-* Option flags 11–10 of the chart record, which overlays set and nothing reads (§16.5).
-* The chart header's byte 5, and the axis records' words at offsets 8 and 10 (§16.5).
+* Overlay option flags 11–10, which overlays set and nothing in Excel 1.00 reads (§16.5).
+* A few bytes Excel works out or leaves alone: the chart header's byte 5, the axis records' words at offsets 8
+  and 10, byte 3 of the category-axis options (§16.5), the text objects' mem 38 and 46 (§16.7), and the point
+  format's offsets 0, 5 and 9–10 and bit 13 of its word at 8 (§16.8).
 
 **Workspace files** (Appendix B)
 
@@ -1945,7 +1946,7 @@ calculation settings. It holds no cell data. Written by `64.00` and read by `64.
 |-----:|---------|
 | word | 0. Open refuses anything else (alert `0x2038`). |
 | 20 bytes | Calculation settings, laid out as offsets 0x000–0x013 of the sheet state block (§6): maximum iterations, calculation mode, precision, reference style, unused word, maximum change (double), iteration. In 1.00 they are global, not per document. |
-| word | 1 if a window was **zoomed** to fill the screen (the FULL command or the zoom box; global `g0c5a`), else 0. Open zooms the front window again (`17.0c`). The rectangles below are always the windows' normal size: Save and this writer un-zoom before recording them. |
+| word | 1 if a window was **zoomed** to fill the screen (the FULL command or the zoom box; global `g0c5a`), else 0. Open zooms the front window again (`17.0c`). The rectangles below are always the windows' normal size: Excel un-zooms a window before recording it. |
 | … | The document windows, front to back, each as below, then a `0x00` byte |
 | word | `n`, then `n` bytes: the **preferred chart format** (Chart > Set Preferred Format, applied by Gallery > Preferred), Excel's in-memory image of a chart, whose first word is its own length. `n` = 0 when none has been set (1,640 bytes for `CLOCK.CH`'s format). From offset 1058 it holds the chart record of §16.5 at its in-memory offsets (the table's second column); the first 1,058 bytes are other in-memory chart structures **(unknown)**. |
 | byte | 0 |

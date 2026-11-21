@@ -8,13 +8,13 @@ The file format was reverse-engineered from the code of Excel 1.00, 1.03 and 1.5
 
 ## Features
 
-- **Exact round-trips.** All 37 sample documents from the Excel 1.00, 1.03 and 1.5 disks, sheets and charts, read and write back byte for byte, including Excel 1.5's version-18 files. Fields the library does not model are preserved untouched.
+- **Exact round-trips.** All 37 sample documents from the Excel 1.00, 1.03 and 1.5 disks, and 33 files Excel itself saved in experiments, read and write back byte for byte, sheets and charts, including Excel 1.5's version-18 files. Fields the library does not model are preserved untouched.
 - **Cells.** Integers, numbers, text and formulas with their current values, plus number formats, alignment, bold and italic, borders, and protection flags.
 - **Formulas, both ways.** Decompile tokens to A1-style text (`=IF(NOT(FORMULA.FIND(B19,1,2,1)),RETURN())`) and compile text back to tokens with `ExcelFormula.Parse`. The parser reproduces Excel's own encoding byte for byte for 1,281 of the samples' 1,282 formulas and all 206 name definitions, for whichever release saved them: token classes, `IF` and `CHOOSE` jumps, the one-argument `SUM` attribute, volatile and memory-function tokens, array formulas and array constants, macro commands, dialog-box forms (`RUN?()`), names, external references and calls to macros on this or another sheet. Every function Excel 1.00–1.5 knows, with each release's argument rules. Allocation-free token walking.
 - **Display formatting.** All 19 built-in number formats, with dates in the 1904 date system. User-defined formats are read and written.
 - **Everything else in the file.** Calculation settings, column widths, fonts, protection and the password hash, defined names and command-macro shortcuts, external documents, windows and selections, page breaks and Page Setup.
 - **Writing.** Create new worksheets and macro sheets with Excel 1.03's defaults, or edit existing ones; only the cells you touch are re-encoded.
-- **Charts.** Chart type and options, axes and scales, legend, titles, data labels and free text, and the series data. Numbers use Microsoft's 8-byte decimal format.
+- **Charts.** Chart type and options, axes and scales, legend, titles, data labels and free text, point formats (markers, patterns, exploded pie slices, label settings), overlay charts, the layout Excel last drew, and the series data. Numbers use Microsoft's 8-byte decimal format.
 - **Robust.** Malformed input only ever raises `ExcelFormatException`. This is checked by fuzzing the samples with hundreds of thousands of random corruptions.
 
 ---
@@ -151,10 +151,9 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
 ## Limitations
 
 - New documents carry empty embedded p-code segments. Excel 1.03 never uses a file's own copy, but a different build of Excel linking to the document while it is closed would; copy the segments from an existing document if that matters.
-- The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`; Excel recalculates it when it opens the file.
+- The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`, and Excel keeps it until something the formula depends on changes. Set `document.State.RecalculationState = 1` to have Excel recalculate the sheet when it opens it.
 - The parser's rules come from Excel's code and tables and were checked against every sample formula; formulas unlike any in the samples could still encode differently. Excel 1.5's functions numbered above 255 follow its Save code, as no sample uses one; Excel 1.5 accepts them.
-- Tables (the Table command) and page breaks are implemented from the spec alone, because no sample contains them.
-- Files written by the library have been checked in Excel 1.03 and 1.5 under Mini vMac: every formula in `tests/Data` in 1.03, and part of the 1.5 list, including functions above 255 ([Testing in a real Excel](docs/Testing.md)). Worksheets other than formula lists, and charts the library builds from scratch, have not.
+- Files written by the library have been checked in Excel 1.00, 1.03 and 1.5 under Mini vMac: every formula in `tests/Data` in 1.03, part of the 1.5 list including functions above 255, and the experiments listed in [Testing in a real Excel](docs/Testing.md). Charts the library builds from scratch have not been.
 
 ---
 
@@ -165,7 +164,7 @@ dotnet build
 dotnet test
 ```
 
-The tests run over the sample documents in `tests/Samples`, grouped by the disk they come from: `Excel 1.00` (the 1.00 data disk, whose Expenses, REPLACE, COMMANDS and DB.FORM are identical to the 1.03 disk's), `Excel 1.03` (Worksheet1) and `Excel 1.5` (the 1.5 sampler, including two charts).
+The tests run over the sample documents in `tests/Samples`, grouped by the release that saved them: `Excel 1.00` (the 1.00 data disk, whose Expenses, REPLACE, COMMANDS and DB.FORM are identical to the 1.03 disk's), `Excel 1.03` (Worksheet1) and `Excel 1.5` (the 1.5 sampler, including two charts). Each folder also holds the files that release saved in experiments, named for what they show; `tests/ExperimentTests.cs` checks what each one showed.
 
 ---
 

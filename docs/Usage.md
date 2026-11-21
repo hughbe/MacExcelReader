@@ -147,7 +147,11 @@ gives a particular release's rules, and `ExcelFunctions.FindNumber("SUM")` goes 
 var formula = ExcelFormula.Parse("=IF(A1>0,SUM($A$1:$A$5)*2,-1)");
 formula.SetResult(0);            // the value Excel shows until it recalculates
 document.Cells["B1"].SetFormula(formula);
+document.State.RecalculationState = 1;   // have Excel recalculate the sheet when it opens it
 ```
+
+Excel does not recalculate the formulas it loads until something they depend on changes, so set the
+recalculation state when you cannot work out the results yourself.
 
 The leading `=` is optional. It supports:
 
@@ -295,12 +299,21 @@ foreach (var series in chart.Series)
 {
     Console.WriteLine($"{series.Name} ({series.FirstReference}): {string.Join(", ", series.SecondValues)}");
 }
+
+var format = main.DefaultSeriesFormat;      // and main.GetPointFormat(i) for per-point overrides
+Console.WriteLine($"marker {format.Marker}, pie slices pulled out {format.Explosion}%, point labels {format.PointLabels}");
+if (chart.OverlayChart is { } overlay)
+{
+    Console.WriteLine($"overlay {overlay.Type}, shares the main value axis: {overlay.SharesValueAxisScale}");
+}
 ```
 
 A chart file stores a copy of the plotted data, so the values are available without the worksheet. Numbers
-in chart files use Microsoft's 8-byte decimal format; `MicrosoftDecimal` converts them. Chart support was
-derived from Excel's code and is confirmed by three real charts from Excel 1.00 and 1.5, which read and write
-back byte for byte.
+in chart files use Microsoft's 8-byte decimal format; `MicrosoftDecimal` converts them. `CategoryCount`,
+`DrawingMargins`, `ChartAreaBox`, `PlotAreaBox` and the axes' `TickLength` are the layout Excel worked out the
+last time it drew the chart; Excel recomputes them, so a writer can leave them as they are. Chart support was
+derived from Excel's code and is checked against Microsoft's three sample charts and the charts Excel saved in
+experiments, which all read and write back byte for byte.
 
 ## Performance
 

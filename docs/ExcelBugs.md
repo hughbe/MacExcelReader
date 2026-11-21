@@ -1,16 +1,13 @@
 # Excel 1.x bugs and quirks
 
 Behaviour of Excel itself found while writing and testing files: crashes, silent data loss and output that
-looks wrong but isn't. Each entry says how it was found and how sure it is. The format is in the
+looks wrong but isn't. Each entry says which Excel showed it and how. The format is in the
 [specification](Spec.md); [Testing in a real Excel](Testing.md) describes how files are
 checked in a real Excel under Mini vMac.
 
-Labels: **Confirmed** means reproduced in a real Excel. **Inferred** means read from the code or from one
-observation, not reproduced.
-
 ## Files that break the cell-table margin (Excel 1.03)
 
-**Confirmed** in Excel 1.03 under Mini vMac, November 2026.
+Seen in Excel 1.03 under Mini vMac, November 2026.
 
 Excel uses only rows `0 … word[0x014] − 1` and columns `0 … word[0x274] − 1` of the cell table (§6.1). In
 the last-index form, which every file Excel 1.03 writes uses, that leaves the table's last row and column as
@@ -27,53 +24,53 @@ margin makes Excel 1.03:
 
 The library always leaves the margin blank when it writes the last-index form.
 
-**Inferred:** Excel 3.0 also hung while converting a 578-formula sheet written before this fix. That sheet
-broke the margin, but it was not retested after the fix.
+Excel 3.0 also hung while converting a 578-formula sheet written before this fix, which broke the margin. That
+the margin caused it is **(inferred)**: the sheet was not retested after the fix.
 
 ## Opening a large macro sheet runs out of memory (Excel 1.03)
 
-**Confirmed** in Excel 1.03 under Mini vMac. A macro sheet with all 578 formulas of `tests/Data/formulas-1.0.txt` stopped at 92% of
+Seen in Excel 1.03 under Mini vMac. A macro sheet with all 578 formulas of `tests/Data/formulas-1.0.txt` stopped at 92% of
 Open with "Out of memory". Sheets of about 100 formulas (around 13 KB) open fine. The limit depends on the
 memory given to Excel, so this is a practical limit rather than a format rule. `sheet --split` exists for it.
 
 ## OPEN stops a macro to ask about links (Excel 1.03)
 
-**Confirmed.** A macro that opens a file linked to other documents, such as `CLOCK.CH`, stops at "Update
+Seen in Excel 1.03. A macro that opens a file linked to other documents, such as `CLOCK.CH`, stops at "Update
 references to non-resident sheets?" until someone answers. While the dialog is up, the macro's next commands
 can act on the wrong window. Pass 0 as OPEN's second argument (`=OPEN("Disk:File",0)`) to skip the question.
 
 ## Macro FORMULA takes only R1C1 text (Excel 1.03)
 
-**Confirmed.** The macro command `FORMULA("=A1+1")` returns `#VALUE!` and enters nothing; `FORMULA("=R1C1+1")`
+Seen in Excel 1.03. The macro command `FORMULA("=A1+1")` returns `#VALUE!` and enters nothing; `FORMULA("=R1C1+1")`
 works. In R1C1 mode `A1` is not a reference at all, so `=Other!A1` became a reference to an external *name*
 `A1`. Text from GET.FORMULA, which is R1C1, can be passed straight back.
 
 ## Calculation mode and reference style are global
 
-**Confirmed** in Excel 1.03. CALCULATION and A1.R1C1 change a setting for the whole program, not for the active
+Seen in Excel 1.03. CALCULATION and A1.R1C1 change a setting for the whole program, not for the active
 sheet: every sheet saved afterwards carries the new value in its state block (§6, 0x002 and 0x006), and
 formulas typed afterwards are read in the new reference style.
 
 ## Out of memory makes OPEN fail quietly (Excel 1.03)
 
-**Confirmed.** With a large macro sheet open (a 345-row Driver after recompiling 100 formulas), the macro
+Seen in Excel 1.03. With a large macro sheet open (a 345-row Driver after recompiling 100 formulas), the macro
 command OPEN returned `#VALUE!` for a small file, and opening it by hand reported "Out of memory". A macro
 that does not check OPEN's result carries on with the wrong window active.
 
 ## ACTIVATE needs the window title (Excel 1.00)
 
-**Confirmed.** Excel 1.00 titles a window with its volume when the document is not on the startup disk
+Excel 1.00 titles a window with its volume when the document is not on the startup disk
 (`Ws:F 01 saved`), so `ACTIVATE("F 01 saved")` fails. The same title is written as the document name in
 workspace files (Appendix B).
 
 ## GET.FORMULA's whole-row text does not compile back the same (Excel 1.03)
 
-**Confirmed.** `=A1:IV16384` comes back from GET.FORMULA as `=R[-20]:R[16363]`, and entering that text gives a
+Seen in Excel 1.03. `=A1:IV16384` comes back from GET.FORMULA as `=R[-20]:R[16363]`, and entering that text gives a
 different formula: a range of two whole-row areas wrapped in a memory area (`46 … 25 … 25 … 11`).
 
 ## Display quirks of GET.FORMULA (Excel 1.03)
 
-**Confirmed.** These look like mismatches but the formula is right:
+Seen in Excel 1.03. These look like mismatches but the formula is right:
 
 * GET.FORMULA returns R1C1 text even when the sheet shows A1 references: `=A1%` in B4 is `=R[-3]C[-1]%`.
 * A range of whole rows is shortened: `=A1:IV16384` becomes `=R[-20]:R[16363]`, and `=$A$1:$IV$16384`
