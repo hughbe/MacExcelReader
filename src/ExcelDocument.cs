@@ -38,8 +38,9 @@ public sealed class ExcelDocument
     public byte[] HeaderReserved { get; private set; } = new byte[6];
 
     /// <summary>
-    /// Gets the embedded p-code segments (spec §3.1). They are only used when another build of Excel links
-    /// to this document while it is closed. Documents created with this library have empty segments.
+    /// Gets the two embedded p-code segments (spec §3.1). They are only used when another build of Excel links
+    /// to this document while it is closed. Documents created with this library have empty segments. Excel
+    /// reads the data offset from a fixed position in the 24-byte header, so there must be exactly two.
     /// </summary>
     public List<byte[]> CodeSegments { get; } = [];
 
@@ -70,8 +71,6 @@ public sealed class ExcelDocument
     /// <summary>Gets the documents this sheet refers to.</summary>
     public List<ExcelExternalDocument> ExternalDocuments { get; } = [];
 
-    /// <summary>Gets the names this sheet uses from external documents (section 3).</summary>
-    public List<string> ExternalNames { get; } = [];
 
     /// <summary>
     /// Gets the per-row size hints of the recalculation dependency index (spec §6.2). Excel rebuilds the
@@ -197,12 +196,18 @@ public sealed class ExcelDocument
         ushort signature = reader.ReadUInt16();
         var headerReserved = reader.ReadBytes(6);
         int segmentCount = reader.ReadUInt16();
+        if (segmentCount != 2)
+        {
+            throw new ExcelFormatException($"Expected 2 embedded code segments, not {segmentCount}.");
+        }
+
         var segmentInfo = new (int Length, int Offset)[segmentCount];
         for (int i = 0; i < segmentCount; i++)
         {
             segmentInfo[i] = (reader.ReadUInt16(), reader.ReadUInt16());
         }
 
+        // Like Excel's Open, take the data offset from header word 22.
         int dataOffset = reader.ReadUInt16();
         reader.Position = dataOffset;
         ushort functionCount = reader.ReadUInt16();
@@ -242,12 +247,16 @@ public sealed class ExcelDocument
         document.ReadNumberFormats(new BigEndianReader(data, sections[0]));
         document.ReadExternalDocuments(new BigEndianReader(data, sections[1]), rows);
         document.Cells.AttachSource(data, sections[2], sections[5], rows, columns);
+        // Section 3: for each external document, the names used from it, ending with a zero byte.
         if (sections[3] < sections[4])
         {
             var namesReader = new BigEndianReader(data, sections[3]);
-            for (byte length; (length = namesReader.ReadByte()) != 0;)
+            foreach (var external in document.ExternalDocuments)
             {
-                document.ExternalNames.Add(MacRoman.GetString(namesReader.ReadBytes(length)));
+                for (byte length; (length = namesReader.ReadByte()) != 0;)
+                {
+                    external.Names.Add(MacRoman.GetString(namesReader.ReadBytes(length)));
+                }
             }
         }
 
@@ -388,6 +397,11 @@ public sealed class ExcelDocument
         writer.WriteUInt16(FormatVersion);
         writer.WriteUInt16(Signature);
         writer.WriteBytes(HeaderReserved);
+        if (CodeSegments.Count != 2)
+        {
+            throw new InvalidOperationException("A document must have exactly two code segments (they may be empty); Excel reads the data offset from header offset 22.");
+        }
+
         writer.WriteUInt16((ushort)CodeSegments.Count);
         int headerSize = 14 + 4 * CodeSegments.Count + 2;
         int segmentOffset = headerSize;
@@ -452,12 +466,12 @@ public sealed class ExcelDocument
         int tableStart = writer.Position;
         writer.WriteZeros(rows * columns * 6);
 
-        // Excel writes the list (with its terminator) only when there are external documents; a table
-        // with no entries has an empty section 3.
+        // Section 3: for each external document, the names used from it and a zero byte. With no external
+        // documents the section is empty.
         sections[3] = writer.Position;
-        if (ExternalDocuments.Count > 0 || ExternalNames.Count > 0)
+        foreach (var external in ExternalDocuments)
         {
-            foreach (var name in ExternalNames)
+            foreach (var name in external.Names)
             {
                 writer.WritePascalString(name);
             }

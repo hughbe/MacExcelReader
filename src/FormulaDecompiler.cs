@@ -21,6 +21,7 @@ public static class FormulaDecompiler
         var stack = new Stack<string>();
         int fixupIndex = 0;
         string? externalPrefix = null;
+        int external = 0;
 
         foreach (var token in FormulaTokens.Enumerate(expression))
         {
@@ -72,10 +73,12 @@ public static class FormulaDecompiler
                 {
                     ushort index = NextFixup(expression, token, fixupWords, fixupsInPlace, ref fixupIndex);
                     externalPrefix = ExternalDocumentName(document, index) + "!";
+                    external = index;
                     break;
                 }
 
                 case 0x1B:
+                    external = 0;
                     break;
                 case 0x1C:
                     stack.Push(ExcelFormulaResult.ErrorText(expression[p]));
@@ -113,7 +116,8 @@ public static class FormulaDecompiler
                 case 0x30:
                 {
                     ushort index = NextFixup(expression, token, fixupWords, fixupsInPlace, ref fixupIndex);
-                    stack.Push(WithPrefix(ref externalPrefix, NameText(document, index)));
+                    // Inside an external reference a name token indexes that document's names (spec §10).
+                    stack.Push(WithPrefix(ref externalPrefix, external != 0 ? ExternalNameText(document, external, index) : NameText(document, index)));
                     break;
                 }
 
@@ -275,6 +279,20 @@ public static class FormulaDecompiler
         if (document is not null && index >= 1 && index <= document.Names.Count)
         {
             return document.Names[index - 1].Name;
+        }
+
+        return $"NAME{index}";
+    }
+
+    private static string ExternalNameText(ExcelDocument? document, int external, ushort index)
+    {
+        if (document is not null && external <= document.ExternalDocuments.Count)
+        {
+            var names = document.ExternalDocuments[external - 1].Names;
+            if (index >= 1 && index <= names.Count)
+            {
+                return names[index - 1];
+            }
         }
 
         return $"NAME{index}";

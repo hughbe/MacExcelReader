@@ -4,21 +4,56 @@ Reverse-engineered from `Microsoft Excel 1.03.dsk` (Excel 1.03, 800K HFS disk).
 
 Sources of truth, in order of weight:
 
-1. The application's **Save** routine (p-code segment `0x45`, procedure `0x0C`) and
-   **Open** routine (segment `0x44`, procedure `0x08`), plus the external-link
-   reader (segment `0x72`, procedure `0x01`), disassembled from the `PCOD`
-   resources of the application.
+1. The application's code, disassembled from its `PCOD` resources:
+   * **Save** (p-code segment `0x45`, procedure `0x0C`);
+   * **Open** (segment `0x44`, procedure `0x08`);
+   * the external-link reader (segment `0x72`, procedure `0x01`);
+   * the formula compiler (segment `0x0F`, procedure `0x00`) and the function
+     table it uses (§9.3).
+
+   Code is cited as `segment.procedure`, e.g. `0f.00`.
 2. The five documents on the disk: `Worksheet1`, `Expenses` (worksheets) and
    `COMMANDS`, `DB.FORM`, `REPLACE` (macro sheets).
 
-Every structural claim below was checked against all five files. A walker built
-from this description consumes every section of every sample byte-exactly
-(1,285 + 147 + 189 + 648 cell slots, 472 formulas). Where something is inferred
-rather than read from code or confirmed in data, it is marked **(inferred)** or
-**(unknown)**.
+Every structural claim below was checked against all five files. A reader built
+from this description consumes every section of every sample exactly, and a
+writer built from it reproduces each file byte for byte. The samples have
+1,285 (`Expenses`), 147 (`REPLACE`), 189 (`COMMANDS`) and 648 (`DB.FORM`) cell
+slots, and 344 formulas; `Worksheet1` is empty.
+
+Where something is not read from code or confirmed in data, it is marked:
+
+* **(inferred)**: a conclusion from indirect evidence, such as dialog item
+  order or consistency with later formats;
+* **(assumed)**: a rule chosen because nothing contradicts it, with no evidence
+  for it;
+* **(unknown)**: not identified.
+
+§15 lists everything that is still open.
 
 Charts use a **different format** (Microsoft Chart, file type `MCBN`),
 described in §16 from Excel's chart writer, chart reader and chart dialogs.
+
+---
+
+## Contents
+
+1. [Conventions](#1-conventions)
+2. [Overall layout](#2-overall-layout)
+3. [File header (24 bytes)](#3-file-header-24-bytes)
+4. [Data area preamble](#4-data-area-preamble)
+5. [Sheet state block (630 bytes)](#5-sheet-state-block-630-bytes)
+6. [Sections 0 and 1](#6-sections-0-and-1)
+7. [Section 2 — cell table](#7-section-2--cell-table)
+8. [Section 5 — cell data](#8-section-5--cell-data)
+9. [Parsed expressions](#9-parsed-expressions)
+10. [Section 3 — external names](#10-section-3--external-names)
+11. [Section 4 — defined names](#11-section-4--defined-names)
+12. [Section 6 — windows](#12-section-6--windows)
+13. [Section 7 — page breaks and print settings](#13-section-7--page-breaks-and-print-settings)
+14. [Recipes](#14-recipes)
+15. [Open questions](#15-open-questions)
+16. [Chart files](#16-chart-files)
 
 ---
 
@@ -72,7 +107,7 @@ table, where the writer replaces them with section-relative offsets (§7).
 +0x00  File header                     24 bytes
 +0x18  Embedded p-code segment 1       header.len1 bytes
        Embedded p-code segment 2       header.len2 bytes
-       Capacity word                   2 bytes          <- header.dataOffset
+       Function count                  2 bytes          <- header.dataOffset
        Sheet state block               630 bytes
        Document flags                  1 byte
        Section table                   8 longs (32 bytes)
@@ -101,12 +136,18 @@ each.
 | 2  | word | `0x0011` (17) | Format version. Open rejects anything else. |
 | 4  | word | `0xAB27` | Code signature of the writing build (see §3.1). |
 | 6  | 3 words | 0, 0, 0 | Written as zero; never read. |
-| 12 | word | 2 | Number of embedded code segments. |
+| 12 | word | 2 | Number of embedded code segments. Always 2; Open does not read it (see below). |
 | 14 | word | `0x0326` / `0x038A` | Length of segment 1. |
 | 16 | word | `0x0018` | Offset of segment 1 (always 24). |
 | 18 | word | `0x0016` | Length of segment 2. |
 | 20 | word | 24 + len1 | Offset of segment 2. |
-| 22 | word | 24 + len1 + len2 | **Offset of the data area.** Open seeks here directly. |
+| 22 | word | 24 + len1 + len2 | **Offset of the data area.** |
+
+Open checks the magic and the version, then seeks to offset 22 and reads the
+data offset from there. It ignores the segment count and the segment table. So
+the header is always 24 bytes. A writer that has no code to embed must still
+write two segment entries (Excel's own layout, with lengths of 0 and offsets of
+24), so that the data offset lands at offset 22.
 
 ### 3.1 Embedded p-code segments
 
@@ -118,7 +159,7 @@ They exist for **external references to closed documents**. When Excel needs a
 value from a file it has not opened, the link reader looks at header word 4:
 
 * `0xAB27` (same build) → use the application's own copy of segment `0x6F`.
-* `0x13E8`, or any `0xABxx` → load segment 1 *from the file*, patch its single
+* `0x13E8`, or any other `0xABxx` → load segment 1 *from the file*, patch its single
   import to point back at the host (segment `0x72`, procedure `0x0A`), and call
   its procedure 0 with message 25 to fetch the value.
 
@@ -158,7 +199,7 @@ At `header.dataOffset`:
 
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
-| 0 | word | **Number of functions known to the writing build**: 208 (`0x00D0`) in all samples, which is the length of the application's function table (208 ten-byte entries) and of its name list `STR#` 257. Open refuses the file if this is larger than its own count, since formulas could then use function numbers it does not have. |
+| 0 | word | **Function count**: 208 (`0x00D0`) in all samples. Open refuses the file if this is larger than the length of its own function table (208 entries), since formulas could then use function numbers it does not have. Save writes the length of its function table if state word `0x01C` (§5) is set, and otherwise a base count fixed at start-up (also 208 in 1.03). The formula compiler sets `0x01C` when a formula uses a function number at or above the base count, so a build with newer functions marks only the sheets that use them. |
 | 2 | 630 bytes | Sheet state block (§5) |
 | 632 | byte | **Document kind**: `0x10` worksheet, `0x40` macro sheet. (`0x20` is the in-memory kind for charts, which never reach this writer.) |
 | 633 | 8 longs | Section table: stream positions (§1.2) of sections 0…7. Written last, by seeking back. Open *skips* this table and reads sequentially; it is redundant but reliable. |
@@ -187,7 +228,7 @@ the start of the block.
 | 0x016 | word | 255 | Index of the last column whose width is not zero. Starts at 255; the column-width routine lowers it when the last such column is set to width 0 and raises it when a higher column is given a width. (A column width of 0 is how a column is hidden.) |
 | 0x018 | word | 0 / 1 | Recalculation state: 0 clean, 1 needs recalculation, 2 a distinct pending state the code never downgrades to 1 |
 | 0x01A | word | 0 | Pending-work flag: when set, the next pass re-applies an operation to the whole sheet (rows 0–16383, columns 0–255) and clears it |
-| 0x01C | word | 0 | Flag that selects which constant is written as the capacity word (§4) |
+| 0x01C | word | 0 | Set to 1 by the formula compiler when a formula uses a function at or above the base function count. It selects which count Save writes at the start of the data area (§4). Cleared for a new sheet. |
 | 0x01E | word | 0 / 1 | **Document protected.** Selects the "Protect Document…" / "Unprotect Document…" menu text and is checked by ~50 editing routines. 1 only in `DB.FORM`. |
 | 0x020 | word | 0 / 1 | **Non-empty flag**: 0 for a sheet with no cell table, else 1 |
 | 0x022 | word | | Number of defined names that have a definition (0 for a new sheet, 6 in `REPLACE`) |
@@ -217,11 +258,11 @@ the start of the block.
 | 0x26A | word | 0 | Cached: number of print-title rows |
 | 0x26C | word | 0 | Cached print-titles value |
 | 0x26E | 6 bytes | 0 | Cached print-titles range (first row word, last row word, first column byte, last column byte) |
+| 0x274 | word | | **Last used column** (zero-based) |
 
 Offsets 0x262–0x273 are all derived from the `Print_Area` and `Print_Titles`
 names by one routine, which is re-run whenever a name or a column width
 changes; a writer can leave them zero.
-| 0x274 | word | | **Last used column** (zero-based) |
 
 The cached font values at 0x248–0x254 are recomputed from the font number and
 size by a single routine (`GetFontInfo` / `CharWidth`); a writer can copy them
@@ -353,7 +394,10 @@ Entry:
 | Size | Meaning |
 |-----:|---------|
 | 6 bytes | First 6 bytes of the in-memory entry **(unknown; zero in the sample)** |
-| Pascal string | Document name. A zero-length string means "this document". `DB.FORM` has one entry whose name is the single character `0x00` — apparently the "active sheet" target of `!NAME` references on a macro sheet **(inferred)**. |
+| Pascal string | Document name. Save writes a zero-length name for an entry that refers to this document itself. `DB.FORM` has one entry whose name is the single character `0x00`. Its macros use it as `!DATABASE` and `!FORM`, meaning the names on whichever worksheet is active **(inferred)**. |
+
+An external reference names its document by the entry's 1-based position in
+this table (§9.2, token `1A`).
 
 **Row index** — immediately after, `nRows` words, one per row. Zero in every
 sample.
@@ -444,8 +488,8 @@ Pascal string (up to 255 characters).
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
 | 0  | 8 bytes | Current value (below) |
-| 8  | 2 bytes | **(unknown)**, zero in samples |
-| 10 | byte | Recalculation scratch — varies, ignore |
+| 8  | 2 bytes | Left over from memory: values such as `FF FF` and `77 F2` occur in the samples. Ignore; write zero. |
+| 10 | byte | Recalculation scratch; varies. Ignore; write zero. |
 | 11 | byte | Column |
 | 12 | word | Row in bits 13–0. Bit 14 mirrors "alignment is Fill" for the cell (set from bit 2 of the alignment code whenever alignment is applied). Bit 15 is a transient "needs fix-up" mark set while importing and cleared by a later pass. Both are zero in the samples. |
 | 14 | byte | `cce` = length of the parsed expression |
@@ -462,7 +506,7 @@ Pascal string (up to 255 characters).
 |-------:|---------|--------------------|
 | 0 | String | Bytes 4–7 are a stale pointer. The string follows the expression as a Pascal string. |
 | 1 | Boolean | Byte 4: 0 = FALSE, 1 = TRUE |
-| 2 | Error | Byte 4 = error code. `0x0F` observed; consistent with the later BIFF codes (0 #NULL!, 7 #DIV/0!, 15 #VALUE!, 23 #REF!, 29 #NAME?, 36 #NUM!, 42 #N/A) **(inferred)** |
+| 2 | Error | Byte 4 = error code. The samples have `0x0F`, `0x1D` and `0x2A` on cells whose formulas produce #VALUE!, #NAME? and #N/A. That matches the later BIFF codes: 0 #NULL!, 7 #DIV/0!, 15 #VALUE!, 23 #REF!, 29 #NAME?, 36 #NUM!, 42 #N/A **(inferred for the codes not observed)** |
 
 ### 8.5 Trailing fix-ups
 
@@ -471,7 +515,7 @@ In memory, some tokens hold pointers. Save writes the expression unchanged
 
 | Token | Appended | Meaning |
 |-------|----------|---------|
-| `0x23` name | word | 1-based index of the name in section 4 |
+| `0x23` name | word | 1-based index of the name in section 4. Inside an external reference (between `1A` and `1B`) it is instead the 1-based index in that document's list in section 3. |
 | `0x1A` external sheet | word | 1-based index of the external document in §6.2. An entry named `\0` stands for the active sheet, written `!A1` **(inferred, §6.2)** |
 | `0x20` array constant | array block (below) | **(not observed in samples)** |
 | `0x26` memory area | word `n`, then `n` × 6-byte areas | The cached area list the token points at **(not observed in samples)** |
@@ -513,15 +557,25 @@ Reverse-Polish token stream. This is the direct ancestor of the BIFF2 `ptg`
 encoding: token numbers and operand sizes coincide wherever they could be
 checked.
 
-A token byte has a base value in bits 5–0 and a class in bits 6–5. The
-application normalises with: *if bit 6 is set, set bit 5; keep the low 6 bits*.
-So `0x44` and `0x24` are the same token (reference), differing only in class
-(value vs. reference).
+Tokens `0x01`–`0x1F` are plain bytes. Tokens from `0x20` up carry a **class** in
+bits 6–5:
 
-### 9.1 Tokens with no operands (`0x01`–`0x16`)
+| Bits 6–5 | Class | Example |
+|---------:|-------|---------|
+| `01` | Reference: the operand is used as a reference | `0x24` |
+| `10` | Value: the operand's value is used | `0x44` |
+| `11` | Array: the operand is used as an array | `0x64` |
+
+The application normalises a token byte with: *if bit 6 is set, set bit 5;
+keep the low 6 bits*. So `0x24`, `0x44` and `0x64` are all the cell-reference
+token `0x24`, and this spec names tokens by that normalised value. §9.4 says
+which class the compiler chooses.
+
+### 9.1 Tokens with no operands (`0x03`–`0x16`)
 
 Observed in samples: `03 04 06 08 09 0B 0C 0D 0E 11 13 16`. Meanings follow
-BIFF **(inferred; consistent with every sample formula)**:
+BIFF **(inferred; consistent with every sample formula)**. `01` and `02` are
+described in §8.6.
 
 | Token | Meaning | Token | Meaning |
 |------:|---------|------:|---------|
@@ -544,7 +598,7 @@ were verified by walking every formula in the samples.
 | Token | Operand bytes | Meaning |
 |------:|--------------:|---------|
 | 17 | 1 + n | String constant: length byte, characters |
-| 19 | 2 (+ n + 1) | Attribute: flags byte, data byte. If flag `0x04` (CHOOSE) is set, `data + 1` further bytes follow. Flag `0x01` = volatile (§9.4; data byte is junk), `0x02` = IF jump, `0x08` = skip. |
+| 19 | 2 (+ n + 1) | Attribute: flags byte, data byte; see the table below. If flag `0x04` is set, `data + 1` further bytes follow. |
 | 1A | 7 | External sheet reference start. Bytes 1–4 are left over from memory; bytes 5–6 are `00 00`; byte 7 is the 1-based external-document index. Cell formulas also carry the index in the fix-ups (§8.5). |
 | 1B | 3 | External sheet reference end. The three bytes are left over from memory (`78 24 06` in the samples). |
 | 1C | 1 | Error constant |
@@ -571,6 +625,20 @@ were verified by walking every formula in the samples.
 | 33, 34, 35 | 4 | Marked copies of `26`, `27`, `28` |
 | 36 | 1 | Marked copy of `29` |
 | 37 | 3 | Second marked copy of `24` |
+
+**Attributes** (token `19`). The flags byte says which kind:
+
+| Flags | Name | Data byte and what follows |
+|------:|------|----------------------------|
+| `01` | Volatile | First token of a formula that calls a volatile function. Data byte is left over from memory. |
+| `02` | IF jump | Follows IF's condition. Data = bytes to skip when the condition is false (§9.4). |
+| `04` | CHOOSE jump table | Follows CHOOSE's index. Data = `n`, the number of choices; `n + 1` offset bytes follow (§9.4). |
+| `08` | Skip | Follows each IF branch and each CHOOSE choice. Data = bytes to skip, minus 1, to reach the end of the IF or CHOOSE token. |
+| `10` | SUM | Replaces the function token of `SUM` with one argument. Data byte is left over from memory. |
+
+Only `01`, `02` and `08` occur in the samples. `04` and `10` are from the
+compiler (§9.4). A reader that only wants the formula text can ignore every
+attribute except `10`, which stands for `SUM(…)`.
 
 Tokens `30`–`37` are working forms. While references are being adjusted, a
 routine adds 13 to tokens `23`–`29` that involve a relative reference (and 19
@@ -599,13 +667,14 @@ commands simply continue the same numbering past 127: 169 = ACTIVE.CELL,
 BIFF; from 56 on they do not (Excel 1.x inserts COLUMN.WIDTH and FORMULA at
 56–57).
 
-The application's function table (PCOD 0, 10-byte entries from offset
-`0x1512`, one per function number) gives each function's argument rules:
+The application's function table gives each function's argument rules. It is
+in `PCOD` 0, starting at offset `0x1512`, with one 10-byte entry per function
+number:
 
 | Byte | Meaning |
 |-----:|---------|
 | 0 | **(unknown)** |
-| 1 | Low nibble: flags. `0x01` = macro sheets only. `0x04` = has a dialog-box form; it is set on exactly the commands that open a dialog, including the four written with `?` in the samples **(inferred)**. `0x08` = volatile; it is set on INDEX, RAND, NOW, AREAS, ROWS and COLUMNS, and formulas that call these start with `19 01` (§9.4). `0x02` is **(unknown)**. High nibble **(unknown)**. |
+| 1 | Low nibble: flags. `0x01` = macro sheets only. `0x04` = has a dialog-box form: the compiler accepts `NAME?(…)` only for functions with this flag. `0x08` = volatile; it is set on INDEX, RAND, NOW, AREAS, ROWS and COLUMNS, and formulas that call these start with `19 01` (§9.4). `0x02` is **(unknown)**. High nibble **(unknown)**. |
 | 2 | Low nibble = minimum arguments; high nibble − 1 = maximum arguments |
 | 3 | Return type |
 | 4 | Type the first argument accepts |
@@ -617,82 +686,141 @@ reference, `0x10` error, `0x20` command, `0x40` array, `0x80` **(unknown)**.
 
 ### 9.4 How Excel compiles formula text
 
-Excel's formula parser was not disassembled in full. These rules come from the
-function table (§9.3) and from the samples. They were checked by decompiling
-every cell formula (344) and every non-empty name definition in the samples and
-compiling the text again: the tokens match byte for byte, apart from the bytes
-§9.2 describes as left over from memory. Rules that the samples do not exercise
-are marked.
+A writer that wants Excel's exact bytes must follow these rules. Some are read
+from Excel's formula compiler (`0f.00`) and are marked *(code)*. The rest come
+from the function table and the samples. They were checked by decompiling every
+cell formula and every non-empty name definition in the samples and compiling
+the text again: the tokens match byte for byte, apart from the bytes §9.2
+describes as left over from memory. Rules that neither the code read nor the
+samples cover are marked **(assumed)**.
 
-* **Token classes.** For a reference, area or name operand:
-  * Reference class (`0x2x`): an operand of a range (`:`) or union (`,`)
-    operator, the whole of a name definition, the macro in a user-function
-    call, or a function argument whose accepted type includes reference
-    (`0x08`).
-  * Value class (`0x4x`): anywhere else, including the whole of a cell
-    formula and operands of other operators.
+**Token classes.** For a reference, area or name operand:
 
-  For a function call:
-  * Reference class: in the same first three places, or as an argument of
-    `IF`.
-  * Array class (`0x6x`): as an argument that accepts arrays, when the
-    function returns an array.
-  * Reference class: as an argument that accepts references, when the function
-    can return a reference.
-  * Value class: everywhere else.
-* **Function tokens.** A function whose minimum and maximum argument counts are
-  equal uses `21 fn`; any other uses `22 argc fn`. `IF` is always `22 argc 01`.
-* **IF.** The condition, then `19 02 n`, then the true branch and `19 08 m`,
-  then (if present) the false branch and another `19 08 m`, then the `IF`
-  token. *n* is the number of bytes from after the `19 02 n` token to the start
-  of the false branch, or to the `IF` token when there is no false branch. Each
-  *m* is the number of bytes from after that `19 08 m` token to the end of the
-  `IF` token, minus 1. `=IF(A1,1,2)` is
-  `44 C0 00 00  19 02 06  1E 00 01  19 08 08  1E 00 02  19 08 02  42 03 01`.
-* **Numbers.** Whole numbers 0–65535 are `1E` words; other numbers are `1F`
-  doubles. The samples contain no constants above 65535, so the upper limit
-  comes from the word's size **(inferred)**. A minus sign directly on a
-  number constant is folded into it: `-1` is `1F BF F0 00 00 00 00 00 00`, not `1E 00 01 13`. A minus sign on
-  anything else is `13`.
-* **TRUE and FALSE** without parentheses are `1D` constants.
-* **Volatile functions.** A formula that calls a function with table flag
-  `0x08` (INDEX, RAND, NOW, AREAS, ROWS, COLUMNS) anywhere starts with
-  `19 01 xx`. The data byte varies and nothing reads it. Formulas that call
-  none of these never have the attribute.
-* **Ranges of function results.** A range whose operands include a function
-  call is preceded by `29 n`, where *n* is the length of the subexpression
-  that follows, up to and including the `11`. For example,
-  `INDEX(A1:C3,1,1):C3` is `29 15` followed by
-  `25… 1E… 1E… 22 03 1D 24… 11` (21 bytes). The samples have two such
-  formulas, both ranges. Treating unions the same way is **(assumed)**.
-* **Dialog-box forms.** A command with table flag `0x04` can be written with a
-  question mark, as in `RUN?()`. It is always encoded as `22`, with bit 7 set
-  in the argument count: `RUN?()` is `42 80 91`.
-* **External references.** `1A`, the operand, then `1B`; see §9.2 for the
-  operand bytes. `Budget!A1` names an entry in §6.2. `!A1` names the entry
-  called `00`, which is the active sheet on a macro sheet **(inferred, §6.2)**.
-* **Names.** `23` and seven bytes (§9.2). A call to a user-defined function is
-  the macro's name token (reference class), then the arguments, then
-  `22 (argc + 1) FF`.
-* **Deleted references.** A name whose definition is `#REF!` stores `2A`, a
-  deleted cell reference, not the error constant `1C 17`. No cell formula in
-  the samples contains `#REF!`. Encoding it there as the error constant is
-  **(assumed)**.
+* Reference class (`0x2x`) when it is:
+  * an operand of a range (`:`) or union (`,`) operator;
+  * the whole of a name definition;
+  * the macro in a call to a user-defined function;
+  * a function argument whose accepted type includes reference (`0x08`).
+* Value class (`0x4x`) anywhere else, including the whole of a cell formula
+  and the operands of other operators.
+
+For a function call:
+
+* Reference class when it is in one of the first three places above, or is an
+  argument of `IF` or `CHOOSE`. The `CHOOSE` case is **(assumed)**, by analogy
+  with `IF`.
+* Array class (`0x6x`) when it is an argument that accepts arrays and the
+  function returns an array.
+* Reference class when it is an argument that accepts references and the
+  function can return a reference.
+* Value class everywhere else.
+
+**Function tokens** *(code)*. `21 fn` when the function's minimum and maximum
+argument counts are equal and it is not written in its dialog-box form;
+otherwise `22 argc fn`.
+
+**Dialog-box forms** *(code)*. A `?` directly after a function name, as in
+`RUN?()`, sets bit 7 of the argument count. That forces the `22` form:
+`RUN?()` is `42 80 91`. It is a syntax error unless the function has table
+flag `0x04`.
+
+**SUM with one argument** *(code)*. The argument, then `19 10 xx` in place of
+the function token. `=SUM(A1:A3)` is `25 C0 00 C0 02 00 00  19 10 00`.
+SUM with any other number of arguments is an ordinary `22 argc 04`.
+
+**IF** *(code and samples)*. In order:
+
+1. the condition, then `19 02 n`;
+2. the true branch, then `19 08 m`;
+3. if there is one, the false branch, then `19 08 m`;
+4. the `IF` token, `22 argc 01`.
+
+*n* is the number of bytes from just after the `19 02 n` to the start of the
+false branch, or to the `IF` token when there is no false branch. Each *m* is
+the number of bytes from just after that `19 08 m` to the end of the `IF`
+token, minus 1. The last *m* is therefore always 2. `=IF(A1,1,2)` is:
+
+```
+44 C0 00 00   19 02 06   1E 00 01   19 08 08   1E 00 02   19 08 02   42 03 01
+condition     jump       true       skip       false      skip       IF
+```
+
+**CHOOSE** *(code)*. In order:
+
+1. the index, then `19 04 n` and a table of `n + 1` bytes, where *n* is the
+   number of choices;
+2. each choice, then `19 08 m` with *m* as for `IF`;
+3. the `CHOOSE` token, `22 argc B4`.
+
+Table entry *k* is the offset of the start of choice *k* + 1, counted from the
+first byte of the table. The last entry is the offset of the `CHOOSE` token.
+So the first entry is always `n + 1`. `=CHOOSE(A1,1,2)` is:
+
+```
+44 C0 00 00   19 04 02   03 09 0F   1E 00 01   19 08 08   1E 00 02   19 08 02   42 03 B4
+index         jump       table      choice 1   skip       choice 2   skip       CHOOSE
+```
+
+The compiler also refuses a CHOOSE whose code would be longer than 255 bytes.
+
+**Numbers.** Whole numbers 0–65535 are `1E` words; other numbers are `1F`
+doubles. The samples contain no constants above 65535, so the upper limit
+comes from the word's size **(inferred)**. A minus sign directly on a number
+constant is folded into it: `-1` is `1F BF F0 00 00 00 00 00 00`, not
+`1E 00 01 13`. A minus sign on anything else is `13`.
+
+**TRUE and FALSE** without parentheses are `1D` constants.
+
+**Volatile functions.** A formula that calls a function with table flag `0x08`
+(INDEX, RAND, NOW, AREAS, ROWS, COLUMNS) anywhere starts with `19 01 xx`.
+Formulas that call none of these never have the attribute.
+
+**Ranges of function results.** A range whose operands include a function call
+is preceded by `29 n`, where *n* is the length of the subexpression that
+follows, up to and including the `11`. For example, `INDEX(A1:C3,1,1):C3` is
+`29 15` followed by `25… 1E… 1E… 22 03 1D 24… 11` (21 bytes). The samples have
+two such formulas, both ranges. Treating unions the same way is **(assumed)**.
+
+**External references.**
+
+* `1A`, then the operand, then `1B` (operand bytes in §9.2).
+* `Budget!A1` names an entry in §6.2. `!A1` names the entry called `00`, which
+  stands for the active sheet **(inferred, §6.2)**.
+* A name after the `!` (`!DATABASE`) is looked up in that document's list in
+  section 3, not in this sheet's names (§10).
+
+**Names.** `23` and seven bytes (§9.2). A call to a user-defined function is:
+
+1. the macro's name token, in reference class;
+2. the arguments;
+3. `22 (argc + 1) FF`.
+
+**Deleted references.** A name whose definition is `#REF!` stores `2A`, a
+deleted cell reference, not the error constant `1C 17`. No cell formula in the
+samples contains `#REF!`. Encoding it there as the error constant is
+**(assumed)**.
 
 ---
 
 ## 10. Section 3 — external names
 
-Names in other documents that this sheet refers to. For each external document
-in §6.2, in order, for each such name:
+The names this sheet uses from each external document. There is one list per
+entry of the external-document table (§6.2), in the same order. Each list holds:
 
 | Size | Meaning |
 |-----:|---------|
-| Pascal string | Name |
+| Pascal strings | The names used from that document, one per name (never empty) |
+| byte | `0x00`, ending the list |
 
-The list ends with a single `0x00` byte. If the sheet has no external-document
-table the section is **empty** (no terminator). `DB.FORM`:
-`08 "DATABASE" 04 "FORM" 00`.
+Save lists only the names that some formula or definition actually uses. It
+numbers them from 1 within the list, and that number is the index a name
+token inside an external reference holds (§8.5, §11). The entry for this
+document itself (zero-length name, §6.2) always gets an empty list: a single
+`0x00`. With no external-document table the section is empty.
+
+`DB.FORM` has one external document, the active sheet, so section 3 is one
+list: `08 "DATABASE" 04 "FORM" 00`. Its formulas refer to these as
+`!DATABASE` (index 1) and `!FORM` (index 2).
 
 ---
 
@@ -708,7 +836,7 @@ tokens.
 | byte | `cce` = definition length |
 | byte | Flags. `0x04` = defined on a macro sheet as a function/command name; `0x20` = the definition is array-valued, so formulas using the name get cell word 2 bit 13 (§7); `0x40` = command macro, two extra bytes follow. Open keeps only bits `0x64`. |
 | 2 bytes | Only if flag `0x40`: shortcut key character, then one more byte **(unknown)** |
-| cce bytes | Definition — a parsed expression (§9). Unlike cell formulas, fix-ups are applied **in place**: in a `0x23` token the first two operand bytes hold the name index; in a `0x1A` token the last three operand bytes are `00 00 <document index>`. |
+| cce bytes | Definition — a parsed expression (§9). Unlike cell formulas, fix-ups are applied **in place**: in a `0x23` token the first two operand bytes hold the name index; in a `0x1A` token the last three operand bytes are `00 00 <document index>`. A name token inside an external reference holds the index in that document's list in section 3 (§10). |
 | byte | Copy of `cce` |
 | cch bytes | Name characters |
 
@@ -833,32 +961,110 @@ The file ends after this section.
 
 ---
 
-## 14. Reading recipe
+## 14. Recipes
 
-1. Check words at 0 and 2 are `0x5327` and `17`.
-2. Seek to the word at offset 22. Skip the capacity word.
-3. Read the 630-byte state block; compute `nRows`, `nCols` (§5.1).
-4. Read the flags byte and the 8-entry section table; convert each entry with
-   `hi × 512 + lo`.
-5. Section 2: read `nRows × nCols` six-byte entries.
-6. For each entry of type 2, 3, 5 or 6, read its record at
-   `section5 + (word0 << 4) + (word1 >> 12)`.
-7. Section 4: read names until the `0x00` terminator.
-8. For formulas, walk the token stream to find how many fix-up words follow.
+### 14.1 Reading
+
+1. Check that the words at offsets 0 and 2 are `0x5327` and 17.
+2. Seek to the offset in the word at 22. Read the function count (§4). Excel
+   refuses a count above 208.
+3. Read the 630-byte state block. Compute `nRows` and `nCols` (§5.1).
+4. Read the kind byte and the section table. Convert each entry with
+   `hi × 512 + lo` (§1.2).
+5. Skip the extra header (a word count, then that many bytes).
+6. Section 0: the number-format count and any user formats (§6.1).
+7. Section 1: the external-document table, then `nRows` row-index words
+   (§6.2).
+8. Section 2: `nRows × nCols` six-byte cell entries (§7). For each entry of
+   type 2, 3, 5 or 6, read its record at
+   `section5 + (word0 << 4) + (word1 >> 12)` (§8).
+9. Section 3: if the section is not empty, read one `0x00`-terminated list of
+   names per external document (§10).
+10. Section 4: names until the `0x00` terminator (§11).
+11. Sections 6 and 7: windows, page breaks and print settings (§12, §13).
+
+For formulas, walk the token stream (§9.2) to find how many fix-ups follow
+the expression (§8.5).
+
+### 14.2 Writing
+
+A writer can copy the samples' choices:
+
+1. **Header.** Write the 24-byte header with two code segments and signature
+   `0xAB27`. The data offset at word 22 must be correct, since Open reads only
+   that. The segments only matter when another document links to this one
+   while it is closed (§3.1):
+   * Excel 1.03 recognises its own signature and uses its own copy of the
+     code, so empty segments (length 0, offset 24) work with it.
+   * A build with a different signature would load the file's copy instead.
+     To support such builds, copy both segments from a sample.
+2. **Data area.**
+   * The function count: 208.
+   * The 630-byte state block. Copy a sample's block and set the
+     last-used row and column, the non-empty flag at `0x020` and anything
+     else you need. Leave the cached print values zero (§5).
+   * The kind byte: `0x10` or `0x40`.
+   * A placeholder for the section table.
+   * The extra header: `00 01 00`, as Excel 1.03 writes, or `00 00`.
+3. **Sections 0–1.** Section 0 is `13 00` (19 built-in formats, no user
+   formats). Section 1 is `00 00` for no external documents, then the
+   row-index words, all zero.
+4. **Section 2.** Reserve `nRows × nCols × 6` bytes and fill them in as you
+   write the cell data. Every cell needs an entry; an empty cell is type 0.
+5. **Sections 3 and 4.** Section 3 is empty unless there are external
+   documents. Section 4 is the names in case-insensitive alphabetical order,
+   then `00`. Name tokens refer to names by position in this order, so sort
+   the names before compiling formulas that use them.
+6. **Section 5.** The cell data, in cell-table order. Set each data cell's
+   offset fields as you go: the offset from the start of section 5, with
+   bits 19–4 in word 0 and bits 3–0 in bits 15–12 of word 1. Cell data is
+   therefore limited to 1 MB.
+7. **Sections 6 and 7.** Section 6 is the window records (§12), then `00`;
+   every sample has exactly one. Section 7 is `00 00 00` for no page breaks
+   and no print record.
+8. Seek back and write the section table as stream positions (§1.2).
+
+This recipe reproduces the samples byte for byte. It has not been tested by
+opening newly written files in Excel 1.03 itself. A formula's stored value is
+what Excel shows until it recalculates. Setting state word `0x018` to 1 marks
+the sheet as needing recalculation, but whether Open acts on that is
+**(unknown)**.
 
 ---
 
 ## 15. Open questions
 
-* A few chart fields (§16): four option flags in the chart record, the role
-  of the two built-in text objects, the 12-byte record trailer words, and the
-  per-series word list.
+None of these affects reading the samples or writing valid files.
+
+**Worksheets and macro sheets**
+
+* Six bytes at the start of each external-document entry (§6.2).
+* The second shortcut byte of a command-macro name (§11).
+* Calculation mode values other than 1 (§5, 0x002): mapped from dialog item
+  order only.
+* Function table: byte 0, bytes 6–9, flag `0x02` and the high nibble of
+  byte 1, and type bit `0x80` (§9.3).
+* Whether a union of function results is wrapped in `29`, like a range (§9.4).
+
+**Described from code alone**
+
+No sample contains these, so they could not be checked against data:
+
+* array formulas and tables (§8.6);
+* array constants and memory areas (§8.5);
+* user-defined number formats (§6.1);
+* page breaks and the print record (§13);
+* the `CHOOSE` and `SUM` attributes (§9.4);
+* all of §16.
+
+**Charts** (§16)
+
+* Four option flags in the chart record.
+* What the two built-in text objects display.
+* The 12-byte record trailer words.
+* The per-series word list.
 * Number-format tokens beyond those the built-ins and the format compiler use
   (§6.1).
-
-Everything that is described from code alone — array formulas, tables, array
-constants, user formats, page breaks, the print record and all of §16 — has
-no sample on the disk to confirm it against.
 
 ---
 
@@ -885,7 +1091,7 @@ this section comes from those two routines and from the chart dialogs
             Series word list
             Data-point formats         12 bytes each
           Window                       12 bytes
-          Page setup                   2 or 666 bytes
+          Page setup                   666 bytes
           Series lists                 <- header.seriesOffset
 ```
 
@@ -1074,8 +1280,8 @@ After the last chart:
 | 256 bytes | Header: a Pascal string in a fixed 256-byte field |
 | 256 bytes | Footer, likewise |
 
-Without a page setup the word 0 is followed by 664 zero bytes instead, so the
-section is always 666 bytes.
+Without a page setup the word is 0 and 664 zero bytes follow, so the page
+setup is always 666 bytes.
 
 ### 16.7 Text objects
 

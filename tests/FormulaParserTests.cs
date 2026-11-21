@@ -83,7 +83,7 @@ public class FormulaParserTests
     [InlineData("=A1*2", "4440000005" + "1E0002" + "05")]
     [InlineData("A1*2", "4440000005" + "1E0002" + "05")]
     [InlineData("=$A$1+B2", "44000000" + "44C00101" + "03")]
-    [InlineData("=SUM($A$1:$A$5)", "25000000040000" + "420104")]
+    [InlineData("=SUM($A$1:$A$5)", "25000000040000" + "191000")]
     [InlineData("=-1", "1FBFF0000000000000")]
     [InlineData("=-A1", "44C00000" + "13")]
     [InlineData("=A1%", "44C00000" + "14")]
@@ -109,6 +109,7 @@ public class FormulaParserTests
     [InlineData("=IF(A1,1,2)")]
     [InlineData("=IF(A1,1)")]
     [InlineData("=IF(A1>0,SUM(A1:A3),-1)")]
+    [InlineData("=CHOOSE(2,\"a\",B1,C1+1)")]
     [InlineData("=IF(A1,IF(B1,1,2),3)")]
     [InlineData("=MID(\"abc\",2,1)")]
     [InlineData("=INDEX(A1:C3,1,1):C3")]
@@ -126,6 +127,37 @@ public class FormulaParserTests
         // =IF(A1,1,2): condition, 19 02 n, true branch, 19 08 m, false branch, 19 08 m, IF.
         var hex = Convert.ToHexString(ExcelFormula.Parse("=IF(A1,1,2)").Expression);
         Assert.Equal("44C00000" + "190206" + "1E0001" + "190808" + "1E0002" + "190802" + "420301", hex);
+    }
+
+    [Fact]
+    public void ChooseHasAJumpTableAndSkips()
+    {
+        // Index, 19 04 n + table of n + 1 offsets from the table start (choice 1, choice 2, CHOOSE token),
+        // each choice followed by a skip to the end of the CHOOSE token minus 1.
+        var hex = Convert.ToHexString(ExcelFormula.Parse("=CHOOSE(A1,1,2)").Expression);
+        Assert.Equal("44C00000" + "190402" + "03090F" + "1E0001" + "190808" + "1E0002" + "190802" + "4203B4", hex);
+        Assert.Equal("=CHOOSE(A1,1,2)", ExcelFormula.Parse("=CHOOSE(A1,1,2)").ToText());
+    }
+
+    [Fact]
+    public void SumWithOneArgumentIsAnAttribute()
+    {
+        Assert.Equal("25C000C0020000" + "191000", Convert.ToHexString(ExcelFormula.Parse("=SUM(A1:A3)").Expression));
+        Assert.Equal("=SUM(A1:A3)", ExcelFormula.Parse("=SUM(A1:A3)").ToText());
+        Assert.Equal("1E0001" + "1E0002" + "420204", Convert.ToHexString(ExcelFormula.Parse("=SUM(1,2)").Expression));
+    }
+
+    [Fact]
+    public void NamesInsideExternalReferencesUseThatDocumentsNames()
+    {
+        // DB.FORM's macros use the active sheet's Database and Form names (section 3), not its own names.
+        var document = Load("DB.FORM.xlm");
+        Assert.Equal("=SELECT(INDEX(!FORM,2,2):INDEX(!FORM,2,COLUMNS(!DATABASE)+1))", document.Cells["C146"].Formula!.ToText(document));
+
+        var parsed = ExcelFormula.Parse("=ROWS(!database)", document);
+        Assert.Equal([1, 1], parsed.GetFixupWords());
+        Assert.Equal("=ROWS(!DATABASE)", parsed.ToText(document));
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=ROWS(!ADD)", document));
     }
 
     [Fact]

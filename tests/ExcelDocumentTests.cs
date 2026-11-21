@@ -103,7 +103,7 @@ public class ExcelDocumentTests
 
         Assert.True(document.HasExternalDocumentTable);
         Assert.Single(document.ExternalDocuments);
-        Assert.Equal(["DATABASE", "FORM"], document.ExternalNames);
+        Assert.Equal(["DATABASE", "FORM"], document.ExternalDocuments[0].Names);
         Assert.True(document.State.IsProtected);
     }
 

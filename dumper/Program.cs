@@ -487,14 +487,17 @@ sealed class DumpCommand : Command<FileSettings>
 
         if (document.HasExternalDocumentTable)
         {
-            var external = new Table().Title("[bold]External documents[/]").AddColumn("#").AddColumn("Name");
+            var external = new Table().Title("[bold]External documents[/]").AddColumn("#").AddColumn("Name").AddColumn("Names used");
             for (int i = 0; i < document.ExternalDocuments.Count; i++)
             {
-                external.AddRow(i.ToString(CultureInfo.InvariantCulture), Program.Escape(document.ExternalDocuments[i].Name.Replace("\0", "(active sheet)")));
+                var entry = document.ExternalDocuments[i];
+                external.AddRow(
+                    (i + 1).ToString(CultureInfo.InvariantCulture),
+                    Program.Escape(entry.Name.Replace("\0", "(active sheet)")),
+                    Program.Escape(string.Join(", ", entry.Names)));
             }
 
             AnsiConsole.Write(external);
-            AnsiConsole.MarkupLine($"External names: {Program.Escape(string.Join(", ", document.ExternalNames))}");
         }
 
         WriteNames(document);
@@ -765,8 +768,7 @@ sealed class JsonCommand : Command<JsonSettings>
                 columnWidths = Enumerable.Range(0, ExcelSheetState.ColumnCount).Where(i => state.GetColumnWidth(i) != 75)
                     .ToDictionary(i => FormulaDecompiler.ColumnName(i), i => (int)state.GetColumnWidth(i)),
             },
-            externalDocuments = document.ExternalDocuments.Select(d => d.Name),
-            externalNames = document.ExternalNames,
+            externalDocuments = document.ExternalDocuments.Select(d => new { name = d.Name, names = d.Names }),
             names = document.Names.Select(n => new
             {
                 name = n.Name,

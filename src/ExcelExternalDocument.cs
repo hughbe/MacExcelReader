@@ -25,6 +25,12 @@ public sealed class ExcelExternalDocument
     /// </summary>
     public byte[] Reserved { get; internal set; }
 
+    /// <summary>
+    /// Gets the names this sheet uses from the document (spec §10). A name token inside an external
+    /// reference to this document holds the 1-based index of its entry here.
+    /// </summary>
+    public List<string> Names { get; } = [];
+
     /// <inheritdoc/>
     public override string ToString() => Name;
 }

@@ -35,7 +35,8 @@ public sealed class ExcelFormulaSyntaxException : FormatException
 /// references to the active sheet (<c>!A1</c>) and the dialog-box forms of commands (<c>RUN?()</c>).
 /// </para>
 /// <para>
-/// Like Excel, the parser folds a minus sign into a number constant, starts formulas that call volatile
+/// Like Excel, the parser compiles IF and CHOOSE with jump attributes, SUM with one argument to a SUM
+/// attribute, folds a minus sign into a number constant, starts formulas that call volatile
 /// functions (RAND, NOW, INDEX, …) with a volatile attribute, and wraps ranges built from function results
 /// (<c>INDEX(A1:C3,1,1):C3</c>) in a memory-function token.
 /// </para>
@@ -624,7 +625,10 @@ public static class ExcelFormulaParser
                 return new RefNode(token.Position, rowWord, column, external);
             }
 
-            return new NameNode(token.Position, ResolveName(token.Text, token.Position), external);
+            return new NameNode(
+                token.Position,
+                external is { } document ? ResolveExternalName(document, token.Text, token.Position) : ResolveName(token.Text, token.Position),
+                external);
         }
 
         private Node ParseCall(Token name)
@@ -727,6 +731,23 @@ public static class ExcelFormulaParser
 
             throw new ExcelFormulaSyntaxException(
                 _document is null ? $"'{name}' is not a cell reference, and names cannot be resolved without a document" : $"Unknown name '{name}'",
+                position);
+        }
+
+        // Names inside an external reference index the document's own list of names used (spec §10).
+        private int ResolveExternalName(int external, string name, int position)
+        {
+            var entry = _document!.ExternalDocuments[external - 1];
+            for (int i = 0; i < entry.Names.Count; i++)
+            {
+                if (string.Equals(entry.Names[i], name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i + 1;
+                }
+            }
+
+            throw new ExcelFormulaSyntaxException(
+                $"Unknown name '{name}' in external document '{entry.Name.Replace("\0", "(active sheet)")}'; add it to that entry's Names first",
                 position);
         }
 
@@ -983,6 +1004,9 @@ public static class ExcelFormulaParser
                 case FunctionNode function when function.Number == 1:
                     EmitIf(function, context);
                     break;
+                case FunctionNode function when function.Number == 180 && !function.Dialog:
+                    EmitChoose(function, context);
+                    break;
                 case FunctionNode function:
                     EmitCall(function, context);
                     break;
@@ -1071,6 +1095,15 @@ public static class ExcelFormulaParser
                 Emit(function.Arguments[i], new Context(ContextKind.Argument, definition.GetArgumentType(i)));
             }
 
+            // Excel compiles SUM with exactly one argument to a SUM attribute instead of a function token.
+            if (function.Number == 4 && function.Arguments.Count == 1 && !function.Dialog)
+            {
+                Add(0x19);
+                Add(0x10);
+                Add(0);
+                return;
+            }
+
             int tokenClass = FunctionClass(context, definition.ReturnType);
             if (function.Dialog)
             {
@@ -1133,11 +1166,50 @@ public static class ExcelFormulaParser
             }
         }
 
+        // CHOOSE(index, choice1, …): the index, then 19 04 n and a table of n + 1 byte offsets, then each choice
+        // followed by a skip past the CHOOSE token, then the CHOOSE token. Offsets in the table are measured
+        // from its first byte: entry k is the start of choice k + 1, and the last entry is the CHOOSE token.
+        private void EmitChoose(FunctionNode function, Context context)
+        {
+            var definition = function.Function!;
+            var arguments = function.Arguments;
+            Emit(arguments[0], new Context(ContextKind.IfArgument, definition.GetArgumentType(0)));
+            Add(0x19);
+            Add(0x04);
+            Add((byte)(arguments.Count - 1));
+            int table = Expression.Count;
+            for (int i = 0; i < arguments.Count; i++)
+            {
+                Add(0);
+            }
+
+            var skips = new List<int>();
+            for (int i = 1; i < arguments.Count; i++)
+            {
+                SetOffset(table + i - 1, Expression.Count - table, function.Position);
+                Emit(arguments[i], new Context(ContextKind.IfArgument, definition.GetArgumentType(i)));
+                Add(0x19);
+                Add(0x08);
+                skips.Add(Expression.Count);
+                Add(0);
+            }
+
+            SetOffset(table + arguments.Count - 1, Expression.Count - table, function.Position);
+            Add(WithClass(0x22, FunctionClass(context, definition.ReturnType)));
+            Add((byte)arguments.Count);
+            Add(180);
+            int end = Expression.Count;
+            foreach (int skip in skips)
+            {
+                SetOffset(skip, end - (skip + 1) - 1, function.Position);
+            }
+        }
+
         private void SetOffset(int index, int value, int position)
         {
             if (value is < 0 or > 255)
             {
-                throw new ExcelFormulaSyntaxException("An IF branch is too long to encode (over 255 bytes)", position);
+                throw new ExcelFormulaSyntaxException("An IF or CHOOSE branch is too long to encode (over 255 bytes)", position);
             }
 
             Expression[index] = (byte)value;

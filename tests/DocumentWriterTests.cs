@@ -102,16 +102,32 @@ public class DocumentWriterTests
     }
 
     [Fact]
+    public void NewDocuments_HaveTheFixedHeaderExcelExpects()
+    {
+        // Excel's Open reads the data offset from header offset 22, whatever the segment count says.
+        var bytes = ExcelDocument.CreateWorksheet().ToArray();
+        Assert.Equal(2, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(12)));
+        Assert.Equal(24, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(22)));
+
+        var document = ExcelDocument.CreateWorksheet();
+        document.CodeSegments.Clear();
+        Assert.Throws<InvalidOperationException>(() => document.ToArray());
+    }
+
+    [Fact]
     public void ExternalDocuments_RoundTrip()
     {
         var document = ExcelDocument.CreateWorksheet();
-        document.ExternalDocuments.Add(new ExcelExternalDocument("Budget"));
-        document.ExternalNames.Add("Total");
+        document.ExternalDocuments.Add(new ExcelExternalDocument("Budget") { Names = { "Total", "Tax" } });
+        document.ExternalDocuments.Add(new ExcelExternalDocument("Sales") { Names = { "Q1" } });
+        document.ExternalDocuments.Add(new ExcelExternalDocument("Empty"));
 
         var reread = RoundTrip(document);
         Assert.True(reread.HasExternalDocumentTable);
-        Assert.Equal("Budget", Assert.Single(reread.ExternalDocuments).Name);
-        Assert.Equal(["Total"], reread.ExternalNames);
+        Assert.Equal(["Budget", "Sales", "Empty"], reread.ExternalDocuments.Select(d => d.Name));
+        Assert.Equal(["Total", "Tax"], reread.ExternalDocuments[0].Names);
+        Assert.Equal(["Q1"], reread.ExternalDocuments[1].Names);
+        Assert.Empty(reread.ExternalDocuments[2].Names);
     }
 
     [Fact]

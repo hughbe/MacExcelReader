@@ -165,7 +165,7 @@ Name definitions store their indices inside the tokens, so they have their own e
 var name = new ExcelDefinedName("Totals", ExcelFormulaParser.ParseNameDefinition("=$A$1:$A$5", document));
 ```
 
-The rules the parser follows (token classes, `IF` jumps, volatile and memory-function tokens) are in
+The rules the parser follows (token classes, `IF` and `CHOOSE` jumps, the `SUM` attribute, volatile and memory-function tokens) are in
 [spec §9.4](Spec.md#94-how-excel-compiles-formula-text). To see what it produces:
 
 ```sh
@@ -189,8 +189,8 @@ You can also build an expression yourself. The common tokens:
 | `0x23` + 7 bytes | 8 | Defined name; its 1-based index goes in the fix-ups |
 
 ```csharp
-// =SUM($A$1:$A$5)*2: area rows 0–4 of column 0, SUM with 1 argument, integer 2, multiply.
-var expression = new byte[] { 0x25, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x42, 1, 4, 0x1E, 0, 2, 0x05 };
+// =AVERAGE($A$1:$A$5)*2: area rows 0–4 of column 0, AVERAGE (5) with 1 argument, integer 2, multiply.
+var expression = new byte[] { 0x25, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x42, 1, 5, 0x1E, 0, 2, 0x05 };
 var formula = new ExcelFormula(expression);
 ```
 
@@ -211,8 +211,8 @@ foreach (var name in document.Names)
 ```
 
 Name definitions are parsed expressions too; name tokens inside them refer to other names by 1-based index
-into `document.Names`. `document.ExternalDocuments` and `document.ExternalNames` list the other documents
-the sheet links to and the names it uses from them.
+into `document.Names`. `document.ExternalDocuments` lists the other documents
+the sheet links to; each entry's `Names` are the names the sheet uses from that document.
 
 ## Sheet settings, protection and printing
 

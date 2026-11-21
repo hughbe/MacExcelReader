@@ -10,7 +10,7 @@ The file format was reverse-engineered from Excel 1.03 and is documented in [doc
 
 - **Exact round-trips.** Every sample document from the Excel 1.03 disk reads and writes back byte for byte. Fields the library does not model are preserved untouched.
 - **Cells.** Integers, numbers, text and formulas with their current values, plus number formats, alignment, bold and italic, borders, and protection flags.
-- **Formulas, both ways.** Decompile tokens to A1-style text (`=IF(NOT(FORMULA.FIND(B19,1,2,1)),RETURN())`) and compile text back to tokens with `ExcelFormula.Parse`. The parser reproduces Excel's own encoding byte for byte for every formula in the samples: token classes, `IF` jumps, volatile and memory-function tokens, macro commands, dialog-box forms (`RUN?()`), names, external references and calls to user-defined macros. Allocation-free token walking.
+- **Formulas, both ways.** Decompile tokens to A1-style text (`=IF(NOT(FORMULA.FIND(B19,1,2,1)),RETURN())`) and compile text back to tokens with `ExcelFormula.Parse`. The parser reproduces Excel's own encoding byte for byte for every formula in the samples: token classes, `IF` and `CHOOSE` jumps, the one-argument `SUM` attribute, volatile and memory-function tokens, macro commands, dialog-box forms (`RUN?()`), names, external references and calls to user-defined macros. Allocation-free token walking.
 - **Display formatting.** All 19 built-in number formats, with dates in the 1904 date system.
 - **Everything else in the file.** Calculation settings, column widths, fonts, protection and the password hash, defined names and command-macro shortcuts, external documents, windows and selections, page breaks and Page Setup.
 - **Writing.** Create new worksheets and macro sheets with Excel 1.03's defaults, or edit existing ones; only the cells you touch are re-encoded.
@@ -147,7 +147,7 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
 
 ## Limitations
 
-- New documents carry no embedded p-code segments. They are only used when a different build of Excel links to the document while it is closed.
+- New documents carry empty embedded p-code segments. Excel 1.03 never uses a file's own copy, but a different build of Excel linking to the document while it is closed would; copy the segments from an existing document if that matters.
 - The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`; Excel recalculates it when it opens the file.
 - The parser's rules were derived from Excel's function table and checked against every sample formula; Excel's own parser code was not disassembled in full, so formulas unlike any in the samples could encode differently.
 - Array formulas, tables, array constants, user number formats, page breaks, Page Setup and charts are implemented from the spec alone, because none of the sample files contain them.
