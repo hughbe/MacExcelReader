@@ -60,6 +60,45 @@ Options for `pack`:
   own.
 - `--keep-open`: leave every file open, to look at charts and sheets on screen.
 - `--no-probe`: open and re-save only.
+- `--recompile`: after probing, re-enter each formula from Excel's own text, so the re-saved file holds Excel's
+  compilation of it. `check` then shows every formula whose tokens differ from the library's. Formulas that
+  refer to other documents are skipped, because re-entering one makes Excel ask for the file. Recompile one
+  sheet of about 100 formulas per disk: the extra Driver rows can run Excel 1.03 out of memory.
+- `--each FORMULA`: a macro command to run on every file before it is saved. A file can also have its own
+  commands in `FILE.commands` next to it, one per line.
+- `--end FORMULA`: a macro command to run after Driver has saved itself, for example before quitting.
+
+If OPEN fails, for example because Excel is out of memory, Driver skips that file rather than run its commands on
+Driver itself.
+
+Options for `check`:
+
+- `--all`: also show the differences Excel is expected to make.
+- `--bytes`: also list raw byte differences the JSON leaves out: the state block, window state, name flags and
+  macro-kind bytes, and external-document entries.
+
+`check` always compares each formula's tokens, with the bytes left over from memory cleared.
+
+## Experiments
+
+To find out what a byte means, have Excel change it: build a small sheet, give it a `.commands` file and pack it.
+
+```bash
+printf '%s\n' "=1" > calc.txt
+dotnet run --project dumper -- sheet calc.txt out/calc
+printf '%s\n' '=CALCULATION(3)' > out/calc.commands
+dotnet run --project dumper -- excel-test pack Exp.dsk out/calc
+# run Driver in Excel, then
+dotnet run --project dumper -- excel-test check Exp.dsk --bytes
+```
+
+Things to know when writing commands:
+
+- The macro command FORMULA takes **R1C1** text: `=FORMULA("=SUM(R1C1:R2C2)")`. A1 text gives `#VALUE!`.
+- CALCULATION and A1.R1C1 are global, so they carry on into every later file on the disk.
+- In Excel 1.00 a window's title includes its volume (`Ws:F 01 saved`), which ACTIVATE needs.
+- Excel 1.00 writes a workspace (`Resume Excel`, next to the application) on every Quit, so leaving files open
+  with `--keep-open`, running `--end` commands and quitting shows what the workspace records.
 
 ## Formula lists
 
@@ -106,5 +145,9 @@ Things to know:
 | Nov 2026 | 1.5 | `formulas-1.5` sheets 1 and 7, including functions 256 and up, and `CLOCK.CH` | No unexpected differences |
 | Nov 2026 | 1.00 | `F 01`, `CLOCK.CH` | No unexpected differences. Excel 1.00 re-saves the version-3 chart as version 12 (spec §16.2). |
 | Nov 2026 | 1.00 | A workspace written by `ExcelWorkspace` | Reopened both windows and restored the calculation options (spec Appendix B) |
+| Nov 2026 | 1.03 | `F 01` with `--recompile` | Found four parser differences, now fixed: unions of plain references (`26` with cached areas), the class of memory tokens, `=+1` and `=#REF!` (spec §15.4) |
+| Nov 2026 | 1.03 | Experiments: CALCULATION, A1.R1C1, SET.PAGE.BREAK, TABLE, DEFINE.NAME, links, intersections | Calculation-mode values, reference style, page-break numbering, the macro-kind byte, state words 0x024 and 0x03E, intersection encoding (spec §6, §11, §14, §15). Tables do not fit the inferred layout (§12.6). |
+| Nov 2026 | 1.00 | FULL, PRINTER.SETUP, Set Preferred Format, then Quit | All three unknown workspace fields (spec Appendix B) |
+| Nov 2026 | 1.5 | FORMAT.NUMBER with `@` and colours, FREEZE.PANES, DISPLAY colour | Tokens `23`, `24`, window bytes 121, 127, 128 and the version-18 rule (spec §7, §13) |
 
 Bugs and quirks of Excel found this way are in [Excel bugs and quirks](ExcelBugs.md).

@@ -280,9 +280,9 @@ the start of the block.
 | Offset | Size | Samples | Meaning |
 |-------:|-----:|---------|---------|
 | 0x000 | word | 100 | Maximum iterations (Calculation dialog; 1…32767) |
-| 0x002 | word | 1 | Calculation mode. From the dialog's radio order: 1 = Automatic, 0 = Automatic except tables, −1 = Manual **(mapping inferred from dialog item order)** |
+| 0x002 | word | 1 | Calculation mode: 1 = automatic, −1 = automatic except tables, 0 = manual (confirmed: Excel 1.03 saves −1 after `CALCULATION(2)` and 0 after `CALCULATION(3)`). Like 0x006 it is a global setting: every sheet Excel saves gets the current one. |
 | 0x004 | word | 1 | Precision: 1 = full precision, 0 = precision as displayed (results are rounded through the cell format when 0) |
-| 0x006 | word | 1 | Reference-style flag, saved and restored around formula parsing; presumably 1 = A1, 0 = R1C1 **(inferred)** |
+| 0x006 | word | 1 | Reference style: 1 = A1, 0 = R1C1 (confirmed: 0 after `A1.R1C1(FALSE)`). It is saved and restored around formula parsing, and is global like 0x002. |
 | 0x008 | word | 0 | Unused — no code in the application reads or writes it |
 | 0x00A | double | 0.001 | Maximum change (iteration) |
 | 0x012 | word | 0 | Iteration enabled (0 / 1) |
@@ -293,12 +293,12 @@ the start of the block.
 | 0x01C | word | 0 | Set to 1 by the formula compiler when a formula uses a function at or above the base function count. It selects which count Save writes at the start of the data area (§5). Cleared for a new sheet. |
 | 0x01E | word | 0 / 1 | **Document protected.** Selects the "Protect Document…" / "Unprotect Document…" menu text and is checked by ~50 editing routines. 1 only in `DB.FORM`. |
 | 0x020 | word | 0 / 1 | Which form 0x014 and 0x274 are in: 1 = last indices, 0 = counts (§6.1) |
-| 0x022 | word | | Number of defined names that have a definition (0 for a new sheet, 6 in `REPLACE`) |
-| 0x024 | word | | Number of those whose definition passes a "simple reference" test (5 in `REPLACE`) |
+| 0x022 | word | | Number of defined names that have a definition (0 for a new sheet, 6 in `REPLACE`). Define Name counts it up; Open and Save carry it through unchanged, so a file written with 0 keeps 0 when Excel re-saves it. Every sample has the true count. |
+| 0x024 | word | | Number of names whose definition is a reference (flag `0x04`, §11; 5 in `REPLACE`). Excel recomputes it when it saves (confirmed: 0 in a library-written file became 5). |
 | 0x026 | long | | memory pointer — garbage |
 | 0x02A | long | | head of the in-memory name list — garbage |
 | 0x02E | 4 longs | | memory pointers / `FFFF` markers — garbage |
-| 0x03E | word | 0 / 1 | Index of an external-document entry that link refresh skips **(inferred)**; 1 only in `DB.FORM` |
+| 0x03E | word | 0 / 1 / 2 | 1-based position of the active-sheet external entry (the one named `\0`, §8), or 0 if there is none. Link refresh skips that entry. Excel recomputes it when it saves (confirmed in 1.00 and 1.03); it matches every sample. |
 | 0x040 | word | 1 | Window counter for the document — set to 1 for a new sheet and updated as windows are opened and closed |
 | 0x042 | 256 words | 75 | **Column widths**, columns 0…255. Default 75. Unit is presumably pixels **(inferred)**. |
 | 0x242 | word | 0 | **Protection password hash**; 0 = none. Unprotect hashes the typed password and refuses on mismatch. See §6.2. |
@@ -448,7 +448,7 @@ are the US defaults.
 | `21` | 2 bytes `n1 n2`, `n1` chars, `n2` chars | AM/PM designator, written as the two strings joined by `/` (`AM/PM`, `A/P`) |
 | `22` | | Currency symbol |
 | `23` | | Excel 1.5: `@`, the text placeholder **(inferred: the character comes from a locale table filled in at run time)** |
-| `24` | 1 byte `n` | Excel 1.5: a colour, written `[name]` with the name `n` from `STR#` 263 (`black`, `white`, `red`, `green`, `blue`, `yellow`, `magenta`, `cyan`) |
+| `24` | 1 byte `n` | Excel 1.5: a colour, written `[name]` with the name `n` from `STR#` 263 (`black`, `white`, `red`, `green`, `blue`, `yellow`, `magenta`, `cyan`, from 0). Confirmed: Excel 1.5 stores `[RED]0.00` with `24 02` and `[BLUE]#,##0;[RED]-#,##0` with `24 04` and `24 02`, and `@` as token `23`. |
 
 A format that uses `23` or `24` makes Excel 1.5 save the file as version 18 (§2.1).
 
@@ -480,7 +480,7 @@ Entry:
 
 | Size | Meaning |
 |-----:|---------|
-| 6 bytes | First 6 bytes of the in-memory entry **(unknown; zero in all nine sample entries)** |
+| 6 bytes | First 6 bytes of the in-memory entry. Zero in all nine sample entries, and Excel 1.03 writes zeros for a link it has just created (confirmed); what they hold in memory is **(unknown)**. |
 | Pascal string | Document name: usually a file name (`CASHBUDGET`, `GREAT BRITAIN`), but it can be a full path (`::sampler files - current 1/13:Files:DATA`). Excel 1.03's Save writes a zero-length name for an entry that refers to this document itself; Excel 1.00's has no such case and writes the entry's name. `DB.FORM` has one entry whose name is the single character `0x00`. Its macros use it as `!DATABASE` and `!FORM`, meaning the names on whichever worksheet is active **(inferred)**. |
 
 An external reference names its document by the entry's 1-based position in
@@ -593,8 +593,8 @@ The defined names, then the data of the array constants their definitions contai
 |-----:|---------|
 | byte | `cch` = name length (never 0; 0 is the terminator) |
 | byte | `cce` = definition length |
-| byte | Flags: `0x04` = the definition is a reference: one cell or area token (`2C`, `2D`) or a union in its definition form (`2E`). Every such name in the samples has it, on worksheets and macro sheets alike, and no other name does. Excel 1.03 sets it when it saves (confirmed by re-saving), so macro names, which point at a cell, have it too. `0x20` = the definition is array-valued, so formulas using the name get cell word 2 bit 13 (§9); `0x40` = command macro, two extra bytes follow. Open keeps only bits `0x64`, so the `0x01`, `0x02` and `0x80` some samples have are in-memory marks Save writes out and Open discards. |
-| 2 bytes | Only if flag `0x40`: the shortcut key (the character typed with Option-Command), then a flags byte. Open keeps its bits `0x80` and `0x40`, counting the command macros that have each, and discards the low nibble (junk in the samples, `0x40`–`0x4E`, `0x80`–`0x8A`). Every sample sets one of the two. Command macros written with `0x40` appear in Excel 1.03's Macro > Run list with their shortcut. Whether the bit is *required* for that is **(unconfirmed)**: an empty Run list was also seen on a sheet broken by the cell-table margin problem (§6.1). |
+| byte | Flags: `0x04` = the definition is a reference: one cell or area token (`2C`, `2D`) or a union in its definition form (`2E`). Every such name in the samples has it, on worksheets and macro sheets alike, and no other name does. Excel 1.03 sets it when it saves (confirmed by re-saving), so macro names, which point at a cell, have it too. `0x20` = the definition is array-valued, so formulas using the name get cell word 2 bit 13 (§9); `0x40` = a macro, function or command, and two extra bytes follow. Open keeps only bits `0x64`, so the `0x01`, `0x02` and `0x80` some samples have are in-memory marks Save writes out and Open discards. |
+| 2 bytes | Only if flag `0x40`: the shortcut key (the character typed with Option-Command; 0 for none), then the **macro kind**: `0x40` = command macro, listed in Macro > Run; `0x80` = function macro, called from formulas. Open keeps those two bits and discards the low nibble (junk in the samples: `0x40`–`0x4E`, `0x80`–`0x8A`). Confirmed: Excel 1.03's `DEFINE.NAME("Cmd",…,2,"q")` writes flags `0x44`, key `q`, kind `0x44`, and `DEFINE.NAME("Fn",…,1)` writes flags `0x44`, key 0, kind `0x80`. In the samples, `MATRIX`'s INV and MULT and `BEARINGS`'s Coordinates are function macros; every other macro is a command. |
 | cce bytes | Definition, a parsed expression (§15) |
 | byte | Copy of `cce` |
 | cch bytes | Name characters |
@@ -664,7 +664,7 @@ In memory, some tokens hold pointers. Save writes the expression unchanged
 | `0x23` name | word | 1-based index of the name in section 4. Inside an external reference (between `1A` and `1B`) it is instead the 1-based index in that document's list in section 3. |
 | `0x1A` external sheet | word | 1-based index of the external document in §8. An entry named `\0` stands for the active sheet, written `!A1` **(inferred, §8)** |
 | `0x20` array constant | array block (below) | The constant's elements |
-| `0x26` memory area | word `n`, then `n` × 6-byte areas | The cached area list the token points at **(not observed in samples)** |
+| `0x26` memory area | word `n`, then `n` × 6-byte areas (first row word, last row word, first column byte, last column byte) | The areas the wrapped union or intersection stands for, as the compiler worked them out (§15.4). Not in the samples; confirmed from formulas Excel 1.03 compiled. |
 
 Array block: byte column count (0 means 256), word row count, then the
 `rows × cols` elements row by row, each a type byte and a value: type 1 is a
@@ -678,8 +678,8 @@ is `09 00 01` and nine type-1 elements.
 If the first token of the expression is `0x01` (array formula) or `0x02` (TABLE), the cell does not own its
 expression: the token's three operand bytes are a stale pointer to a shared record, and the trailer replaces
 the fix-ups of §12.5. Every cell of the range carries the token; the top-left cell, the *anchor*, holds the
-shared record. Array formulas occur in `MATRIX`, `SIMUL EQUATIONS` and `ACCOUNTS DATA`; tables are from code
-alone.
+shared record. Array formulas occur in `MATRIX`, `SIMUL EQUATIONS` and `ACCOUNTS DATA`. No sample has a table;
+the three Excel 1.03 made for this spec do not fit the layout below (see the TABLE row).
 
 *Anchor cell*:
 
@@ -688,7 +688,7 @@ alone.
 | word | `0x4000`, a marker that cannot be a row number |
 | byte | 0 |
 | 10 bytes | Shared record header: first row word, last row word, first column, last column, three bytes left over from memory, then (offset 9) the length of the shared expression for an array formula |
-| n bytes | Array formula: the shared expression, `n` = header byte 9. TABLE: 8 bytes, the row input cell and the column input cell, each a row word and a column word, with row `0x4000` meaning none **(inferred from the TABLE command, `4a.05`)**. |
+| n bytes | Array formula: the shared expression, `n` = header byte 9. TABLE: 8 bytes, the row input cell and the column input cell, each a row word and a column word, with row `0x4000` meaning none, was **(inferred from the TABLE command, `4a.05`)** and is **wrong**: tables Excel 1.03 made have no `0x4000`. After the anchor's range they hold 12 bytes: `FF FF 08 17 00 00 FF FF 00 00 01 EC` for a column input of X1 (row 0, column 23) on B2:B3; `00 00 00 18 00 18 FF FF C0 17 00 10` for a row input of Y7 (row 6, column 24) and a column input of X5 (row 4, column 23) on B2:C3; `00 00 00 18 00 18 FF FF C0 0F 00 00` for a row input of Y7 alone on B2:C2. The layout is **(unknown)**. |
 | … | Array formula only: the shared expression's fix-ups, as in §12.5 |
 
 *Any other cell* of the range:
@@ -771,9 +771,9 @@ are identified, by state offset (window-record offset − 183):
 
 | Offset | Size | New window | Meaning |
 |-------:|-----:|-----------|---------|
-| 121 | byte | 0 | **Panes frozen.** FREEZE.PANES toggles it; SPLIT does nothing while it is set (`0f.3e`, `0f.47`). |
+| 121 | byte | 0 | **Panes frozen.** FREEZE.PANES toggles it; SPLIT does nothing while it is set (`0f.3e`, `0f.47`). Confirmed: 1 after `SPLIT(1,2)` and `FREEZE.PANES(TRUE)`, and the file is saved as version 18. |
 | 127 | byte | 1 | **Gridline and heading colour is automatic** (the DISPLAY dialog shows "automatic" when it is set, `0d.20`) |
-| 128 | byte | 0 | Gridline and heading colour, used when offset 127 is 0 |
+| 128 | byte | 0 | Gridline and heading colour, used when offset 127 is 0: 0–7 in the order of `STR#` 263 (§7). Confirmed: `DISPLAY(FALSE,TRUE,TRUE,TRUE,3)` saves 0 at 127 and 2 (red) at 128; DISPLAY's colour argument counts from 1. |
 
 The rest are **(unknown)**; they are zero in `SIMUL EQUATIONS`. Excel 1.5's Save
 writes version 18 when any window has panes frozen or a non-automatic colour
@@ -783,8 +783,8 @@ writes version 18 when any window has panes frozen or a non-automatic colour
 
 ## 14. Section 7 — page breaks and print settings
 
-Three parts, each self-terminating. No sample has page breaks; three have a
-print record (`MATRIX`, `BEARINGS`, `JAPAN`) and the rest a single `0x00` for it.
+Three parts, each self-terminating. No sample has page breaks (Excel 1.03 made one to check them);
+three have a print record (`MATRIX`, `BEARINGS`, `JAPAN`) and the rest a single `0x00` for it.
 
 **Excel 1.00: extra function names.** In a file without an extra header (§5, `n = 0`), when the function
 count is above 208, section 7 starts with one Pascal string per function from 208 up to the count: the names of
@@ -803,7 +803,9 @@ and Open, and later files carry no names even when their count is higher.
    In memory both are linked lists of 14-byte nodes holding five word slots;
    every node but the last is full, which is why a chunk never exceeds five.
    That the byte-sized list is columns and the word-sized list is rows follows
-   from the value ranges **(inferred)**.
+   from the value ranges, and is confirmed: Excel 1.03's `SET.PAGE.BREAK` with C5
+   selected saves column break 1 and row break 3. Each number is the 0-based
+   index of the last column or row **before** the break.
 3. **Print record** — `0x00` if the document has none. Otherwise `0xFF`, then
    a 122-byte page-setup structure, then three strings, each either `0x00`
    (absent) or a Pascal string.
@@ -869,8 +871,8 @@ described in §12.6. The binary operators are confirmed by Excel's own operator
 table (`PCOD` 0 at `0xCE9` in 1.03), which pairs tokens `03 04 0B 0D 07 06 05 08
 11 09 10 0E 0A 0C 0F` with the characters `+ - = > ^ / * & : < , < < >` and space
 (the second character of `<>`, `<=` and `>=` comes from elsewhere). So `07` is `^`
-and `0F` is the space, Excel's intersection operator. `12` and `14` follow BIFF
-**(inferred)**.
+and `0F` is the space, Excel's intersection operator. Excel 1.03 itself compiles all four: `=2^3` to `07`,
+`=A1:B2 B1:C3` to `0F`, `=+A1` to `12` and `=A1%` to `14` (confirmed), the same meanings as in BIFF.
 
 Excel 1.03 and 1.5 accept the operator characters `+-^*/,&:<>= (){};!`. Excel
 1.00 accepts only `+-^*/,&:<>=!`, so a formula typed into 1.00 cannot contain an
@@ -911,9 +913,9 @@ were verified by walking every formula in the samples; `0x38`–`0x3A` are Excel
 | 23 | 7 | Name. In a cell formula all seven bytes are left over from memory (the first three look like a pointer) and the index is in the fix-ups (§12.5). In a name definition the first two bytes are the 1-based name index (§11) and the other five are left over. |
 | 24 | 3 | Cell reference: row word, column byte |
 | 25 | 6 | Area reference: first row word, last row word, first column byte, last column byte |
-| 26 | 4 | Memory area: 3-byte stale pointer to a cached area list, 1 more byte. The list is appended (§12.5). |
+| 26 | 4 | Memory area: 3-byte stale pointer, then the length in bytes of the subexpression that follows. Wraps a union or intersection of plain cell references; the areas it stands for are in the fix-ups (§12.5, §15.4). Confirmed from Excel 1.03's compilation. |
 | 27, 28 | 4 | Memory error / no-memory (as BIFF) **(inferred)** |
-| 29 | 1 | Memory function: the length in bytes of the subexpression that follows (§15.4) |
+| 29 | 1 | Memory function: the length in bytes of the subexpression that follows. Wraps a range or union that involves a function result or a name (§15.4). |
 | 2A | 3 | Deleted cell reference. The bytes look like the former row word and column (`2A 00 84 02`); nothing reads them. |
 | 2B | 6 | Deleted area reference |
 | 2C | 3 | Cell reference inside a name definition |
@@ -1092,16 +1094,29 @@ formulas is **(assumed)**.
 **Volatile functions.** A formula that calls a function with table flag `0x08` (INDEX, RAND, NOW, AREAS,
 ROWS, COLUMNS) anywhere starts with `19 01 xx`. Formulas that call none of these never have the attribute.
 
-**Memory functions.** The outermost union, and the outermost range whose operands are not both plain cell
-references or areas (a name, a function call or another range), is preceded by `29 n` (`2E n` in a name
-definition), where *n* is the length of the subexpression that follows, up to and including its last `10` or
-`11`. Ranges and unions nested inside it are not wrapped again. Examples:
+**Memory tokens.** The outermost union or intersection, and the outermost range that is not a single cell or
+area, is preceded by a memory token giving the length *n* of the subexpression that follows, up to and
+including its last `0F`, `10` or `11`. Ranges, unions and intersections nested inside it are not wrapped again.
+
+* Built only from cell references and areas on this sheet, it is a **memory area**, `26 xx xx xx n`. The
+  compiler also works out the areas the expression stands for and puts them in the fix-ups (§12.5): the
+  operands of a union, the overlaps of an intersection, the bounding box of a range. `=SUM((A1,B2),C3)` is
+  `26 … 09 24… 24… 10 15 24… 42 02 04` with areas A1 and B2, and `=A1:B2 B1:C3` is `46 … 0F 25… 25… 0F` with
+  one area, B1:B2.
+* Otherwise (a name, a function result, another sheet) it is a **memory function**, `29 n` (`2E n` in a name
+  definition).
+
+Both take the class a reference would in their place: `46` and `49` at the top of a cell formula, `26` and
+`29` as a function's reference argument. All of this is confirmed by Excel 1.03 compiling the formulas
+(the `Recompiled` and `Intersections` samples). Examples:
 
 * `INDEX(A1:C3,1,1):C3` is `29 15` and 21 bytes: `25… 1E… 1E… 22 03 1D 24… 11`;
 * `matrix:inverse` (two names) is `29 11 23… 23… 11`;
 * the definition `=$C$9,$E$9,…,$C$6` (ten areas) is `2E 3A` and one 58-byte union chain.
 
-A union in a cell formula is **(assumed)** to be wrapped like the definition's.
+**Signs and `#REF!`.** A plus sign on a number constant is dropped (`=+1` is `1E 00 01`), like a minus sign
+folded into it; on anything else it is token `12`. A typed `#REF!` compiles to a deleted-reference token,
+`4A 00 00 00` at the top of a cell formula, not to error constant `1C 17`. Both confirmed.
 
 **External references.**
 
@@ -1517,25 +1532,19 @@ None of these affects reading the samples or writing valid files.
 
 **Worksheets and macro sheets**
 
-* Six bytes at the start of each external-document entry; zero in every sample (§8).
-* What bits `0x80` and `0x40` of a command macro's shortcut flags byte mean (§11).
-* Calculation mode values other than 1 (§6, 0x002): mapped from dialog item order only; every sample uses 1.
+* What the six bytes at the start of an external-document entry hold in memory; Excel writes zeros (§8).
+* The layout of a table's shared record: the inferred one is wrong (§12.6).
 * Most of the 88 extra window-state bytes of version 18 (§13).
 * Function table bytes 0–1 (§15.3) and type bit `0x80`.
-* Tokens `12` and `14` (unary plus and percent) and the memory tokens `26`–`28`, `2F` (§15.1, §15.2), whose
-  meanings follow BIFF.
+* The memory tokens `27`, `28` and `2F` (§15.2), whose meanings follow BIFF.
 * What Excel 1.04 changed besides adding CHANGE.LINK; no 1.04 code or sample is available (§2.1).
 
-**Described from code alone**
+**Checked in Excel rather than samples**
 
-No sample contains these, so they could not be checked against data:
-
-* tables made with the Table command (§12.6);
-* page breaks (§14);
-* array constants and unions in cell formulas (§15.4);
-* functions numbered 256 and up (tokens `39`, `3A`), number-format tokens `23` and `24`, frozen panes and
-  gridline colours (§7, §13, §15.2);
-* the intersection operator (§15.1).
+No sample has these; they were confirmed by having Excel itself make or compile them (docs/Testing.md):
+page breaks (§14); unions, intersections and array constants in cell formulas (§15.4); functions numbered 256
+and up; Excel 1.5's `@` and colour number formats, frozen panes and gridline colours, and the version-18 rule
+(§2.1, §7, §13).
 
 **Charts** (§16)
 
@@ -1546,8 +1555,8 @@ No sample contains these, so they could not be checked against data:
 
 **Workspace files** (Appendix B)
 
-* The word after the settings, the length-prefixed block after the windows, and the 6 print-related bytes.
-* Whether the word after each folder name is a directory ID.
+* The layout of the preferred chart format.
+* What the word after each folder name refers to.
 
 ---
 
@@ -1879,11 +1888,11 @@ calculation settings. It holds no cell data. Written by `64.00` and read by `64.
 |-----:|---------|
 | word | 0. Open refuses anything else (alert `0x2038`). |
 | 20 bytes | Calculation settings, laid out as offsets 0x000–0x013 of the sheet state block (§6): maximum iterations, calculation mode, precision, reference style, unused word, maximum change (double), iteration. In 1.00 they are global, not per document. |
-| word | **(unknown)** When it is set, Open applies one more window operation (`17.0c`) to the front window. 0 in the sample. |
+| word | 1 if a window was **zoomed** to fill the screen (the FULL command or the zoom box; global `g0c5a`), else 0. Open zooms the front window again (`17.0c`). The rectangles below are always the windows' normal size: Save and this writer un-zoom before recording them. Confirmed: 1 after `FULL(TRUE)`. |
 | … | The document windows, front to back, each as below, then a `0x00` byte |
-| word | `n`, then `n` bytes: a block of application state used by segments `0a` and `5a` **(unknown)**. 0 in the sample. |
+| word | `n`, then `n` bytes: the **preferred chart format** (Chart > Set Preferred Format, applied by Gallery > Preferred), Excel's in-memory image of a chart, whose first word is its own length. `n` = 0 when none has been set. Confirmed: 1,640 bytes after Set Preferred Format on `CLOCK.CH`. Its layout is **(unknown)**. |
 | byte | 0 |
-| 6 bytes | State used by the print code (segment `51`) **(unknown)**. `00 00 00 05 00 00` in the sample. |
+| 3 words | **Printer Setup** (dialog 288, PRINTER.SETUP): printer type (0 Macintosh, 1 TTY), baud rate (0–5 for 300, 600, 1200, 2400, 4800, 9600) and port (0 printer, 1 modem). The sample's `0, 5, 0` is a Macintosh printer. Confirmed: `1, 2, 1` after `PRINTER.SETUP(2,2,3)`. |
 | byte | 0 |
 
 Window entry:
@@ -1891,9 +1900,9 @@ Window entry:
 | Size | Meaning |
 |-----:|---------|
 | byte | Document kind: `0x10` worksheet, `0x40` macro sheet, `0x20` chart (the in-memory kinds of §5) |
-| Pascal string | Document name |
+| Pascal string | Document name. Excel 1.00 writes the window title, which includes the volume for a document on another disk (`Ws:Clock saved`). |
 | Pascal string | Folder: the volume name and any folder names, each followed by `:` |
-| word | Used only on a system with HFS (low-memory `FSFCBLen` above 0), so presumably a directory reference **(inferred)**. 0 in the sample, which is on an MFS disk. |
+| word | Used only on a system with HFS (low-memory `FSFCBLen` above 0). 0 for a document on the startup disk, 2 for one on the third floppy mounted, so presumably a volume or directory reference **(inferred)**. |
 | 4 words | Window rectangle (top, left, bottom, right), in global coordinates. Open fits it to the screen. |
 | 41 bytes | Window state, as in §13. Absent for a chart. |
 | word + `n` × 6 bytes | Selected areas, as in §13. Absent for a chart. |

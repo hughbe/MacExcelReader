@@ -17,8 +17,17 @@ public sealed class ExcelDefinedName
     /// <summary>Flag: the definition is array-valued.</summary>
     public const byte ArrayFlag = 0x20;
 
-    /// <summary>Flag: a command macro; a shortcut key follows the flags.</summary>
-    public const byte CommandFlag = 0x40;
+    /// <summary>
+    /// Flag: a macro, function or command. Two bytes follow the flags: the shortcut key and the macro kind
+    /// (<see cref="MacroKind"/>). Excel 1.03's DEFINE.NAME sets it for both kinds (spec §11).
+    /// </summary>
+    public const byte MacroFlag = 0x40;
+
+    /// <summary>Macro kind bit: a command macro, listed in Macro > Run.</summary>
+    public const byte CommandKind = 0x40;
+
+    /// <summary>Macro kind bit: a function macro, called from formulas.</summary>
+    public const byte FunctionKind = 0x80;
 
     /// <summary>
     /// Creates a name.
@@ -46,14 +55,20 @@ public sealed class ExcelDefinedName
     /// <summary>Gets or sets the flags byte.</summary>
     public byte Flags { get; set; }
 
-    /// <summary>Gets or sets the command-macro shortcut key (used when <see cref="CommandFlag"/> is set).</summary>
+    /// <summary>Gets or sets the command macro's shortcut key, typed with Option-Command; 0 for none (used when <see cref="MacroFlag"/> is set).</summary>
     public byte ShortcutKey { get; set; }
 
-    /// <summary>Gets or sets the unidentified byte that follows the shortcut key.</summary>
-    public byte ShortcutExtra { get; set; }
+    /// <summary>
+    /// Gets or sets the macro-kind byte that follows the shortcut key: <see cref="CommandKind"/> or
+    /// <see cref="FunctionKind"/>. Excel's own files have junk in the low nibble, which Open discards.
+    /// </summary>
+    public byte MacroKind { get; set; }
 
     /// <summary>Gets whether this is a command macro.</summary>
-    public bool IsCommand => (Flags & CommandFlag) != 0;
+    public bool IsCommand => (Flags & MacroFlag) != 0 && (MacroKind & FunctionKind) == 0;
+
+    /// <summary>Gets whether this is a function macro defined with its kind (Excel's DEFINE.NAME with type 1).</summary>
+    public bool IsFunctionMacro => (Flags & MacroFlag) != 0 && (MacroKind & FunctionKind) != 0;
 
     /// <summary>
     /// Gets the definition as A1-style text, without '='.
@@ -104,7 +119,7 @@ public sealed class ExcelDefinedName
         int definitionLength = reader.ReadByte();
         byte flags = reader.ReadByte();
         byte key = 0, extra = 0;
-        if ((flags & CommandFlag) != 0)
+        if ((flags & MacroFlag) != 0)
         {
             key = reader.ReadByte();
             extra = reader.ReadByte();
@@ -117,7 +132,7 @@ public sealed class ExcelDefinedName
         }
 
         var name = MacRoman.GetString(reader.ReadBytes(nameLength));
-        return new ExcelDefinedName(name, definition, flags) { ShortcutKey = key, ShortcutExtra = extra };
+        return new ExcelDefinedName(name, definition, flags) { ShortcutKey = key, MacroKind = extra };
     }
 
     internal void Write(BigEndianWriter writer)
@@ -131,10 +146,10 @@ public sealed class ExcelDefinedName
         writer.WriteByte((byte)nameBytes.Length);
         writer.WriteByte((byte)Definition.Length);
         writer.WriteByte(Flags);
-        if ((Flags & CommandFlag) != 0)
+        if ((Flags & MacroFlag) != 0)
         {
             writer.WriteByte(ShortcutKey);
-            writer.WriteByte(ShortcutExtra);
+            writer.WriteByte(MacroKind);
         }
 
         writer.WriteBytes(Definition);

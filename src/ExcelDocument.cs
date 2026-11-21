@@ -494,6 +494,9 @@ public sealed class ExcelDocument
         }
 
         State.SetExtent(rows, columns);
+        State.SetNameCounts(
+            Names.Count(n => n.Definition.Length > 0 && (n.Flags & ExcelDefinedName.ReferenceFlag) != 0),
+            ExternalDocuments.FindIndex(d => d.Name == "\0") + 1);
         while (RowIndex.Count < rows)
         {
             RowIndex.Add(0);

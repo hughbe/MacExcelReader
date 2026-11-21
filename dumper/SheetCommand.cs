@@ -232,11 +232,12 @@ sealed class FormulaList
                     char key = '\0';
                     if (words.Count >= 4 && words[3] == "macro")
                     {
-                        flags = ExcelDefinedName.ReferenceFlag;
+                        flags = ExcelDefinedName.ReferenceFlag | ExcelDefinedName.MacroFlag;
+                        key = '\x80';   // marks a function macro below
                     }
                     else if (words.Count >= 5 && words[3] == "command")
                     {
-                        flags = ExcelDefinedName.ReferenceFlag | ExcelDefinedName.CommandFlag;
+                        flags = ExcelDefinedName.ReferenceFlag | ExcelDefinedName.MacroFlag;
                         key = words[4][0];
                     }
 
@@ -276,8 +277,9 @@ sealed class FormulaList
         {
             document.Names.Add(new ExcelDefinedName(name, [], flags)
             {
-                ShortcutKey = (byte)key,
-                ShortcutExtra = (flags & ExcelDefinedName.CommandFlag) != 0 ? (byte)0x40 : (byte)0,
+                // Excel's DEFINE.NAME writes kind 0x80 for a function macro and 0x40 for a command (spec §11).
+                ShortcutKey = key == '\x80' ? (byte)0 : (byte)key,
+                MacroKind = (flags & ExcelDefinedName.MacroFlag) == 0 ? (byte)0 : key == '\x80' ? ExcelDefinedName.FunctionKind : ExcelDefinedName.CommandKind,
             });
         }
 

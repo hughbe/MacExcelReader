@@ -172,7 +172,11 @@ public static class ExcelFormulaParser
         Semicolon,
     }
 
-    private readonly record struct Token(TokenKind Kind, string Text, int Position, double Number = 0);
+    private readonly record struct Token(TokenKind Kind, string Text, int Position, double Number = 0)
+    {
+        /// <summary>Gets whether white space came before the token: between two references, the intersection operator.</summary>
+        public bool SpaceBefore { get; init; }
+    }
 
     private sealed class Lexer
     {
@@ -201,7 +205,13 @@ public static class ExcelFormulaParser
 
         public Token Next()
         {
+            int before = _position;
             SkipSpace();
+            return NextToken() with { SpaceBefore = _position > before };
+        }
+
+        private Token NextToken()
+        {
             int start = _position;
             if (_position >= _text.Length)
             {
@@ -535,17 +545,46 @@ public static class ExcelFormulaParser
                 Advance();
                 var operand = ParseUnary();
 
-                // Excel folds a minus sign on a number constant into the constant.
+                // Excel folds a minus sign on a number constant into the constant, and drops a plus sign on one
+                // (confirmed by Excel 1.03 compiling =+1 to 1E 00 01).
                 if (op.Text == "-" && operand is NumberNode number)
                 {
                     return new NumberNode(op.Position, -number.Value, ForceDouble: true);
                 }
 
+                if (op.Text == "+" && operand is NumberNode)
+                {
+                    return operand;
+                }
+
                 return new UnaryNode(op.Position, op.Text == "-" ? (byte)0x13 : (byte)0x12, operand);
             }
 
-            return ParseRange();
+            return ParseIntersection();
         }
+
+        // Intersection: white space between two references (=A1:B2 B1:C3). It binds less tightly than a range and
+        // more tightly than a union.
+        private Node ParseIntersection()
+        {
+            var left = ParseRange();
+            while (_current.SpaceBefore && IsReferenceNode(left)
+                && _current.Kind is TokenKind.Identifier or TokenKind.QuotedName or TokenKind.Bang or TokenKind.OpenParen)
+            {
+                int position = _current.Position;
+                left = new BinaryNode(position, 0x0F, left, ParseRange());
+            }
+
+            return left;
+        }
+
+        private static bool IsReferenceNode(Node node) => node switch
+        {
+            RefNode or AreaNode or NameNode => true,
+            ParenNode paren => IsReferenceNode(paren.Inner),
+            BinaryNode binary => binary.Operator is 0x0F or 0x10 or 0x11,
+            _ => false,
+        };
 
         private Node ParseRange()
         {
@@ -1120,9 +1159,9 @@ public static class ExcelFormulaParser
                     Add(0x1D);
                     Add((byte)(logical.Value ? 1 : 0));
                     break;
-                case ErrorNode error when error.Code == 0x17 && (context == Context.DefinitionTop || context == Context.Range):
-                    // A name or range that is #REF! refers to deleted cells: a deleted-reference token, whose
-                    // row and column bytes are no longer meaningful.
+                case ErrorNode error when error.Code == 0x17:
+                    // #REF! refers to deleted cells: a deleted-reference token, whose row and column bytes are no
+                    // longer meaningful. Excel 1.03 compiles a typed =#REF! to 4A 00 00 00, not an error constant.
                     Add(WithClass(0x2A, OperandClass(context)));
                     Add(0);
                     Add(0);
@@ -1182,17 +1221,44 @@ public static class ExcelFormulaParser
                     break;
                 case BinaryNode binary:
                 {
-                    bool reference = binary.Operator is 0x10 or 0x11;
+                    bool reference = binary.Operator is 0x0F or 0x10 or 0x11;
                     var operandContext = reference ? Context.Range : Context.Operator;
 
-                    // The outermost union, or range whose operands are not both plain references, is wrapped in a
-                    // memory-function token (0x29; 0x2E in a definition) giving the length of what follows.
+                    // The outermost union or intersection, or range whose operands are not both plain references, is
+                    // wrapped in a memory token giving the length of what follows. Built from cell references alone,
+                    // it is a memory area (0x26: three stale bytes, then the length), and Excel caches the resulting
+                    // areas in the fix-ups; otherwise a memory function (0x29; 0x2E in a definition). Both take
+                    // the class of a reference in their place (confirmed by Excel 1.03's own compilation).
                     int start = -1;
                     if (reference && !_insideMemoryFunction
-                        && (binary.Operator == 0x10 || !(IsPlainReference(binary.Left) && IsPlainReference(binary.Right))))
+                        && (binary.Operator != 0x11 || !(IsPlainReference(binary.Left) && IsPlainReference(binary.Right))))
                     {
-                        Add(_definition ? (byte)0x2E : (byte)0x29);
-                        Add(0);
+                        var areas = _definition ? null : Areas(binary);
+                        if (areas is not null)
+                        {
+                            Add(WithClass(0x26, OperandClass(context)));
+                            Add(0);
+                            Add(0);
+                            Add(0);
+                            Add(0);
+                            Fixups.Add((byte)(areas.Count >> 8));
+                            Fixups.Add((byte)areas.Count);
+                            foreach (var (firstRow, lastRow, firstColumn, lastColumn) in areas)
+                            {
+                                Fixups.Add((byte)(firstRow >> 8));
+                                Fixups.Add((byte)firstRow);
+                                Fixups.Add((byte)(lastRow >> 8));
+                                Fixups.Add((byte)lastRow);
+                                Fixups.Add(firstColumn);
+                                Fixups.Add(lastColumn);
+                            }
+                        }
+                        else
+                        {
+                            Add(_definition ? (byte)0x2E : WithClass(0x29, OperandClass(context)));
+                            Add(0);
+                        }
+
                         start = Expression.Count;
                         _insideMemoryFunction = true;
                     }
@@ -1237,6 +1303,60 @@ public static class ExcelFormulaParser
         // Excel evaluates a range or union directly only when both operands are cell references or areas;
         // anything else (a name, a function call, another range) is wrapped in a memory-function token.
         private static bool IsPlainReference(Node node) => node is RefNode or AreaNode;
+
+        // The areas a reference expression built only from cell references on this sheet stands for, as Excel
+        // caches them after a memory-area token; null if it involves anything else (names, functions, other sheets).
+        private static List<(ushort FirstRow, ushort LastRow, byte FirstColumn, byte LastColumn)>? Areas(Node node)
+        {
+            switch (node)
+            {
+                case RefNode r when r.External is null:
+                    return [((ushort)(r.RowWord & 0x3FFF), (ushort)(r.RowWord & 0x3FFF), r.Column, r.Column)];
+                case AreaNode a when a.External is null:
+                    return [((ushort)(a.FirstRowWord & 0x3FFF), (ushort)(a.LastRowWord & 0x3FFF), a.FirstColumn, a.LastColumn)];
+                case ParenNode paren:
+                    return Areas(paren.Inner);
+                case BinaryNode binary when binary.Operator is 0x0F or 0x10 or 0x11:
+                {
+                    var left = Areas(binary.Left);
+                    var right = Areas(binary.Right);
+                    if (left is null || right is null)
+                    {
+                        return null;
+                    }
+
+                    if (binary.Operator == 0x10)
+                    {
+                        return [.. left, .. right];
+                    }
+
+                    if (binary.Operator == 0x11)
+                    {
+                        var all = left.Concat(right).ToList();
+                        return [(all.Min(x => x.FirstRow), all.Max(x => x.LastRow), all.Min(x => x.FirstColumn), all.Max(x => x.LastColumn))];
+                    }
+
+                    var result = new List<(ushort, ushort, byte, byte)>();
+                    foreach (var x in left)
+                    {
+                        foreach (var y in right)
+                        {
+                            ushort firstRow = Math.Max(x.FirstRow, y.FirstRow), lastRow = Math.Min(x.LastRow, y.LastRow);
+                            byte firstColumn = Math.Max(x.FirstColumn, y.FirstColumn), lastColumn = Math.Min(x.LastColumn, y.LastColumn);
+                            if (firstRow <= lastRow && firstColumn <= lastColumn)
+                            {
+                                result.Add((firstRow, lastRow, firstColumn, lastColumn));
+                            }
+                        }
+                    }
+
+                    return result;
+                }
+
+                default:
+                    return null;
+            }
+        }
 
         private void EmitName(int index, int tokenClass)
         {

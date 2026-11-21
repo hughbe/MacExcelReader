@@ -27,8 +27,9 @@ public sealed class ExcelWorkspaceWindow
     public string Folder { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the word that follows the folder. Resume only uses it on a system with HFS, so it is
-    /// presumably a directory reference; 0 on an MFS disk <b>(inferred)</b>.
+    /// Gets or sets the word that follows the folder. Resume only uses it on a system with HFS. It was 0 for a
+    /// document on the startup disk and 2 for one on the third floppy, so it is presumably a volume or directory
+    /// reference <b>(inferred)</b>.
     /// </summary>
     public ushort Directory { get; set; }
 
@@ -89,19 +90,28 @@ public sealed class ExcelWorkspace
     }
 
     /// <summary>
-    /// Gets or sets the word after the settings. When it is set, Resume applies one more window operation to
-    /// the front window <b>(unknown)</b>.
+    /// Gets or sets whether a window was zoomed to fill the screen (the FULL command, or a click in the zoom box).
+    /// Resume zooms the front window again. The rectangles are always the windows' normal size.
     /// </summary>
-    public ushort WindowOption { get; set; }
+    public bool Zoomed { get; set; }
 
     /// <summary>Gets the document windows, front to back.</summary>
     public List<ExcelWorkspaceWindow> Windows { get; } = [];
 
-    /// <summary>Gets or sets a length-prefixed block of application state after the windows <b>(unknown)</b>; empty in the sample.</summary>
-    public byte[] Block { get; set; } = [];
+    /// <summary>
+    /// Gets or sets the preferred chart format (Chart > Set Preferred Format, applied by Gallery > Preferred): Excel's
+    /// in-memory image of a chart, whose first word is its length. Empty when none has been set.
+    /// </summary>
+    public byte[] PreferredChartFormat { get; set; } = [];
 
-    /// <summary>Gets the 6 bytes of print-related state at the end <b>(unknown)</b>.</summary>
-    public byte[] Trailer { get; } = new byte[6];
+    /// <summary>Gets or sets the printer type from Printer Setup: 0 = Macintosh (an ImageWriter), 1 = TTY.</summary>
+    public ushort PrinterType { get; set; }
+
+    /// <summary>Gets or sets the TTY printer's baud rate from Printer Setup: 0–5 for 300, 600, 1200, 2400, 4800, 9600.</summary>
+    public ushort PrinterBaud { get; set; }
+
+    /// <summary>Gets or sets the TTY printer's port from Printer Setup: 0 = printer port, 1 = modem port.</summary>
+    public ushort PrinterPort { get; set; }
 
     /// <summary>Reads a workspace file (its data fork).</summary>
     /// <exception cref="ExcelFormatException">The data is not a workspace file.</exception>
@@ -118,7 +128,7 @@ public sealed class ExcelWorkspace
 
             var workspace = new ExcelWorkspace();
             reader.ReadBytes(SettingsSize).CopyTo(workspace.Settings, 0);
-            workspace.WindowOption = reader.ReadUInt16();
+            workspace.Zoomed = reader.ReadUInt16() != 0;
             for (byte kind; (kind = reader.ReadByte()) != 0;)
             {
                 var entry = new ExcelWorkspaceWindow
@@ -140,9 +150,11 @@ public sealed class ExcelWorkspace
                 workspace.Windows.Add(entry);
             }
 
-            workspace.Block = reader.ReadBytes(reader.ReadUInt16());
+            workspace.PreferredChartFormat = reader.ReadBytes(reader.ReadUInt16());
             reader.ReadByte();
-            reader.ReadBytes(6).CopyTo(workspace.Trailer, 0);
+            workspace.PrinterType = reader.ReadUInt16();
+            workspace.PrinterBaud = reader.ReadUInt16();
+            workspace.PrinterPort = reader.ReadUInt16();
             reader.ReadByte();
             return workspace;
         }
@@ -161,7 +173,7 @@ public sealed class ExcelWorkspace
         var writer = new BigEndianWriter(256);
         writer.WriteUInt16(0);
         writer.WriteBytes(Settings);
-        writer.WriteUInt16(WindowOption);
+        writer.WriteUInt16((ushort)(Zoomed ? 1 : 0));
         foreach (var entry in Windows)
         {
             if (entry.Kind == 0)
@@ -187,10 +199,12 @@ public sealed class ExcelWorkspace
         }
 
         writer.WriteByte(0);
-        writer.WriteUInt16(checked((ushort)Block.Length));
-        writer.WriteBytes(Block);
+        writer.WriteUInt16(checked((ushort)PreferredChartFormat.Length));
+        writer.WriteBytes(PreferredChartFormat);
         writer.WriteByte(0);
-        writer.WriteBytes(Trailer);
+        writer.WriteUInt16(PrinterType);
+        writer.WriteUInt16(PrinterBaud);
+        writer.WriteUInt16(PrinterPort);
         writer.WriteByte(0);
         return writer.ToArray();
     }

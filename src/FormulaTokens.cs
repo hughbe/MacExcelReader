@@ -115,6 +115,47 @@ public static class FormulaTokens
     public static TokenEnumerator Enumerate(ReadOnlySpan<byte> expression) => new(expression);
 
     /// <summary>
+    /// Returns a copy of a parsed expression with the bytes Excel leaves over from memory set to zero (spec §15.2),
+    /// so that two encodings of the same formula compare equal: the pointer bytes of name (<c>23</c>),
+    /// external-sheet (<c>1A</c>, <c>1B</c>), array-constant (<c>20</c>) and deleted-reference (<c>2A</c>) tokens, and
+    /// the skip byte of an IF or CHOOSE attribute, and the pointer bytes of a memory area (<c>26</c>).
+    /// </summary>
+    /// <param name="expression">The expression.</param>
+    /// <param name="definition">Whether it is a name definition, whose fix-ups are applied in place (spec §11).</param>
+    public static byte[] ClearStaleBytes(ReadOnlySpan<byte> expression, bool definition = false)
+    {
+        var copy = expression.ToArray();
+        foreach (var token in Enumerate(expression))
+        {
+            var operands = copy.AsSpan(token.Offset + 1, token.Length - 1);
+            switch (token.Code)
+            {
+                case 0x23:
+                    operands[(definition ? 2 : 0)..].Clear();
+                    break;
+                case 0x1A:
+                    operands[..(definition ? 6 : 7)].Clear();
+                    break;
+                case Array:
+                    operands[3..].Clear();
+                    break;
+                case 0x1B:
+                case 0x2A:
+                    operands.Clear();
+                    break;
+                case MemoryArea:
+                    operands[..3].Clear();
+                    break;
+                case 0x19 when operands[0] is 0x01 or 0x10:
+                    operands[1] = 0;
+                    break;
+            }
+        }
+
+        return copy;
+    }
+
+    /// <summary>
     /// Validates an expression's token stream and returns the number of tokens.
     /// </summary>
     public static int CountTokens(ReadOnlySpan<byte> expression)

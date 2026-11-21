@@ -42,6 +42,35 @@ memory given to Excel, so this is a practical limit rather than a format rule. `
 references to non-resident sheets?" until someone answers. While the dialog is up, the macro's next commands
 can act on the wrong window. Pass 0 as OPEN's second argument (`=OPEN("Disk:File",0)`) to skip the question.
 
+## Macro FORMULA takes only R1C1 text (Excel 1.03)
+
+**Confirmed.** The macro command `FORMULA("=A1+1")` returns `#VALUE!` and enters nothing; `FORMULA("=R1C1+1")`
+works. In R1C1 mode `A1` is not a reference at all, so `=Other!A1` became a reference to an external *name*
+`A1`. Text from GET.FORMULA, which is R1C1, can be passed straight back.
+
+## Calculation mode and reference style are global
+
+**Confirmed** in Excel 1.03. CALCULATION and A1.R1C1 change a setting for the whole program, not for the active
+sheet: every sheet saved afterwards carries the new value in its state block (§6, 0x002 and 0x006), and
+formulas typed afterwards are read in the new reference style.
+
+## Out of memory makes OPEN fail quietly (Excel 1.03)
+
+**Confirmed.** With a large macro sheet open (a 345-row Driver after recompiling 100 formulas), the macro
+command OPEN returned `#VALUE!` for a small file, and opening it by hand reported "Out of memory". A macro
+that does not check OPEN's result carries on with the wrong window active.
+
+## ACTIVATE needs the window title (Excel 1.00)
+
+**Confirmed.** Excel 1.00 titles a window with its volume when the document is not on the startup disk
+(`Ws:F 01 saved`), so `ACTIVATE("F 01 saved")` fails. The same title is written as the document name in
+workspace files (Appendix B).
+
+## GET.FORMULA's whole-row text does not compile back the same (Excel 1.03)
+
+**Confirmed.** `=A1:IV16384` comes back from GET.FORMULA as `=R[-20]:R[16363]`, and entering that text gives a
+different formula: a range of two whole-row areas wrapped in a memory area (`46 … 25 … 25 … 11`).
+
 ## Display quirks of GET.FORMULA (Excel 1.03)
 
 **Confirmed.** These look like mismatches but the formula is right:

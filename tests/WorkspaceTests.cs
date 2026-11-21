@@ -23,8 +23,30 @@ public class WorkspaceTests
         Assert.Equal((short)73, window.Window.Top);
         Assert.Equal((short)503, window.Window.Right);
         Assert.Equal(new ExcelRange(0, 0, 0, 0), Assert.Single(window.Window.Selection));
-        Assert.Empty(workspace.Block);
+        Assert.Empty(workspace.PreferredChartFormat);
+        Assert.False(workspace.Zoomed);
+        Assert.Equal(0, workspace.PrinterType);
+        Assert.Equal(5, workspace.PrinterBaud);   // 9600
+        Assert.Equal(0, workspace.PrinterPort);
 
+        Assert.Equal(bytes, workspace.ToArray());
+    }
+
+    [Fact]
+    public void ResumeExcel2_HasZoomPrinterSetupAndPreferredChart()
+    {
+        // Saved by Excel 1.00 on Quit after FULL(TRUE), PRINTER.SETUP(2,2,3) and Chart > Set Preferred Format, with a
+        // chart and two macro sheets open.
+        var bytes = Sample("Resume Excel 2");
+        var workspace = ExcelWorkspace.Read(bytes);
+
+        Assert.True(workspace.Zoomed);
+        Assert.Equal(1, workspace.PrinterType);   // TTY
+        Assert.Equal(2, workspace.PrinterBaud);   // 1200
+        Assert.Equal(1, workspace.PrinterPort);   // modem
+        Assert.Equal(1640, workspace.PreferredChartFormat.Length);
+        Assert.Equal([ExcelWorkspaceWindow.ChartKind, ExcelWorkspaceWindow.MacroSheetKind, ExcelWorkspaceWindow.MacroSheetKind], workspace.Windows.Select(w => w.Kind));
+        Assert.Equal("Ws:Clock saved", workspace.Windows[0].DocumentName);
         Assert.Equal(bytes, workspace.ToArray());
     }
 

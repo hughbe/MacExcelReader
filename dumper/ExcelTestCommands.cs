@@ -38,6 +38,18 @@ sealed class PackSettings : CommandSettings
     [CommandOption("--no-probe")]
     [Description("Do not record GET.FORMULA for formula cells; only open and re-save.")]
     public bool NoProbe { get; init; }
+
+    [CommandOption("--recompile")]
+    [Description("Re-enter every formula from Excel's own text (FORMULA, or FORMULA.ARRAY for an array formula), so the re-saved file holds Excel's compilation of it; check then compares its tokens with ours.")]
+    public bool Recompile { get; init; }
+
+    [CommandOption("--each <FORMULA>")]
+    [Description("A macro command to run on each file after probing, before it is saved, such as =CALCULATION(3). Repeatable. A file can also have its own commands, one per line, in FILE.commands next to it.")]
+    public string[] Each { get; init; } = [];
+
+    [CommandOption("--end <FORMULA>")]
+    [Description("A macro command to run after Driver has saved itself, such as =FULL(TRUE). Repeatable.")]
+    public string[] End { get; init; } = [];
 }
 
 sealed class CheckSettings : CommandSettings
@@ -53,6 +65,10 @@ sealed class CheckSettings : CommandSettings
     [CommandOption("--all")]
     [Description("Show every difference, including the ones Excel is expected to make (recalculated values, windows, table size).")]
     public bool All { get; init; }
+
+    [CommandOption("--bytes")]
+    [Description("Also list raw byte differences the JSON model does not show: the sheet state block, window state, name flag and shortcut bytes, and external-document entries.")]
+    public bool Bytes { get; init; }
 }
 
 static class ExcelTest
@@ -73,6 +89,7 @@ sealed class PackCommand : Command<PackSettings>
         var version = settings.Excel == "1.5" ? ExcelVersion.Excel150 : ExcelVersion.Excel100;
         var files = new List<MfsFile>();
         var targets = new List<(string Name, ExcelDocument? Sheet)>();
+        var commands = new Dictionary<string, string[]>();
         foreach (string path in settings.Files)
         {
             string name = Path.GetFileName(path).Replace(':', '-');
@@ -82,6 +99,11 @@ sealed class PackCommand : Command<PackSettings>
             }
 
             byte[] data = File.ReadAllBytes(path);
+            if (File.Exists(path + ".commands"))
+            {
+                commands[name] = File.ReadAllLines(path + ".commands").Where(l => l.TrimStart().StartsWith('=')).ToArray();
+            }
+
             if (ExcelTest.IsChart(data))
             {
                 files.Add(new MfsFile(name, "MCBN", "XCEL", data, []));
@@ -95,15 +117,16 @@ sealed class PackCommand : Command<PackSettings>
             }
         }
 
-        var (driver, probes) = BuildDriver(settings, version, targets);
+        var (driver, probes) = BuildDriver(settings, version, targets, commands);
         files.Insert(0, new MfsFile(ExcelTest.DriverName, "XLPG", "XCEL", driver.ToArray(), []));
 
         int size = files.Sum(f => (f.Data.Length + 1023) / 1024 + 1) <= 380 ? 400 : 800;
         File.WriteAllBytes(settings.Disk, MfsImage.Write(settings.Volume, files, size));
         AnsiConsole.MarkupLine($"Wrote [bold]{Markup.Escape(settings.Disk)}[/] ({size}K, volume \"{Markup.Escape(settings.Volume)}\"): Driver and {targets.Count} file(s), {probes} formula cells to probe.");
-        if (probes > 300)
+        // Excel 1.03 ran out of memory opening a small file after a 345-row Driver had recompiled a 100-formula sheet.
+        if (driver.Cells.RowCount > 250)
         {
-            AnsiConsole.MarkupLine("[yellow]Driver is large; Excel 1.03 may run out of memory. Pack fewer or smaller files.[/]");
+            AnsiConsole.MarkupLine($"[yellow]Driver has {driver.Cells.RowCount} rows; Excel 1.03 may run out of memory. Pack fewer files, or recompile one sheet per disk.[/]");
         }
 
         AnsiConsole.MarkupLine(version == ExcelVersion.Excel150
@@ -114,7 +137,21 @@ sealed class PackCommand : Command<PackSettings>
 
     // Driver: column A holds the commands; column B labels each one, so check can map results back. A probe
     // row is =GET.FORMULA(File!B4); when Driver saves itself, each probe's value is Excel's text for that cell.
-    private static (ExcelDocument Driver, int Probes) BuildDriver(PackSettings settings, ExcelVersion version, List<(string Name, ExcelDocument? Sheet)> targets)
+    // Whether a formula refers to another document (an external-sheet token other than the active sheet's).
+    private static bool ReferencesOtherDocuments(ExcelFormula formula)
+    {
+        foreach (var token in FormulaTokens.Enumerate(formula.IsArrayFormula ? formula.SharedExpression : formula.Expression))
+        {
+            if (token.Code == FormulaTokens.ExternalSheet)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static (ExcelDocument Driver, int Probes) BuildDriver(PackSettings settings, ExcelVersion version, List<(string Name, ExcelDocument? Sheet)> targets, Dictionary<string, string[]> commands)
     {
         var driver = ExcelDocument.CreateMacroSheet();
         driver.State.SetColumnWidth(0, 200);
@@ -140,30 +177,85 @@ sealed class PackCommand : Command<PackSettings>
         Put("=ERROR(FALSE)", "start");
         foreach (var (name, sheet) in targets)
         {
-            // 0: do not update links, which would otherwise stop Driver with a question.
-            Put($"=OPEN({Quote(settings.Volume + ":" + name)},0)", "open " + name);
+            // The file's block of rows, laid out first so the guards after OPEN know where the next file starts.
+            // Each entry is a formula and its label; {P:n} in a formula stands for the row of the block's n-th entry.
+            var block = new List<(string Formula, string Label)>();
+            var probeRows = new List<(int Row, int Column, ExcelFormula Formula, int Entry)>();
             if (sheet is not null && !settings.NoProbe)
             {
                 foreach (var (r, c, cell) in sheet.Cells.NonEmptyCells)
                 {
-                    if (cell.Formula is not null)
+                    if (cell.Formula is { } formula)
                     {
                         string address = new ExcelCellAddress(r, c).ToString();
-                        Put($"=GET.FORMULA(!{address})", name + "!" + address);
+                        probeRows.Add((r, c, formula, block.Count));
+                        block.Add(($"=GET.FORMULA(!{address})", name + "!" + address));
                         probes++;
                     }
                 }
             }
 
-            Put($"=SAVE.AS({Quote(settings.Volume + ":" + ExcelTest.SavedName(name))})", "save " + name);
+            // Excel compiles the text it just gave back, so its re-save holds its own tokens for each formula.
+            // Formulas that refer to other documents are left alone: re-entering one makes Excel ask for the file.
+            if (settings.Recompile)
+            {
+                foreach (var (r, c, formula, entry) in probeRows)
+                {
+                    string address = new ExcelCellAddress(r, c).ToString();
+                    if (ReferencesOtherDocuments(formula))
+                    {
+                        continue;
+                    }
+
+                    if (formula.IsArrayFormula)
+                    {
+                        if (!formula.IsSharedAnchor || formula.SharedRange is not { } range)
+                        {
+                            continue;
+                        }
+
+                        string area = new ExcelCellAddress(range.FirstRow, range.FirstColumn) + ":" + new ExcelCellAddress(range.LastRow, range.LastColumn);
+                        block.Add(($"=SELECT(!{area},!{address})", "select " + name + "!" + area));
+                        block.Add(($"=FORMULA.ARRAY(A{{P:{entry}}})", "recompile " + name + "!" + address));
+                    }
+                    else
+                    {
+                        block.Add(($"=SELECT(!{address})", "select " + name + "!" + address));
+                        block.Add(($"=FORMULA(A{{P:{entry}}})", "recompile " + name + "!" + address));
+                    }
+                }
+            }
+
+            foreach (string command in settings.Each.Concat(commands.GetValueOrDefault(name, [])))
+            {
+                block.Add((command.Trim(), "command " + name));
+            }
+
+            block.Add(($"=SAVE.AS({Quote(settings.Volume + ":" + ExcelTest.SavedName(name))})", "save " + name));
             if (!settings.KeepOpen)
             {
-                Put("=CLOSE()", "close " + name);
+                block.Add(("=CLOSE()", "close " + name));
+            }
+
+            // 0: do not update links, which would otherwise stop Driver with a question. If OPEN fails (a missing
+            // file, or Excel out of memory), skip to the next file rather than run its commands on Driver itself.
+            int open = row, first = row + 3, next = first + block.Count;
+            Put($"=OPEN({Quote(settings.Volume + ":" + name)},0)", "open " + name);
+            Put($"=IF(ISERROR(A{open + 1}),GOTO(A{next + 1}))", "skip if not opened");
+            Put($"=IF(NOT(A{open + 1}),GOTO(A{next + 1}))", "skip if not opened");
+            foreach (var (formula, label) in block)
+            {
+                Put(Regex.Replace(formula, @"\{P:(\d+)\}", m => (first + int.Parse(m.Groups[1].Value) + 1).ToString()), label);
             }
         }
 
         Put($"=ACTIVATE({Quote(ExcelTest.DriverName)})", "activate");
         Put("=SAVE()", "save Driver");
+        foreach (string command in settings.End)
+        {
+            Put(command, "end command");
+        }
+
         Put("=RETURN()", "end");
 
         // Run is the command macro for Macro > Run (Option-Command-R); Excel 1.5 also runs Auto_Open on open.
@@ -175,10 +267,10 @@ sealed class PackCommand : Command<PackSettings>
 
         foreach (string name in names)
         {
-            driver.Names.Add(new ExcelDefinedName(name, [], ExcelDefinedName.ReferenceFlag | ExcelDefinedName.CommandFlag)
+            driver.Names.Add(new ExcelDefinedName(name, [], ExcelDefinedName.ReferenceFlag | ExcelDefinedName.MacroFlag)
             {
                 ShortcutKey = name == "Run" ? (byte)'r' : (byte)0,
-                ShortcutExtra = 0x40,
+                MacroKind = 0x40,
             });
         }
 
@@ -246,15 +338,16 @@ sealed class CheckCommand : Command<CheckSettings>
                 : $"  Bytes: ours {original.Data.Length:N0}, Excel {saved.Data.Length:N0}; {DifferingBytes(original.Data, saved.Data):N0} differ in the common length.");
             problems += original.Type == "MCBN"
                 ? CompareJson(JsonCommand.ChartModel(ChartDocument.Read(original.Data)), JsonCommand.ChartModel(ChartDocument.Read(saved.Data)), settings.All)
-                : CheckSheet(original, saved, results, settings.All);
+                : CheckSheet(original, saved, results, settings);
         }
 
         AnsiConsole.MarkupLine(problems == 0 ? "[green]No unexpected differences.[/]" : $"[yellow]{problems} unexpected difference(s).[/]");
         return problems == 0 ? 0 : 1;
     }
 
-    private static int CheckSheet(MfsFile original, MfsFile saved, Dictionary<string, ExcelCell> results, bool all)
+    private static int CheckSheet(MfsFile original, MfsFile saved, Dictionary<string, ExcelCell> results, CheckSettings settings)
     {
+        bool all = settings.All;
         var ours = ExcelDocument.Read(original.Data);
         var excel = ExcelDocument.Read(saved.Data);
         int problems = 0, probed = 0;
@@ -290,6 +383,37 @@ sealed class CheckCommand : Command<CheckSettings>
             AnsiConsole.MarkupLine($"  GET.FORMULA: {probed} formula(s) probed.");
         }
 
+        // The tokens in Excel's re-save, with the bytes left over from memory cleared. After --recompile they are
+        // Excel's own compilation of each formula.
+        int compared = 0;
+        foreach (var (r, c, cell) in ours.Cells.NonEmptyCells)
+        {
+            if (cell.Formula is not { } formula || (formula.IsArrayFormula && !formula.IsSharedAnchor) || excel.Cells.TryGet(r, c)?.Formula is not { } theirs)
+            {
+                continue;
+            }
+
+            compared++;
+            var a = FormulaTokens.ClearStaleBytes(formula.IsArrayFormula ? formula.SharedExpression : formula.Expression);
+            var b = FormulaTokens.ClearStaleBytes(theirs.IsArrayFormula ? theirs.SharedExpression : theirs.Expression);
+            bool sameFixups = formula.IsArrayFormula || formula.GetFixupWords().SequenceEqual(theirs.GetFixupWords());
+            if (!a.AsSpan().SequenceEqual(b) || !sameFixups)
+            {
+                AnsiConsole.MarkupLine($"  [yellow]{new ExcelCellAddress(r, c)} tokens[/] {Markup.Escape(formula.ToText(ours))}: ours {Convert.ToHexString(a)}, Excel {Convert.ToHexString(b)}" + (sameFixups ? "" : " (fix-ups differ)"));
+                problems++;
+            }
+        }
+
+        if (compared > 0)
+        {
+            AnsiConsole.MarkupLine($"  Tokens: {compared} formula(s) compared.");
+        }
+
+        if (settings.Bytes)
+        {
+            CompareBytes(ours, excel);
+        }
+
         problems += CompareJson(JsonCommand.SheetModel(ours, false), JsonCommand.SheetModel(excel, false), all);
         return problems;
     }
@@ -319,6 +443,52 @@ sealed class CheckCommand : Command<CheckSettings>
         }
 
         return differences.Count;
+    }
+
+    // Raw differences in the parts the JSON model leaves out. Informational: they do not count as problems.
+    private static void CompareBytes(ExcelDocument ours, ExcelDocument excel)
+    {
+        void Report(string what, ReadOnlySpan<byte> a, ReadOnlySpan<byte> b, Func<int, bool>? skip = null)
+        {
+            var parts = new List<string>();
+            for (int i = 0; i < Math.Max(a.Length, b.Length); i++)
+            {
+                int x = i < a.Length ? a[i] : -1, y = i < b.Length ? b[i] : -1;
+                if (x != y && skip?.Invoke(i) != true)
+                {
+                    parts.Add($"0x{i:X3}: {(x < 0 ? "--" : x.ToString("X2"))}→{(y < 0 ? "--" : y.ToString("X2"))}");
+                }
+            }
+
+            if (parts.Count > 0)
+            {
+                AnsiConsole.MarkupLine($"  [blue]{Markup.Escape(what)}[/] {string.Join(", ", parts)}");
+            }
+        }
+
+        AnsiConsole.MarkupLine($"  Function count: ours {ours.FunctionCount}, Excel {excel.FunctionCount}; extra header: ours {Convert.ToHexString(ours.ExtraHeader)}, Excel {Convert.ToHexString(excel.ExtraHeader)}");
+
+        // State block offsets the spec marks as memory pointers.
+        static bool Garbage(int i) => i is >= 0x026 and < 0x03E or >= 0x256 and < 0x25A or >= 0x266 and < 0x26A;
+        Report("State block", ours.State.RawData, excel.State.RawData, Garbage);
+        for (int i = 0; i < Math.Min(ours.Windows.Count, excel.Windows.Count); i++)
+        {
+            // Window state bytes 23–25 and 29–32 are stale pointers and padding (spec §13).
+            Report($"Window {i + 1} state", ours.Windows[i].State, excel.Windows[i].State, j => j is >= 23 and < 26 or >= 29 and < 33);
+        }
+
+        foreach (var name in ours.Names)
+        {
+            if (excel.Names.FirstOrDefault(n => n.Name == name.Name) is { } other)
+            {
+                Report($"Name {name.Name} flags, key, key flags", [name.Flags, name.ShortcutKey, name.MacroKind], [other.Flags, other.ShortcutKey, other.MacroKind]);
+            }
+        }
+
+        for (int i = 0; i < Math.Min(ours.ExternalDocuments.Count, excel.ExternalDocuments.Count); i++)
+        {
+            Report($"External document {i + 1} entry bytes", ours.ExternalDocuments[i].Reserved, excel.ExternalDocuments[i].Reserved);
+        }
     }
 
     private static int DifferingBytes(byte[] a, byte[] b)

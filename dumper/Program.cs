@@ -74,6 +74,15 @@ public sealed class Program
 
     internal static string Escape(string? text) => Markup.Escape(text ?? string.Empty);
 
+    // Spec §6, 0x002, confirmed with Excel 1.03's CALCULATION command.
+    internal static string CalculationModeText(short mode) => mode switch
+    {
+        1 => "automatic",
+        -1 => "automatic except tables",
+        0 => "manual",
+        _ => mode.ToString(CultureInfo.InvariantCulture),
+    };
+
     internal static string Hex(ReadOnlySpan<byte> bytes) => bytes.IsEmpty ? "(none)" : Convert.ToHexString(bytes);
 
     internal static string YesNo(bool value) => value ? "yes" : "no";
@@ -514,7 +523,7 @@ sealed class DumpCommand : Command<FileSettings>
         AnsiConsole.Write(header);
 
         var settingsTable = new Table().Title("[bold]Sheet settings[/]").AddColumn("Setting").AddColumn("Value");
-        settingsTable.AddRow("Calculation mode", state.CalculationMode switch { 1 => "automatic", 0 => "automatic except tables", -1 => "manual", var m => m.ToString(CultureInfo.InvariantCulture) });
+        settingsTable.AddRow("Calculation mode", Program.CalculationModeText(state.CalculationMode));
         settingsTable.AddRow("Precision", state.FullPrecision ? "full" : "as displayed");
         settingsTable.AddRow("Iteration", $"{Program.YesNo(state.Iteration)}, max {state.MaxIterations}, max change {state.MaxChange.ToString(CultureInfo.InvariantCulture)}");
         settingsTable.AddRow("Reference style word", state.ReferenceStyle.ToString(CultureInfo.InvariantCulture));
@@ -593,7 +602,8 @@ sealed class DumpCommand : Command<FileSettings>
         for (int i = 0; i < document.Names.Count; i++)
         {
             var name = document.Names[i];
-            string kind = name.IsCommand ? $"command (Option-⌘-{(char)name.ShortcutKey})"
+            string kind = name.IsCommand ? (name.ShortcutKey == 0 ? "command" : $"command (Option-⌘-{(char)name.ShortcutKey})")
+                : name.IsFunctionMacro ? "function macro"
                 : name.Definition.Length == 0 ? "undefined"
                 : (name.Flags & ExcelDefinedName.ReferenceFlag) != 0 ? "reference" : "formula";
             names.AddRow((i + 1).ToString(CultureInfo.InvariantCulture), Program.Escape(name.Name), Program.Escape(kind),
@@ -794,6 +804,7 @@ sealed class JsonCommand : Command<JsonSettings>
         return new
         {
             kind = document.Kind.ToString(),
+            version = document.Version,
             signature = $"0x{document.Signature:X4}",
             rows = document.Cells.RowCount,
             columns = document.Cells.ColumnCount,
@@ -811,6 +822,7 @@ sealed class JsonCommand : Command<JsonSettings>
                 columnWidths = Enumerable.Range(0, ExcelSheetState.ColumnCount).Where(i => state.GetColumnWidth(i) != 75)
                     .ToDictionary(i => FormulaDecompiler.ColumnName(i), i => (int)state.GetColumnWidth(i)),
             },
+            numberFormats = document.NumberFormats.Select(f => Convert.ToHexString(f.Descriptor) + " " + Convert.ToHexString(f.Body)),
             externalDocuments = document.ExternalDocuments.Select(d => new { name = d.Name, names = d.Names }),
             names = document.Names.Select(n => new
             {
@@ -867,12 +879,14 @@ sealed class WorkspaceCommand : Command<FileSettings>
     {
         var workspace = ExcelWorkspace.Load(settings.Input);
         var summary = new Table().Title("[bold]Workspace[/]").AddColumn("Field").AddColumn("Value");
-        summary.AddRow("Calculation mode", workspace.CalculationMode.ToString(CultureInfo.InvariantCulture));
+        summary.AddRow("Calculation mode", Program.CalculationModeText(workspace.CalculationMode));
         summary.AddRow("Precision", workspace.FullPrecision ? "full" : "as displayed");
         summary.AddRow("Iteration", $"{Program.YesNo(workspace.Iteration)}, max {workspace.MaxIterations}, max change {workspace.MaxChange.ToString(CultureInfo.InvariantCulture)}");
-        summary.AddRow("Window option word", workspace.WindowOption.ToString(CultureInfo.InvariantCulture));
-        summary.AddRow("Block after the windows", Program.Hex(workspace.Block));
-        summary.AddRow("Trailer", Program.Hex(workspace.Trailer));
+        summary.AddRow("A window zoomed", Program.YesNo(workspace.Zoomed));
+        summary.AddRow("Preferred chart format", workspace.PreferredChartFormat.Length == 0 ? "(none)" : $"{workspace.PreferredChartFormat.Length:N0} bytes");
+        string[] bauds = ["300", "600", "1200", "2400", "4800", "9600"];
+        summary.AddRow("Printer setup", workspace.PrinterType == 0 ? "Macintosh"
+            : $"TTY, {(workspace.PrinterPort == 0 ? "printer" : "modem")} port, {(workspace.PrinterBaud < bauds.Length ? bauds[workspace.PrinterBaud] : workspace.PrinterBaud.ToString(CultureInfo.InvariantCulture))} baud");
         AnsiConsole.Write(summary);
 
         var windows = new Table().Title("[bold]Windows, front to back[/]").AddColumn("Kind").AddColumn("Document").AddColumn("Folder").AddColumn("Directory").AddColumn("Rectangle").AddColumn("Active cell");

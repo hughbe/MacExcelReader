@@ -71,8 +71,8 @@ public sealed class ExcelSheetState
     }
 
     /// <summary>
-    /// Gets or sets the raw calculation-mode word. 1 is automatic and −1 manual; 0 is believed to be
-    /// "automatic except tables".
+    /// Gets or sets the raw calculation-mode word: 1 automatic, −1 automatic except tables, 0 manual (confirmed with
+    /// Excel 1.03's CALCULATION command).
     /// </summary>
     public short CalculationMode
     {
@@ -206,6 +206,17 @@ public sealed class ExcelSheetState
     /// </summary>
     internal bool HoldsCountForm(int rows, int columns)
         => rows > 0 && GetWord(NonEmptyOffset) == 0 && RowCount == rows && ColumnCountInTable == columns;
+
+    /// <summary>
+    /// Sets the words Excel recomputes from the names and external documents when it saves (spec §6): 0x024, the
+    /// number of names whose definition is a reference, and 0x03E, the 1-based position of the active-sheet
+    /// external entry, or 0. (0x022 is only counted up by Define Name; Open and Save carry it through as it is.)
+    /// </summary>
+    internal void SetNameCounts(int references, int activeSheetEntry)
+    {
+        SetWord(0x024, (ushort)references);
+        SetWord(0x03E, (ushort)activeSheetEntry);
+    }
 
     /// <summary>
     /// Updates the extent words so they describe a cell table of the given size.
