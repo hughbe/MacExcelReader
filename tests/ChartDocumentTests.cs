@@ -63,8 +63,8 @@ public class ChartDocumentTests
         chart.CategoriesBetweenTickLabels = 3;
         var axis = chart.CategoryAxis;
         axis.MinorTickMarks = TickMarkType.Cross;
-        axis.MajorGridlinePattern = ChartPattern.LightGray;
-        axis.MinorGridlinePattern = ChartPattern.DarkGray;
+        axis.MajorGridlines.Pattern = ChartPattern.LightGray;
+        axis.MinorGridlines.Pattern = ChartPattern.DarkGray;
         var scale = chart.ValueScale;
         scale.Minimum = -10;
         scale.Maximum = 20;
@@ -92,8 +92,8 @@ public class ChartDocumentTests
         Assert.True(reread.CategoriesInReverseOrder);
         Assert.Equal(3, reread.CategoriesBetweenTickLabels);
         Assert.Equal(TickMarkType.Cross, reread.CategoryAxis.MinorTickMarks);
-        Assert.Equal(ChartPattern.LightGray, reread.CategoryAxis.MajorGridlinePattern);
-        Assert.Equal(ChartPattern.DarkGray, reread.CategoryAxis.MinorGridlinePattern);
+        Assert.Equal(ChartPattern.LightGray, reread.CategoryAxis.MajorGridlines.Pattern);
+        Assert.Equal(ChartPattern.DarkGray, reread.CategoryAxis.MinorGridlines.Pattern);
         Assert.Equal(-10, reread.ValueScale.Minimum);
         Assert.Equal(20, reread.ValueScale.Maximum);
         Assert.Equal(5, reread.ValueScale.MajorUnit);

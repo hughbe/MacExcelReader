@@ -132,14 +132,20 @@ public sealed class Chart
     /// </summary>
     public (short Top, short Left) DrawingMargins => (unchecked((short)GetWord(14)), unchecked((short)GetWord(16)));
 
-    /// <summary>Gets the chart area's box in twips, as Excel last laid it out: (0, 0, height, width).</summary>
-    public ChartBox ChartAreaBox => ReadBox(24 + 8);
+    /// <summary>Gets the chart area's format: border, background and the box Excel last drew it in.</summary>
+    public ChartAreaFormat ChartArea => new(Record, 24);
 
-    /// <summary>Gets the plot area's box in twips, relative to the chart area, as Excel last laid it out.</summary>
-    public ChartBox PlotAreaBox => ReadBox(138 + 8);
+    /// <summary>Gets the plot area's format; its box is relative to the chart area.</summary>
+    public ChartAreaFormat PlotArea => new(Record, 138);
 
-    private ChartBox ReadBox(int offset)
-        => new(unchecked((short)GetWord(offset)), unchecked((short)GetWord(offset + 2)), unchecked((short)GetWord(offset + 4)), unchecked((short)GetWord(offset + 6)));
+    /// <summary>Gets the legend's area format.</summary>
+    public ChartAreaFormat LegendArea => new(Record, 160);
+
+    /// <summary>Gets the drop lines (line and area charts).</summary>
+    public ChartLineFormat DropLines => new(Record, 254);
+
+    /// <summary>Gets the hi-lo lines (line charts).</summary>
+    public ChartLineFormat HiLoLines => new(Record, 258);
 
     /// <summary>
     /// Gets the number of categories, which Excel works out when it draws the chart (header byte 4; 0 in overlays).
@@ -279,8 +285,8 @@ public sealed class Chart
         chart.ValueAxis.TickLabelPosition = TickLabelPosition.NextToAxis;
         chart.CategoryAxis.MajorTickMarks = TickMarkType.Outside;
         chart.ValueAxis.MajorTickMarks = TickMarkType.Outside;
-        chart.CategoryAxis.AxisLinePattern = ChartPattern.Solid;
-        chart.ValueAxis.AxisLinePattern = ChartPattern.Solid;
+        chart.CategoryAxis.Line.Pattern = ChartPattern.Solid;
+        chart.ValueAxis.Line.Pattern = ChartPattern.Solid;
         var scale = chart.ValueScale;
         scale.AutoMinimum = scale.AutoMaximum = scale.AutoMajorUnit = scale.AutoMinorUnit = scale.AutoCrossesAt = true;
         if (type == ChartType.Scatter)
@@ -325,8 +331,14 @@ public sealed class ChartAxis
     /// <summary>Gets or sets the tick label position.</summary>
     public TickLabelPosition TickLabelPosition { get => (TickLabelPosition)((Word >> 4) & 0xF); set => SetField(4, (int)value); }
 
-    /// <summary>Gets or sets the axis line pattern; 0 hides the axis.</summary>
-    public ChartPattern AxisLinePattern { get => (ChartPattern)_data[_offset + 13]; set => _data[_offset + 13] = (byte)value; }
+    /// <summary>Gets the axis line; <see cref="ChartPattern.None"/> hides the axis.</summary>
+    public ChartLineFormat Line => new(_data, _offset + 12);
+
+    /// <summary>Gets the major gridlines; <see cref="ChartPattern.None"/> hides them.</summary>
+    public ChartLineFormat MajorGridlines => new(_data, _offset + 16);
+
+    /// <summary>Gets the minor gridlines; <see cref="ChartPattern.None"/> hides them.</summary>
+    public ChartLineFormat MinorGridlines => new(_data, _offset + 20);
 
     /// <summary>Gets where Excel last drew the tick labels, in twips; 0 when the axis has no tick labels.</summary>
     public short TickLabelsAt => unchecked((short)BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + 8)));
@@ -337,14 +349,71 @@ public sealed class ChartAxis
     /// <summary>Gets the tick-mark length in twips, which Excel works out when it draws the chart.</summary>
     public short TickLength => unchecked((short)BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + 6)));
 
-    /// <summary>Gets or sets the major gridline pattern; 0 hides them.</summary>
-    public ChartPattern MajorGridlinePattern { get => (ChartPattern)_data[_offset + 17]; set => _data[_offset + 17] = (byte)value; }
-
-    /// <summary>Gets or sets the minor gridline pattern; 0 hides them.</summary>
-    public ChartPattern MinorGridlinePattern { get => (ChartPattern)_data[_offset + 21]; set => _data[_offset + 21] = (byte)value; }
-
     /// <summary>Gets the tick-label font descriptor bytes (on disk, Microsoft Chart codes).</summary>
     public ReadOnlySpan<byte> Font => _data.AsSpan(_offset + 2, 4);
+}
+
+/// <summary>
+/// A view of a 4-byte line format (spec §16.4): axis lines, gridlines, drop and hi-lo lines, arrow shafts.
+/// </summary>
+public sealed class ChartLineFormat
+{
+    private readonly byte[] _data;
+    private readonly int _offset;
+
+    internal ChartLineFormat(byte[] data, int offset)
+    {
+        _data = data;
+        _offset = offset;
+    }
+
+    /// <summary>Gets or sets the pattern; <see cref="ChartPattern.None"/> means the line is not drawn.</summary>
+    public ChartPattern Pattern { get => (ChartPattern)_data[_offset + 1]; set => _data[_offset + 1] = (byte)value; }
+
+    /// <summary>Gets or sets the weight.</summary>
+    public ChartLineWeight Weight
+    {
+        get => (ChartLineWeight)((BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + 2)) >> 12) & 0xF);
+        set
+        {
+            ushort word = BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + 2));
+            BinaryPrimitives.WriteUInt16BigEndian(_data.AsSpan(_offset + 2), (ushort)((word & 0x0FFF) | (((int)value & 0xF) << 12)));
+        }
+    }
+}
+
+/// <summary>
+/// A view of a 16-byte area format (spec §16.4): the chart area, plot area, legend and text boxes.
+/// </summary>
+public sealed class ChartAreaFormat
+{
+    private readonly byte[] _data;
+    private readonly int _offset;
+
+    internal ChartAreaFormat(byte[] data, int offset)
+    {
+        _data = data;
+        _offset = offset;
+    }
+
+    private ushort GetWord(int offset) => BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + offset));
+
+    private void SetWord(int offset, ushort value) => BinaryPrimitives.WriteUInt16BigEndian(_data.AsSpan(_offset + offset), value);
+
+    /// <summary>Gets the border: its pattern and weight.</summary>
+    public ChartLineFormat Border => new(_data, _offset);
+
+    /// <summary>Gets or sets the background pattern; <see cref="ChartPattern.None"/> means none.</summary>
+    public ChartPattern BackgroundPattern { get => (ChartPattern)_data[_offset + 5]; set => _data[_offset + 5] = (byte)value; }
+
+    /// <summary>Gets or sets whether the box has a shadow (bits 11–8 of the word at offset 6).</summary>
+    public bool HasShadow { get => (GetWord(6) & 0x0F00) != 0; set => SetWord(6, (ushort)(value ? GetWord(6) | 0x0100 : GetWord(6) & ~0x0F00)); }
+
+    /// <summary>Gets or sets whether a text box sizes itself automatically (bit 14 of the word at offset 6).</summary>
+    public bool AutomaticSize { get => (GetWord(6) & 0x4000) != 0; set => SetWord(6, (ushort)(value ? GetWord(6) | 0x4000 : GetWord(6) & ~0x4000)); }
+
+    /// <summary>Gets the box in twips, as Excel last laid it out when it drew the chart.</summary>
+    public ChartBox Box => new(unchecked((short)GetWord(8)), unchecked((short)GetWord(10)), unchecked((short)GetWord(12)), unchecked((short)GetWord(14)));
 }
 
 /// <summary>
@@ -374,15 +443,8 @@ public sealed class ChartPointFormat
         BinaryPrimitives.WriteUInt16BigEndian(_data.AsSpan(_offset + offset), (ushort)(value ? word | (1 << bit) : word & ~(1 << bit)));
     }
 
-    /// <summary>Gets or sets the line or border pattern; 0 means none.</summary>
-    public ChartPattern LinePattern { get => (ChartPattern)_data[_offset + 1]; set => _data[_offset + 1] = (byte)value; }
-
-    /// <summary>Gets or sets the line or border weight (bits 15–12 of the word at offset 2).</summary>
-    public ChartLineWeight LineWeight
-    {
-        get => (ChartLineWeight)(GetWord(2) >> 12);
-        set => BinaryPrimitives.WriteUInt16BigEndian(_data.AsSpan(_offset + 2), (ushort)((GetWord(2) & 0x0FFF) | (((int)value & 0xF) << 12)));
-    }
+    /// <summary>Gets the line or border: its pattern and weight.</summary>
+    public ChartLineFormat Line => new(_data, _offset);
 
     /// <summary>Gets or sets whether the line or border is automatic.</summary>
     public bool AutomaticLine { get => (GetWord(2) & 0x0400) != 0; set => SetBit(2, 10, value); }

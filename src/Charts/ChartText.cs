@@ -90,13 +90,16 @@ public sealed class ChartText
     /// Gets or sets whether the object is an arrow rather than text (memory offset 17). An arrow is a free object
     /// with automatic text and no string; its two points are the arrow's ends (spec §16.7).
     /// </summary>
-    public bool IsArrow { get => Record[15] != 0; set => Record[15] = (byte)(value ? 1 : 0); }
+    public bool IsArrow { get => ArrowLine.Pattern != ChartPattern.None; set => ArrowLine.Pattern = value ? ChartPattern.Solid : ChartPattern.None; }
 
-    /// <summary>Gets or sets an arrow's pattern (memory offset 17); <see cref="ChartPattern.None"/> means the object is text.</summary>
-    public ChartPattern ArrowPattern { get => (ChartPattern)Record[15]; set => Record[15] = (byte)value; }
+    /// <summary>
+    /// Gets an arrow's line: its pattern (memory offset 17), which is <see cref="ChartPattern.None"/> for text, and
+    /// its shaft weight.
+    /// </summary>
+    public ChartLineFormat ArrowLine => new(Record, 14);
 
-    /// <summary>Gets or sets an arrow's shaft weight.</summary>
-    public ChartLineWeight ShaftWeight { get => (ChartLineWeight)((Word(16) >> 12) & 3); set => SetWord(16, (ushort)((Word(16) & ~0x3000) | (((int)value & 3) << 12))); }
+    /// <summary>Gets the text box's area format: border, background and the box Excel last drew it in.</summary>
+    public ChartAreaFormat Area => new(Record, 20);
 
     /// <summary>Gets or sets an arrow's head width.</summary>
     public ArrowHeadWidth HeadWidth { get => (ArrowHeadWidth)((Word(18) >> 12) & 3); set => SetWord(18, (ushort)((Word(18) & ~0x3000) | (((int)value & 3) << 12))); }

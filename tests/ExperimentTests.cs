@@ -341,8 +341,8 @@ public class ExperimentTests
         // Excel 1.00: Chart > Axes, "Overlay Chart Axis" under Category Axes, on the Combination sample. The overlay's
         // category axis line pattern becomes 1; its option flags do not change (spec §16.5).
         var overlay = ChartDocument.Load(SamplePath("Overlay Axis")).OverlayChart!;
-        Assert.Equal(ChartPattern.Solid, overlay.CategoryAxis.AxisLinePattern);
-        Assert.Equal(ChartPattern.None, overlay.ValueAxis.AxisLinePattern);
+        Assert.Equal(ChartPattern.Solid, overlay.CategoryAxis.Line.Pattern);
+        Assert.Equal(ChartPattern.None, overlay.ValueAxis.Line.Pattern);
         Assert.Equal(0x0F, overlay.Record[22]);
     }
 
@@ -355,8 +355,8 @@ public class ExperimentTests
         var document = ChartDocument.Load(SamplePath(name));
         var chart = document.MainChart;
         var (top, left) = chart.DrawingMargins;
-        Assert.InRange(document.ChartHeight - (2 * top + chart.ChartAreaBox.Height), -1, 1);
-        Assert.InRange(document.ChartWidth - (2 * left + chart.ChartAreaBox.Width), -1, 1);
+        Assert.InRange(document.ChartHeight - (2 * top + chart.ChartArea.Box.Height), -1, 1);
+        Assert.InRange(document.ChartWidth - (2 * left + chart.ChartArea.Box.Width), -1, 1);
     }
 
     [Fact]
@@ -364,7 +364,7 @@ public class ExperimentTests
     {
         // PROFIT CHART's value axis crosses before the first category (spec §16.5).
         var chart = ChartDocument.Load(SamplePath("PROFIT CHART")).MainChart;
-        Assert.Equal(chart.PlotAreaBox.Left, chart.ValueAxis.LineAt);
+        Assert.Equal(chart.PlotArea.Box.Left, chart.ValueAxis.LineAt);
     }
 
     [Fact]
@@ -430,8 +430,8 @@ public class ExperimentTests
         // PROFIT CHART's arrow, and an arrow set in Format > Patterns in Excel 1.00 (spec §16.7).
         var arrow = ChartDocument.Load(SamplePath(name)).MainChart.Texts[index];
         Assert.True(arrow.IsArrow);
-        Assert.Equal(pattern, arrow.ArrowPattern);
-        Assert.Equal(weight, arrow.ShaftWeight);
+        Assert.Equal(pattern, arrow.ArrowLine.Pattern);
+        Assert.Equal(weight, arrow.ArrowLine.Weight);
         Assert.Equal(width, arrow.HeadWidth);
         Assert.Equal(length, arrow.HeadLength);
         Assert.Equal(style, arrow.HeadStyle);
