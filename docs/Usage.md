@@ -322,7 +322,8 @@ Patterns, markers, line weights and arrowheads are enums (`ChartPattern`, `Chart
 A chart file stores a copy of the plotted data, so the values are available without the worksheet. Numbers
 in chart files use Microsoft's 8-byte decimal format; `MicrosoftDecimal` converts them. `CategoryCount`,
 `DrawingMargins`, the area formats' `Box` and the axes' `TickLength`, `TickLabelsAt` and `LineAt` are the layout Excel worked out the
-last time it drew the chart; Excel recomputes them, so a writer can leave them as they are. Chart support was
+last time it drew the chart; Excel recomputes them, so a writer can leave them as they are. A chart Excel 1.5 saved last
+holds the category count as a word instead, which `Excel15CategoryCount` reads. Chart support was
 derived from Excel's code and is checked against Microsoft's three sample charts and the charts Excel saved in
 experiments, which all read and write back byte for byte.
 

@@ -1,3 +1,4 @@
+using MacExcelReader.Charts;
 using static MacExcelReader.Tests.TestData;
 
 namespace MacExcelReader.Tests;
@@ -48,6 +49,22 @@ public class WorkspaceTests
         Assert.Equal([ExcelWorkspaceWindow.ChartKind, ExcelWorkspaceWindow.MacroSheetKind, ExcelWorkspaceWindow.MacroSheetKind], workspace.Windows.Select(w => w.Kind));
         Assert.Equal("Ws:Clock saved", workspace.Windows[0].DocumentName);
         Assert.Equal(bytes, workspace.ToArray());
+    }
+
+    [Fact]
+    public void ResumeExcel2_PreferredChartFormatIsTheChartDataBlock()
+    {
+        // The preferred format is CLOCK.CH's chart data block (spec Appendix B): its length word, the three titles at
+        // their fixed offsets, and the chart table at 652 pointing at the main chart and then the overlay.
+        var workspace = ExcelWorkspace.Read(Sample("Resume Excel 2"));
+        var block = workspace.PreferredChartFormat;
+
+        Assert.Equal(block.Length, (block[0] << 8) | block[1]);
+        Assert.Equal(1, block[334 + 3] & 0x0F);
+        Assert.Equal(2, block[394 + 3] & 0x0F);
+        Assert.Equal(3, block[454 + 3] & 0x0F);
+        Assert.Equal([666, 1058], workspace.PreferredChartOffsets);
+        Assert.Equal([ChartType.Scatter, ChartType.Pie], workspace.PreferredChartTypes);
     }
 
     [Fact]

@@ -21,12 +21,19 @@ specification it is built from. The library is unreleased, so its API can change
   bit fields gets its own table too (a `Bits` column, highest first, or a `Flag` column for masks such as
   `0x04`), and its row in the record table says "(below)". Only a field holding a single bit field describes
   it in its row ("bits 15–12: weight").
+- Keep every table in order: record tables by offset, bit tables highest bit first. An unused byte or bit gets
+  its own row in its place ("Not used"), not a combined row at the end.
 - Bytes Excel copies straight from memory are "left over from memory" (defined in the spec's Conventions); do not
   call them junk, garbage or stale.
 - Write version differences from earlier to later ("1.03 adds…"), not the other way round.
 - Every file Excel saves in an experiment that shows something goes into `tests/Samples/<release>/`, named for
   what it shows, with a test in `tests/ExperimentTests.cs`. The round-trip and recompile tests then cover it.
+- A finding from the decompiled code that the samples can show (a field's value, a byte always 0) also gets a
+  test over those samples, in `tests/ExperimentTests.cs` or, for a rule every sample follows, a theory over
+  `TestData.AllSheets()` or `AllCharts()`.
 - When a finding adds a field, expose it in the library and show it in the `dumper` output.
+- A later release's code can explain an earlier release's bytes: Excel 1.5 widening a field leaves values that
+  1.00 and 1.03 carry along. Check Excel 1.5's code when Excel 1.00 never writes a byte.
 - Keep the spec clear and plain: no duplication between sections, the right level of detail, no filler.
   Update §18 (open questions), `docs/Testing.md` (results table) and the README when findings change them.
 

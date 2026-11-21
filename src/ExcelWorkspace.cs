@@ -99,10 +99,41 @@ public sealed class ExcelWorkspace
     public List<ExcelWorkspaceWindow> Windows { get; } = [];
 
     /// <summary>
-    /// Gets or sets the preferred chart format (Chart > Set Preferred Format, applied by Gallery > Preferred): Excel's
-    /// in-memory image of a chart, whose first word is its length. Empty when none has been set.
+    /// Gets or sets the preferred chart format (Chart > Set Preferred Format, applied by Gallery > Preferred): the
+    /// chart's data block as it was in memory, whose first word is its length (spec Appendix B). Empty when none has
+    /// been set.
     /// </summary>
     public byte[] PreferredChartFormat { get; set; } = [];
+
+    /// <summary>
+    /// Gets the offsets, within <see cref="PreferredChartFormat"/>, of its chart structures, main chart first and then
+    /// the overlay if there is one, from the chart table at offset 652 (a file stores them the other way round). Each is the 392-byte in-memory form of a chart record (spec §16.5).
+    /// </summary>
+    public IReadOnlyList<int> PreferredChartOffsets
+    {
+        get
+        {
+            var data = PreferredChartFormat;
+            if (data.Length < 658)
+            {
+                return [];
+            }
+
+            int count = Math.Min((int)BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(656)), 2);
+            return Enumerable.Range(0, count)
+                .Select(i => (int)BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(652 + 2 * i)))
+                .ToList();
+        }
+    }
+
+    /// <summary>
+    /// Gets the chart types of the preferred chart format's charts, main chart first: the word at
+    /// offset 2 of each chart structure.
+    /// </summary>
+    public IReadOnlyList<Charts.ChartType> PreferredChartTypes =>
+        PreferredChartOffsets
+            .Select(offset => (Charts.ChartType)BinaryPrimitives.ReadUInt16BigEndian(PreferredChartFormat.AsSpan(offset + 2)))
+            .ToList();
 
     /// <summary>Gets or sets the printer type from Printer Setup: 0 = Macintosh (an ImageWriter), 1 = TTY.</summary>
     public ushort PrinterType { get; set; }

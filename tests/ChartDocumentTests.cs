@@ -1,4 +1,5 @@
 using MacExcelReader.Charts;
+using static MacExcelReader.Tests.TestData;
 
 namespace MacExcelReader.Tests;
 
@@ -270,5 +271,27 @@ public class ChartDocumentTests
     public void Read_WorksheetBytes_Throws()
     {
         Assert.Throws<ExcelFormatException>(() => ChartDocument.Read(new byte[200]));
+    }
+
+    public static TheoryData<string> Charts => AllCharts();
+
+    [Theory]
+    [MemberData(nameof(Charts))]
+    public void PointFormats_LeaveTheUnusedBytesAtZero(string sample)
+    {
+        // Excel 1.00 clears a point format when it makes one and never touches bytes 0 and 5 or bits 14 and 8-0 of
+        // word 8 (spec §16.8).
+        var document = ChartDocument.Read(File.ReadAllBytes(SampleFile(sample)));
+        foreach (var chart in document.Charts)
+        {
+            var formats = chart.PointFormats.Append(chart.Record[366..378]);
+            Assert.All(formats, format =>
+            {
+                Assert.Equal(0, format[0]);
+                Assert.Equal(0, format[5]);
+                Assert.Equal(0, format[8] & 0x41);
+                Assert.Equal(0, format[9]);
+            });
+        }
     }
 }

@@ -295,4 +295,15 @@ public class ReaderTests
         Assert.Equal(5580, chart.ChartWidth);   // 279 pixels: the 295-pixel window less 16
         Assert.Equal(4540, chart.ChartHeight);
     }
+
+    public static TheoryData<string> Sheets => AllSheets();
+
+    [Theory]
+    [MemberData(nameof(Sheets))]
+    public void ExternalDocuments_HaveZeroInTheirUnusedBytes(string sample)
+    {
+        // Excel 1.00 clears the first six bytes of an external-document entry and never uses them (spec §8).
+        var document = ExcelDocument.Read(File.ReadAllBytes(SampleFile(sample)));
+        Assert.All(document.ExternalDocuments, external => Assert.All(external.Reserved, b => Assert.Equal(0, b)));
+    }
 }

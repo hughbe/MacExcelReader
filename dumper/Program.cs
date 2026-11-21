@@ -907,7 +907,10 @@ sealed class WorkspaceCommand : Command<FileSettings>
         summary.AddRow("Precision", workspace.FullPrecision ? "full" : "as displayed");
         summary.AddRow("Iteration", $"{Program.YesNo(workspace.Iteration)}, max {workspace.MaxIterations}, max change {workspace.MaxChange.ToString(CultureInfo.InvariantCulture)}");
         summary.AddRow("A window zoomed", Program.YesNo(workspace.Zoomed));
-        summary.AddRow("Preferred chart format", workspace.PreferredChartFormat.Length == 0 ? "(none)" : $"{workspace.PreferredChartFormat.Length:N0} bytes");
+        summary.AddRow("Preferred chart format", workspace.PreferredChartFormat.Length == 0
+            ? "(none)"
+            : $"{workspace.PreferredChartFormat.Length:N0} bytes; charts at "
+              + string.Join(", ", workspace.PreferredChartOffsets.Zip(workspace.PreferredChartTypes, (o, t) => $"{o} ({t})")));
         string[] bauds = ["300", "600", "1200", "2400", "4800", "9600"];
         summary.AddRow("Printer setup", workspace.PrinterType == 0 ? "Macintosh"
             : $"TTY, {(workspace.PrinterPort == 0 ? "printer" : "modem")} port, {(workspace.PrinterBaud < bauds.Length ? bauds[workspace.PrinterBaud] : workspace.PrinterBaud.ToString(CultureInfo.InvariantCulture))} baud");

@@ -1939,7 +1939,7 @@ None of these affects reading the samples or writing valid files.
 
 **Workspace files** (Appendix B)
 
-* The layout of the preferred chart format before offset 1058, the in-memory chart document.
+* The words at offsets 538–546 and 658–662 of a chart's data block (Appendix B).
 
 ---
 
@@ -2273,10 +2273,35 @@ calculation settings. It holds no cell data. Written by `64.00` and read by `64.
 | 20 bytes | Calculation settings, laid out as offsets 0x000–0x013 of the sheet state block (§6): maximum iterations, calculation mode, precision, reference style, unused word, maximum change (double), iteration. In 1.00 they are global, not per document. |
 | word | 1 if a window was **zoomed** to fill the screen (the FULL command or the zoom box; global `g0c5a`), else 0. Open zooms the front window again (`17.0c`). The rectangles below are always the windows' normal size: Excel un-zooms a window before recording it. |
 | … | The document windows, front to back, each as below, then a `0x00` byte |
-| word | `n`, then `n` bytes: the **preferred chart format** (Chart > Set Preferred Format, applied by Gallery > Preferred). Set Preferred Format keeps the active chart document's whole in-memory block (`5a.13` in 1.00), and this is that block as it is: its first word is its own length, as for every block on Excel's heap, which the memory manager (`0a.03`) moves like any other. `n` = 0 when none has been set (1,640 bytes for `CLOCK.CH`'s format). From offset 1058 it holds the chart record of §16.5 at its in-memory offsets (the table's second column); the rest of the block's layout is **(unknown)**. |
+| word | `n`, then `n` bytes: the **preferred chart format** (Chart > Set Preferred Format, applied by Gallery > Preferred). Set Preferred Format keeps the active chart's data block (`5a.13` in 1.00), and this is that block as it is (below). `n` = 0 when none has been set (1,640 bytes for `CLOCK.CH`'s format). |
 | byte | 0 |
 | 3 words | **Printer Setup** (dialog 288, PRINTER.SETUP): printer type, baud rate and port (values below). The sample's `0, 5, 0` is a Macintosh printer; `PRINTER.SETUP(2,2,3)` gives `1, 2, 1`. |
 | byte | 0 |
+
+**Preferred chart format.** Each chart document keeps its charts in a data block of its own, which the chart
+code makes its data segment (`pushG g23cc | setDS`) and addresses by fixed offsets; the document points at it
+from offset 202. Excel 1.00 makes the block 1,078 bytes long for a new chart (`0f.00`), sets up its fixed
+fields (`0f.02`) and allocates the chart structures, point formats and strings in it as it needs them
+(`30.11`), so it grows. Set Preferred Format keeps the block and gives the chart a fresh one. Its first word
+is its own length, as for every block on Excel's heap, which the memory manager (`0a.03`) moves like any
+other; the pointers inside are offsets in the block, so they stay valid when it moves.
+
+| Offset | Meaning |
+|-------:|---------|
+| 0 | Word: the block's length |
+| 334 | Chart title: a text object in its 60-byte in-memory form (§16.7), kind 1 (`0f.02`) |
+| 394 | Category-axis title, kind 2 |
+| 454 | Value-axis title, kind 3 |
+| 538 | Word, set to −1 when the block is made **(unknown)** |
+| 540, 542, 546 | Words, set to 0 when the block is made **(unknown)** |
+| 652 | Two words: the offsets of the main chart's structure and the overlay's (0 when there is none). Save writes them last first, which is why a file has the overlay first (§16.1; `5d.00`). |
+| 656 | Word: the number of charts |
+| 658, 662 | Words worked out from the chart's series when it is made (`34.00`) **(unknown)** |
+
+Each chart structure is the 392-byte form of the chart record (§16.5, the table's "mem" column). In `Resume
+Excel 2` the table at 652 holds 666 and 1058, the main (scatter) and overlay (pie) charts of `CLOCK.CH`, and
+the count is 2. The rest of the block, its point formats, strings and free space, has no fixed layout
+**(inferred)**.
 
 Printer type:
 
