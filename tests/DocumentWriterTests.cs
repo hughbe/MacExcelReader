@@ -361,6 +361,32 @@ public class DocumentWriterTests
     }
 
     [Fact]
+    public void Excel100FunctionNames_AreReadFromSection7AndWrittenBack()
+    {
+        // Excel 1.00 writes the names of functions numbered 208 and up at the start of section 7 (spec §14).
+        var document = ExcelDocument.CreateWorksheet();
+        document.ExtraHeader = [];
+        document.FunctionCount = 210;
+        document.ExtraFunctionNames.AddRange(["FIRST.EXTRA", "SECOND.EXTRA"]);
+        document.RowPageBreaks.Add(5);
+        document.Cells[0, 0].SetText("x");
+
+        var bytes = document.ToArray();
+        var reread = ExcelDocument.Read(bytes);
+        Assert.Equal(["FIRST.EXTRA", "SECOND.EXTRA"], reread.ExtraFunctionNames);
+        Assert.Equal([(ushort)5], reread.RowPageBreaks);
+        Assert.Equal(bytes, reread.ToArray());
+
+        // With an extra header (Excel 1.03 and later) a larger function count carries no names.
+        var later = ExcelDocument.CreateWorksheet();
+        later.FunctionCount = 239;
+        later.RowPageBreaks.Add(5);
+        var rereadLater = ExcelDocument.Read(later.ToArray());
+        Assert.Empty(rereadLater.ExtraFunctionNames);
+        Assert.Equal([(ushort)5], rereadLater.RowPageBreaks);
+    }
+
+    [Fact]
     public void GrowingASample_WritesTheLargerGrid()
     {
         var document = Load("Expenses.xls");

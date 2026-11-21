@@ -68,6 +68,23 @@ public class FuzzTests
 
     private static void Exercise(byte[] bytes)
     {
+        // Workspace ("Resume Excel") files start with a zero word.
+        if (bytes.Length > 1 && bytes[0] == 0 && bytes[1] == 0)
+        {
+            try
+            {
+                _ = ExcelWorkspace.Read(bytes).ToArray();
+            }
+            catch (ExcelFormatException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
+            return;
+        }
+
         if (bytes.Length > 0 && bytes[0] == 0x01)
         {
             try

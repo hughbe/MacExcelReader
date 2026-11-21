@@ -10,17 +10,18 @@ available.
 
 | Release | Disk | Used for |
 |---------|------|----------|
-| Excel 1.00 (1985) | "Excel Program Disk" (400K MFS) | Function table and names, embedded-code fingerprints |
+| Excel 1.00 (1985) | "Excel Program" disk (400K MFS), in two copies whose code differs in 4 bytes (the copy protection) | Save (`47.0b`), Open (`46.06`), the formula compiler (`11.00`), chart writer and reader (`5d`, `5e`), workspace files (`64.00`, `64.01`), function table and names. Each was compared with its 1.03 counterpart instruction by instruction; the differences are noted where they matter. |
 | Excel 1.03 | `Microsoft Excel 1.03.dsk` (800K HFS) | Save (`45.0c`), Open (`44.08`), the external-link reader (`72.01`), the formula compiler (`0f.00`), chart reader and writer (`5d`, `5c`) |
 | Excel 1.5 (May 1988) | Excel 1.5 folder | Save (`47.0d`), format and token translation (`47.18`), function table and file-number table, version-18 rules |
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 files, all of which a reader built from this spec reads, and a writer rebuilds byte for byte:
+**Samples.** 37 documents and one workspace file, all of which a reader built from this spec reads, and a writer rebuilds byte for byte:
 
 | Source | Files |
 |--------|-------|
-| Excel 1.00 data disk | `Expenses`, `CLOCK.WS` (worksheets); `COMMANDS`, `DB.FORM`, `REPLACE`, `MATRIX`, `CLOCK.MS` (macro sheets); `CLOCK.CH` (chart) |
+| Excel 1.00 data disk | `Expenses`, `CLOCK.WS` (worksheets); `COMMANDS`, `DB.FORM`, `REPLACE`, `MATRIX`, `CLOCK.MS` (macro sheets); `CLOCK.CH` (chart). Both copies of the disk hold the same bytes. |
+| Excel 1.00 program disk | `Resume Excel`, a workspace file (Appendix B) |
 | Excel 1.03 disk | `Worksheet1` (empty worksheet). The disk's other samples are byte-identical to the 1.00 disk's. |
 | Excel 1.5 sampler | 26 worksheets and macro sheets, including one version-18 file (`SIMUL EQUATIONS`), and 2 charts (`BREAK CHART`, `PROFIT CHART`) |
 
@@ -60,6 +61,7 @@ for example with a file that breaks a rule given here.
 17. [Recipes](#17-recipes)
 18. [Open questions](#18-open-questions)
 * [Appendix A. Functions](#appendix-a-functions)
+* [Appendix B. Workspace files](#appendix-b-workspace-files)
 
 ---
 
@@ -80,7 +82,7 @@ for example with a file that breaks a rule given here.
 |--------|---------|---------------------------------|
 | `XLBN` | `XCEL`  | Worksheet                       |
 | `XLPG` | `XCEL`  | Macro sheet                     |
-| `XLIN` | `XCEL`  | "Resume Excel" workspace file (not this format; 35 bytes on the sample disk) |
+| `XLIN` | `XCEL`  | Workspace file ("Resume Excel"): the settings and open windows Excel restores. Not a document; see Appendix B. |
 | `MCBN` |         | Chart, saved in Microsoft Chart format (§16) |
 
 Save dispatches on the document kind: charts go to the chart writer; otherwise
@@ -142,15 +144,21 @@ internally but 58 in files), and translates in both directions on Save and Open 
 
 ### 2.3 Identifying the build that saved a file
 
-Each document embeds a copy of part of the saving build's code (§4.1), so the code fingerprints the build:
+Each document embeds a copy of part of the saving build's code (§4.1), so the code fingerprints the build. The
+segment's import word, which names the host procedure in the saving build's own segment numbering, tells the
+builds apart even where the lengths agree:
 
-| Segment 1 length | Matches | Samples |
-|-----------------:|---------|---------|
-| `0x038A` | A build earlier than 1.00, without the p-code compiler's shared-sequence optimisation | `Expenses` |
-| `0x0326` | Excel 1.00 (and, with different bytes, Excel 1.03) | 1.00 disk; `Worksheet1` (1.03) |
-| `0x032A` | Excel 1.5: byte-identical to the 1.5 application's code | ten of the 1.5 samples |
-| `0x03FC` | Another Excel 1.5 build, encoding formulas exactly as the 1.5 application's code does | `ACCOUNTS MACROS`, `COMMISSION MACROS` |
-| `0x032A` (different bytes) | A pre-release Excel 1.5 build | the other 14 of the 1.5 samples |
+| Segment 1 length | Import | Matches | Samples |
+|-----------------:|-------:|---------|---------|
+| `0x038A` | `0x720A` | A build earlier than 1.00, without the p-code compiler's shared-sequence optimisation | `Expenses` |
+| `0x0326` | `0x730A` | Excel 1.00: byte-identical to its segment `0x70` | the other six sheets of the 1.00 disk |
+| `0x0326` | `0x720A` | Excel 1.03: byte-identical to its segment `0x6F` | `Worksheet1` |
+| `0x032A` | `0x7A0A` | Excel 1.5: byte-identical to the 1.5 application's code | ten of the 1.5 samples |
+| `0x03FC` | `0x7C0A` | Another Excel 1.5 build, encoding formulas exactly as the 1.5 application's code does | `ACCOUNTS MACROS`, `COMMISSION MACROS` |
+| `0x032A` | `0x7C0A` | A pre-release Excel 1.5 build (different bytes) | the other 14 of the 1.5 samples |
+
+Charts cannot be dated this way: their embedded code (§16.2) is the same in every release. `CLOCK.CH` is
+format version 3, which no released build writes (§16.2), so it comes from a build before 1.00.
 
 The pre-release build differs from the released one in one respect the samples show: it writes FORMULA with
 one argument in the variable-count form (`42 01 39`), where the released 1.5 keeps the fixed-count form
@@ -209,8 +217,8 @@ write two segment entries (Excel's own layout, with lengths of 0 and offsets of
 ### 4.1 Embedded p-code segments
 
 Each Excel 1.x document carries two segments of the application's own
-interpreted code (segments `0x6F` and `0x70` of the running program), copied
-verbatim out of memory.
+interpreted code, copied verbatim out of memory: segments `0x70` and `0x71` in
+Excel 1.00, `0x6F` and `0x70` in 1.03. The numbers below are 1.03's.
 
 They exist for **external references to closed documents**. When Excel needs a
 value from a file it has not opened, the link reader looks at header word 4:
@@ -232,7 +240,7 @@ Segment image layout (for completeness):
 | 2 | word | LRU stamp from the running interpreter — garbage |
 | 4 | word | Number of procedures (3 in segment 1, 1 in segment 2) |
 | 6 | word × n | Offset of each procedure |
-| … | word | Import: `0x720A` = segment `0x72`, procedure `0x0A` |
+| … | word | Import: the host procedure, in the saving build's numbering: `0x720A` (segment `0x72`, procedure `0x0A`) in 1.03, `0x730A` in 1.00 (§2.3) |
 | … | | p-code |
 | last 10 bytes | | Header of whatever heap block followed in memory — garbage |
 
@@ -253,11 +261,11 @@ At `header.dataOffset`:
 
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
-| 0 | word | **Function count**: one more than the highest function number the document may use. Open refuses the file if this is larger than the number of functions it knows (208 in 1.00–1.03), since formulas could then use numbers it lacks. Excel 1.03's Save writes the length of its function table if state word `0x01C` (§6) is set, and otherwise a base count fixed at start-up (208); its formula compiler sets `0x01C` when a formula uses a number at or above the base count. Excel 1.5's Save writes 208, or one more than the highest function number any formula uses if that is higher. 208 in every sample but `INVOICE MACROS`, which uses GET.DOCUMENT (238) and has 239. |
+| 0 | word | **Function count**: one more than the highest function number the document may use. Open refuses the file if this is larger than the number of functions it knows (208 in 1.00–1.03), since formulas could then use numbers it lacks. Excel 1.03's Save writes the length of its function table if state word `0x01C` (§6) is set, and otherwise a base count fixed at start-up (208); its formula compiler sets `0x01C` when a formula uses a number at or above the base count. Excel 1.5's Save writes 208, or one more than the highest function number any formula uses if that is higher. 208 in every sample but `INVOICE MACROS`, which uses GET.DOCUMENT (238) and has 239. Excel 1.00 works like 1.03 with a global flag in place of `0x01C`, and when the count is above 208 it also writes the names of the extra functions at the start of section 7 so that Open can check them (§14). |
 | 2 | 630 bytes | Sheet state block (§6) |
 | 632 | byte | **Document kind**: `0x10` worksheet, `0x40` macro sheet. (`0x20` is the in-memory kind for charts, which never reach this writer.) |
 | 633 | 8 longs | Section table: stream positions (§1.2) of sections 0…7. Written last, by seeking back. Open *skips* this table and reads sequentially; it is redundant but reliable. |
-| 665 | word | `n` = number of extra header bytes that follow: 0 from Excel 1.00, 1 from 1.03 and 1.5. |
+| 665 | word | `n` = number of extra header bytes that follow: 0 from Excel 1.00, 1 from 1.03 and 1.5. Excel 1.00's Open reads `n` and skips that many bytes, so it reads later files' extra header without trouble. |
 | 667 | n bytes | Extra header. Byte 0, when present, is a system/locale code (high byte of an application global; 0 in every sample); Open warns with alert 0x106 if it differs from the reader's. Open skips any further bytes, so this is the format's forward-compatibility hook. |
 
 Section 0 begins immediately after the extra header.
@@ -464,7 +472,7 @@ token.
 
 | Size | Meaning |
 |-----:|---------|
-| word | 0 if the sheet has no external-document table. Otherwise `n × 12 + 8`. |
+| word | 0 if the sheet has no external-document table. Otherwise `n × 12 + 8`: the size of Excel 1.00's in-memory table, an 8-byte header and 12-byte entries, whose first 4 bytes 1.00 writes as they are. Excel 1.03's entries are 16 bytes, but it computes and writes the same value. |
 | word | `n` = number of external documents (present only if the previous word is non-zero) |
 | n × … | One entry per external document |
 
@@ -473,7 +481,7 @@ Entry:
 | Size | Meaning |
 |-----:|---------|
 | 6 bytes | First 6 bytes of the in-memory entry **(unknown; zero in all nine sample entries)** |
-| Pascal string | Document name: usually a file name (`CASHBUDGET`, `GREAT BRITAIN`), but it can be a full path (`::sampler files - current 1/13:Files:DATA`). Save writes a zero-length name for an entry that refers to this document itself. `DB.FORM` has one entry whose name is the single character `0x00`. Its macros use it as `!DATABASE` and `!FORM`, meaning the names on whichever worksheet is active **(inferred)**. |
+| Pascal string | Document name: usually a file name (`CASHBUDGET`, `GREAT BRITAIN`), but it can be a full path (`::sampler files - current 1/13:Files:DATA`). Excel 1.03's Save writes a zero-length name for an entry that refers to this document itself; Excel 1.00's has no such case and writes the entry's name. `DB.FORM` has one entry whose name is the single character `0x00`. Its macros use it as `!DATABASE` and `!FORM`, meaning the names on whichever worksheet is active **(inferred)**. |
 
 An external reference names its document by the entry's 1-based position in
 this table (§15.2, token `1A`).
@@ -778,6 +786,14 @@ writes version 18 when any window has panes frozen or a non-automatic colour
 Three parts, each self-terminating. No sample has page breaks; three have a
 print record (`MATRIX`, `BEARINGS`, `JAPAN`) and the rest a single `0x00` for it.
 
+**Excel 1.00: extra function names.** In a file without an extra header (§5, `n = 0`), when the function
+count is above 208, section 7 starts with one Pascal string per function from 208 up to the count: the names of
+the functions the saving build knows beyond the base set (`47.0b`). Excel 1.00's Open reads them before the
+page breaks and compares each with its own name for that number, refusing the file (alert `0x2038`) on any
+difference (`46.06`). This guards against a later build numbering new functions differently. Released 1.00 knows
+exactly 208 functions, so it never writes the list, and no sample has one. Excel 1.03 dropped it in both Save
+and Open, and later files carry no names even when their count is higher.
+
 1. **Column page breaks** — a sequence of chunks, each a count byte `n`
    (1…5) followed by `n` bytes, one column number per byte. Terminated by
    `0x00`.
@@ -983,6 +999,10 @@ compiling the text again for the release that saved each file (§2.3): the token
 from the bytes §15.2 describes as left over from memory, in every case except the pre-release 1.5 build's
 FORMULA calls (§2.3). Rules no sample exercises are marked **(assumed)**.
 
+Excel 1.00's compiler (`11.00`) produces the same tokens as 1.03's; the two differ only in reading text. 1.00
+always separates arguments and array elements with a comma (character 44 in its tokeniser), where 1.03 reads
+the separator from a global, presumably set from the system's international settings **(inferred)**.
+
 **Token classes.** For a reference, area or name operand:
 
 * Reference class (`0x2x`) when it is:
@@ -1144,7 +1164,7 @@ and up to five series). All three are read and rebuilt byte for byte.
 | Offset | Size | Value | Meaning |
 |-------:|-----:|-------|---------|
 | 0 | word | `0x018C` | Magic. Open rejects anything else. |
-| 2 | word | 3 or 12 | Format version: 3 from Excel 1.00 (`CLOCK.CH`), 12 from 1.03 and 1.5. Excel 1.03's Open rejects 1, treats 2 and 3 as 12, and uses bit 2 and bit 3 to decide how to read fonts and series headers. |
+| 2 | word | 3 or 12 | Format version. Excel 1.00, 1.03 and 1.5 all write 12 (`push 12` in 1.00's `5d.00` and 1.03's `5c.00`). `CLOCK.CH`, on the 1.00 data disk, has 3, so it was saved by a build before the release; Excel 1.00 opens it and saves it back as 12 (confirmed in the emulator). Excel 1.00's and 1.03's Open both reject 1, treat 2 and 3 as 12, and use bit 2 and bit 3 to decide how to read fonts and series headers. |
 | 4 | word | `0x13E8` | Code signature (§4.1) |
 | 6 | 6 bytes | 0 | |
 | 12 | word | 1 | Number of embedded code segments |
@@ -1524,6 +1544,11 @@ No sample contains these, so they could not be checked against data:
 * The 12-byte record trailer words.
 * The per-series word list.
 
+**Workspace files** (Appendix B)
+
+* The word after the settings, the length-prefixed block after the windows, and the 6 print-related bytes.
+* Whether the word after each folder name is a directory ID.
+
 ---
 
 ## Appendix A. Functions
@@ -1840,4 +1865,42 @@ Numbers marked unused are never assigned. Function 255 is not in the table: it c
 | 289 | TEXTREF | 1–2 | R | T | L | M | 1.5 |  |
 | 290 | INDIRECT | 1–2 | NTLEA | T | L | V | 1.5 |  |
 | 291 | CELL | 1–2 | NTL | T | R | V | 1.5 |  |
+
+---
+
+## Appendix B. Workspace files
+
+A workspace file (Finder type `XLIN`, creator `XCEL`; on the 1.00 program disk it is called `Resume Excel`)
+records what Excel had open, so that opening it reopens the same documents in the same windows with the same
+calculation settings. It holds no cell data. Written by `64.00` and read by `64.01` in Excel 1.00 (`63.00`,
+`63.01` in 1.03, which build the folder string differently but write the same fields).
+
+| Size | Meaning |
+|-----:|---------|
+| word | 0. Open refuses anything else (alert `0x2038`). |
+| 20 bytes | Calculation settings, laid out as offsets 0x000–0x013 of the sheet state block (§6): maximum iterations, calculation mode, precision, reference style, unused word, maximum change (double), iteration. In 1.00 they are global, not per document. |
+| word | **(unknown)** When it is set, Open applies one more window operation (`17.0c`) to the front window. 0 in the sample. |
+| … | The document windows, front to back, each as below, then a `0x00` byte |
+| word | `n`, then `n` bytes: a block of application state used by segments `0a` and `5a` **(unknown)**. 0 in the sample. |
+| byte | 0 |
+| 6 bytes | State used by the print code (segment `51`) **(unknown)**. `00 00 00 05 00 00` in the sample. |
+| byte | 0 |
+
+Window entry:
+
+| Size | Meaning |
+|-----:|---------|
+| byte | Document kind: `0x10` worksheet, `0x40` macro sheet, `0x20` chart (the in-memory kinds of §5) |
+| Pascal string | Document name |
+| Pascal string | Folder: the volume name and any folder names, each followed by `:` |
+| word | Used only on a system with HFS (low-memory `FSFCBLen` above 0), so presumably a directory reference **(inferred)**. 0 in the sample, which is on an MFS disk. |
+| 4 words | Window rectangle (top, left, bottom, right), in global coordinates. Open fits it to the screen. |
+| 41 bytes | Window state, as in §13. Absent for a chart. |
+| word + `n` × 6 bytes | Selected areas, as in §13. Absent for a chart. |
+
+Open reopens each document by its Finder type: `MCBN` through the chart reader, `XLBN` and `XLPG` through Open
+(§3), anything else through the importer. Confirmed in Excel 1.00: a workspace written from this description
+(a macro sheet and a chart window, with iteration on and 77 iterations) reopened both windows at their rectangles
+and set the calculation options. The sample has one window: `Expenses` in `Excel Data:`, a worksheet,
+rectangle 73, 14, 335, 503, selection A1.
 

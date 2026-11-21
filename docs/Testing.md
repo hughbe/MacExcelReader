@@ -18,17 +18,20 @@ For each file, Driver:
 
 1. opens it, without updating links, so linked files don't stop it with a question;
 2. for each formula cell, records `GET.FORMULA` of it in one of its own cells, which is Excel's own text for
-   the formula;
+   the formula. It refers to the cell as `!B4`, meaning "on the active sheet", because Excel 1.00 gives
+   `#REF!` for a reference to a document by name that was opened after Driver;
 3. saves it with Save As as `<name> saved` and closes it.
 
 Finally Driver saves itself, so its cells keep Excel's answers.
 
 | Excel | Running Driver |
 |---|---|
-| 1.03 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R) |
+| 1.00, 1.03 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R) |
 | 1.5 | Open Driver. It runs by itself (Auto_Open). Pack with `--excel 1.5`. |
 
-Start Excel from its own disk, not by opening a document from the Finder, which may pick a newer Excel. Then:
+Start Excel from its own disk, not by opening a document from the Finder, which may pick a newer Excel. To
+open a workspace (`XLIN`) file, which only the Finder can do, boot from a disk whose only Excel is the one under
+test: Excel 1.00's data disk has its own System. Then:
 
 ```bash
 dotnet run --project dumper -- excel-test check Test.dsk [-o extracted/] [--all]
@@ -101,5 +104,7 @@ Things to know:
 | Nov 2026 | 1.03 | `formulas-1.0` in six sheets (578 formulas) | All formulas match. Found the cell-table margin rule (spec §6.1). |
 | Nov 2026 | 1.03 | `F 01`, `CLOCK.CH` through Driver | Formulas match. Excel sets name flag `0x04` on reference names (spec §11). |
 | Nov 2026 | 1.5 | `formulas-1.5` sheets 1 and 7, including functions 256 and up, and `CLOCK.CH` | No unexpected differences |
+| Nov 2026 | 1.00 | `F 01`, `CLOCK.CH` | No unexpected differences. Excel 1.00 re-saves the version-3 chart as version 12 (spec §16.2). |
+| Nov 2026 | 1.00 | A workspace written by `ExcelWorkspace` | Reopened both windows and restored the calculation options (spec Appendix B) |
 
 Bugs and quirks of Excel found this way are in [Excel bugs and quirks](ExcelBugs.md).

@@ -56,6 +56,14 @@ public sealed class ExcelDocument
     /// <summary>Gets or sets the function count of the writing build (208 for Excel 1.x).</summary>
     public ushort FunctionCount { get; set; } = (ushort)ExcelFunctions.Count;
 
+    /// <summary>
+    /// Gets the names of the functions numbered from 208 up to <see cref="FunctionCount"/>, which Excel 1.00 writes
+    /// at the start of section 7 when a formula uses one (spec §14), so that Open can check they mean the same
+    /// functions. Only files without an extra header (Excel 1.00 and earlier) have them; later releases dropped
+    /// the list. Released 1.00 knows no function past 207, so no known file has any.
+    /// </summary>
+    public List<string> ExtraFunctionNames { get; } = [];
+
     /// <summary>Gets the sheet state block.</summary>
     public ExcelSheetState State { get; }
 
@@ -272,7 +280,16 @@ public sealed class ExcelDocument
 
         document.ReadNames(new BigEndianReader(data, sections[4]));
         document.ReadWindows(new BigEndianReader(data, sections[6]));
-        document.ReadPrintSettings(new BigEndianReader(data, sections[7]));
+        var printSettings = new BigEndianReader(data, sections[7]);
+        if (document.ExtraHeader.Length == 0)
+        {
+            for (int i = ExcelFunctions.Count; i < document.FunctionCount; i++)
+            {
+                document.ExtraFunctionNames.Add(printSettings.ReadPascalString());
+            }
+        }
+
+        document.ReadPrintSettings(printSettings);
         return document;
     }
 
@@ -621,8 +638,13 @@ public sealed class ExcelDocument
 
         writer.WriteByte(0);
 
-        // Section 7: page breaks and print setup.
+        // Section 7: Excel 1.00's list of extra function names, then page breaks and print setup.
         sections[7] = writer.Position;
+        foreach (string name in ExtraFunctionNames)
+        {
+            writer.WritePascalString(name);
+        }
+
         WriteChunks(writer, ColumnPageBreaks, (w, b) => w.WriteByte(b));
         WriteChunks(writer, RowPageBreaks, (w, v) => w.WriteUInt16(v));
         if (PrintSetup is null)

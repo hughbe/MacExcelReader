@@ -134,6 +134,12 @@ public sealed class ExcelWindow
     internal void Write(BigEndianWriter writer)
     {
         writer.WriteByte(0xFF);
+        WriteBody(writer);
+    }
+
+    // The rectangle, state and selection: everything after the record's marker byte.
+    internal void WriteBody(BigEndianWriter writer)
+    {
         writer.WriteInt16(Top);
         writer.WriteInt16(Left);
         writer.WriteInt16(Bottom);

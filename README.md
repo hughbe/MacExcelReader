@@ -136,6 +136,7 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |
 | `dump <file>` | Everything: header, settings, column widths, external references, names, windows, page breaks, print setup and cells |
+| `workspace <file>` | A workspace ("Resume Excel", type XLIN) file: settings and the windows it reopens |
 | `layout <file>` | Where each part of the file lies: header, code segments, state block and all eight sections |
 | `chart <file>` | A chart file: charts, axes, scales, text objects and series data |
 

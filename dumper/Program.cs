@@ -51,6 +51,9 @@ public sealed class Program
                 .WithDescription("Dump the whole file: header, settings, names, windows, print setup and cells.");
             config.AddCommand<ChartCommand>("chart")
                 .WithDescription("Dump a chart (MCBN) file.");
+            config.AddCommand<WorkspaceCommand>("workspace")
+                .WithDescription("Show a workspace (\"Resume Excel\", type XLIN) file: settings and the windows it reopens.")
+                .WithExample("workspace", "Resume Excel");
             config.AddCommand<LayoutCommand>("layout")
                 .WithDescription("Show where each part of the file lies: header, code segments and sections.")
                 .WithExample("layout", "Expenses");
@@ -856,4 +859,39 @@ sealed class JsonCommand : Command<JsonSettings>
             values = s.SecondValues.Select(v => v.ToDouble()),
         }),
     };
+}
+
+sealed class WorkspaceCommand : Command<FileSettings>
+{
+    public override int Execute(CommandContext context, FileSettings settings, CancellationToken cancellationToken)
+    {
+        var workspace = ExcelWorkspace.Load(settings.Input);
+        var summary = new Table().Title("[bold]Workspace[/]").AddColumn("Field").AddColumn("Value");
+        summary.AddRow("Calculation mode", workspace.CalculationMode.ToString(CultureInfo.InvariantCulture));
+        summary.AddRow("Precision", workspace.FullPrecision ? "full" : "as displayed");
+        summary.AddRow("Iteration", $"{Program.YesNo(workspace.Iteration)}, max {workspace.MaxIterations}, max change {workspace.MaxChange.ToString(CultureInfo.InvariantCulture)}");
+        summary.AddRow("Window option word", workspace.WindowOption.ToString(CultureInfo.InvariantCulture));
+        summary.AddRow("Block after the windows", Program.Hex(workspace.Block));
+        summary.AddRow("Trailer", Program.Hex(workspace.Trailer));
+        AnsiConsole.Write(summary);
+
+        var windows = new Table().Title("[bold]Windows, front to back[/]").AddColumn("Kind").AddColumn("Document").AddColumn("Folder").AddColumn("Directory").AddColumn("Rectangle").AddColumn("Active cell");
+        foreach (var entry in workspace.Windows)
+        {
+            string kind = entry.Kind switch
+            {
+                ExcelWorkspaceWindow.WorksheetKind => "worksheet",
+                ExcelWorkspaceWindow.MacroSheetKind => "macro sheet",
+                ExcelWorkspaceWindow.ChartKind => "chart",
+                _ => $"0x{entry.Kind:X2}",
+            };
+            var w = entry.Window;
+            windows.AddRow(kind, Program.Escape(entry.DocumentName), Program.Escape(entry.Folder), entry.Directory.ToString(CultureInfo.InvariantCulture),
+                $"{w.Top}, {w.Left}, {w.Bottom}, {w.Right}",
+                entry.Kind == ExcelWorkspaceWindow.ChartKind ? "" : new ExcelCellAddress(w.ActiveRow, w.ActiveColumn).ToString());
+        }
+
+        AnsiConsole.Write(windows);
+        return 0;
+    }
 }

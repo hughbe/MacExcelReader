@@ -119,13 +119,10 @@ sealed class PackCommand : Command<PackSettings>
         var driver = ExcelDocument.CreateMacroSheet();
         driver.State.SetColumnWidth(0, 200);
         driver.State.SetColumnWidth(1, 120);
-        foreach (var (name, sheet) in targets)
-        {
-            if (sheet is not null)
-            {
-                driver.ExternalDocuments.Add(new ExcelExternalDocument(name));
-            }
-        }
+        // Probes use active-sheet references (!B4), which every release resolves against the document OPEN has
+        // just brought to the front. Excel 1.00 does not resolve a reference to a named document opened after
+        // Driver was loaded ('Name'!B4 gives #REF!).
+        driver.ExternalDocuments.Add(new ExcelExternalDocument("\0"));
 
         int row = 0, probes = 0;
         void Put(string formula, string label)
@@ -138,7 +135,6 @@ sealed class PackCommand : Command<PackSettings>
         }
 
         static string Quote(string text) => "\"" + text.Replace("\"", "\"\"") + "\"";
-        static string Reference(string name) => Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_.]*$") ? name : "'" + name.Replace("'", "''") + "'";
 
         // Carry on past errors, so one bad file does not stop the rest; its probes come back as error values.
         Put("=ERROR(FALSE)", "start");
@@ -153,7 +149,7 @@ sealed class PackCommand : Command<PackSettings>
                     if (cell.Formula is not null)
                     {
                         string address = new ExcelCellAddress(r, c).ToString();
-                        Put($"=GET.FORMULA({Reference(name)}!{address})", name + "!" + address);
+                        Put($"=GET.FORMULA(!{address})", name + "!" + address);
                         probes++;
                     }
                 }
