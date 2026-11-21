@@ -57,10 +57,14 @@ public static class ExcelFormulaParser
     /// The document, used to resolve defined names and external documents. May be null if the formula
     /// uses neither.
     /// </param>
+    /// <param name="version">
+    /// The Excel release whose functions and encoding to use. Excel 1.00–1.03 (the default) produce formulas
+    /// every Excel 1.x can read; Excel 1.5 adds functions and encodes a few things differently (spec §9.4).
+    /// </param>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
-    public static ExcelFormula Parse(string text, ExcelDocument? document = null)
+    public static ExcelFormula Parse(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
     {
-        var (expression, fixups) = Compile(text, document, definition: false);
+        var (expression, fixups) = Compile(text, document, definition: false, version);
         return new ExcelFormula(expression, fixups);
     }
 
@@ -69,16 +73,39 @@ public static class ExcelFormulaParser
     /// external-document indices are stored inside the tokens, as name definitions require.
     /// </summary>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
-    public static byte[] ParseNameDefinition(string text, ExcelDocument? document = null)
-        => Compile(text, document, definition: true).Expression;
+    public static (byte[] Definition, List<byte[]> ArrayConstants) ParseNameDefinition(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
+    {
+        var (expression, _, arrays) = CompileFull(text, document, definition: true, version, arrayFormula: false);
+        return (expression, arrays);
+    }
 
-    private static (byte[] Expression, byte[] Fixups) Compile(string text, ExcelDocument? document, bool definition)
+    /// <summary>
+    /// Parses the formula of an array formula (without the braces) into the shared expression and its fix-ups.
+    /// Use <see cref="ExcelDocument.SetArrayFormula"/> to put an array formula on a sheet.
+    /// </summary>
+    public static (byte[] Expression, byte[] Fixups) ParseArrayFormula(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
+        => Compile(text, document, definition: false, version, arrayFormula: true);
+
+    private static (byte[] Expression, byte[] Fixups) Compile(string text, ExcelDocument? document, bool definition, ExcelVersion version, bool arrayFormula = false)
+    {
+        var (expression, fixups, _) = CompileFull(text, document, definition, version, arrayFormula);
+        return (expression, fixups);
+    }
+
+    private static (byte[] Expression, byte[] Fixups, List<byte[]> ArrayConstants) CompileFull(string text, ExcelDocument? document, bool definition, ExcelVersion version, bool arrayFormula)
     {
         ArgumentNullException.ThrowIfNull(text);
         var lexer = new Lexer(text);
-        var parser = new Parser(lexer, document);
-        var root = parser.ParseFormula();
-        var emitter = new Emitter(definition);
+        var parser = new Parser(lexer, document, version);
+        var root = parser.ParseFormula(definition);
+
+        // A document that uses a function newer than Excel 1.03 records the highest number it needs (spec §4).
+        if (document is not null && parser.HighestFunction >= document.FunctionCount)
+        {
+            document.FunctionCount = (ushort)(parser.HighestFunction + 1);
+        }
+
+        var emitter = new Emitter(definition, version) { ArrayFormula = arrayFormula };
         if (parser.IsVolatile)
         {
             // Formulas that call a volatile function start with a volatile attribute.
@@ -92,12 +119,14 @@ public static class ExcelFormulaParser
             throw new ExcelFormulaSyntaxException($"The formula compiles to {expression.Length} bytes; the limit is 255.", text.Length - 1);
         }
 
-        return (expression, emitter.Fixups.ToArray());
+        return (expression, emitter.Fixups.ToArray(), emitter.ArrayConstants);
     }
 
     // ----- Syntax tree -----
 
     private abstract record Node(int Position);
+
+    private sealed record ArrayNode(int Position, byte[] Block) : Node(Position);
 
     private sealed record NumberNode(int Position, double Value, bool ForceDouble = false) : Node(Position);
 
@@ -138,6 +167,9 @@ public static class ExcelFormulaParser
         CloseParen,
         Comma,
         Bang,
+        OpenBrace,
+        CloseBrace,
+        Semicolon,
     }
 
     private readonly record struct Token(TokenKind Kind, string Text, int Position, double Number = 0);
@@ -191,6 +223,15 @@ public static class ExcelFormulaParser
                 case '!':
                     _position++;
                     return new Token(TokenKind.Bang, "!", start);
+                case '{':
+                    _position++;
+                    return new Token(TokenKind.OpenBrace, "{", start);
+                case '}':
+                    _position++;
+                    return new Token(TokenKind.CloseBrace, "}", start);
+                case ';':
+                    _position++;
+                    return new Token(TokenKind.Semicolon, ";", start);
                 case '"':
                     return ReadString(start);
                 case '\'':
@@ -348,13 +389,15 @@ public static class ExcelFormulaParser
     {
         private readonly Lexer _lexer;
         private readonly ExcelDocument? _document;
+        private readonly ExcelVersion _version;
         private Token _current;
         private Token _next;
 
-        public Parser(Lexer lexer, ExcelDocument? document)
+        public Parser(Lexer lexer, ExcelDocument? document, ExcelVersion version)
         {
             _lexer = lexer;
             _document = document;
+            _version = version;
             _current = lexer.Next();
             _next = lexer.Next();
         }
@@ -365,12 +408,15 @@ public static class ExcelFormulaParser
             _next = _lexer.Next();
         }
 
+        /// <summary>Gets the highest function number the formula uses, or -1.</summary>
+        public int HighestFunction { get; private set; } = -1;
+
         /// <summary>Gets whether the formula calls a volatile function.</summary>
         public bool IsVolatile { get; private set; }
 
         private bool IsOperator(string op) => _current.Kind == TokenKind.Operator && _current.Text == op;
 
-        public Node ParseFormula()
+        public Node ParseFormula(bool definition = false)
         {
             if (_current.Kind == TokenKind.End)
             {
@@ -378,6 +424,15 @@ public static class ExcelFormulaParser
             }
 
             var node = ParseComparison();
+
+            // A name can be defined as a union without parentheses: =$A$1,$C$3:$D$4.
+            while (definition && _current.Kind == TokenKind.Comma)
+            {
+                int position = _current.Position;
+                Advance();
+                node = new BinaryNode(position, 0x10, node, ParseComparison());
+            }
+
             if (_current.Kind != TokenKind.End)
             {
                 throw new ExcelFormulaSyntaxException($"Unexpected '{_current.Text}'", _current.Position);
@@ -573,9 +628,105 @@ public static class ExcelFormulaParser
 
                 case TokenKind.Identifier:
                     return ParseIdentifier(external: null);
+
+                case TokenKind.OpenBrace:
+                    return ParseArrayConstant();
             }
 
             throw new ExcelFormulaSyntaxException(token.Kind == TokenKind.End ? "Unexpected end of formula" : $"Unexpected '{token.Text}'", token.Position);
+        }
+
+        // {1,2;3,4}: rows separated by ';', columns by ','. Elements are numbers (optionally negative) or strings,
+        // the two element types the samples show (spec §8.5).
+        private ArrayNode ParseArrayConstant()
+        {
+            var start = _current;
+            Advance();
+            var rows = new List<List<object>>();
+            var row = new List<object>();
+            while (true)
+            {
+                bool negative = false;
+                if (_current.Kind == TokenKind.Operator && _current.Text is "-" or "+")
+                {
+                    negative = _current.Text == "-";
+                    Advance();
+                }
+
+                if (_current.Kind == TokenKind.Number)
+                {
+                    row.Add(negative ? -_current.Number : _current.Number);
+                }
+                else if (_current.Kind == TokenKind.String && !negative)
+                {
+                    var bytes = MacRoman.GetBytes(_current.Text);
+                    if (bytes.Length > 255)
+                    {
+                        throw new ExcelFormulaSyntaxException("A string constant cannot be longer than 255 characters", _current.Position);
+                    }
+
+                    row.Add(bytes);
+                }
+                else
+                {
+                    throw new ExcelFormulaSyntaxException("An array constant can hold only numbers and strings", _current.Position);
+                }
+
+                Advance();
+                if (_current.Kind == TokenKind.Comma)
+                {
+                    Advance();
+                }
+                else if (_current.Kind == TokenKind.Semicolon)
+                {
+                    Advance();
+                    rows.Add(row);
+                    row = [];
+                }
+                else
+                {
+                    Expect(TokenKind.CloseBrace, "}");
+                    rows.Add(row);
+                    break;
+                }
+            }
+
+            int columns = rows[0].Count;
+            if (rows.Any(r => r.Count != columns))
+            {
+                throw new ExcelFormulaSyntaxException("Every row of an array constant needs the same number of columns", start.Position);
+            }
+
+            if (columns > 256 || rows.Count > ushort.MaxValue)
+            {
+                throw new ExcelFormulaSyntaxException("The array constant is too large", start.Position);
+            }
+
+            // The data block (spec §8.5): column count (0 = 256), row count, then elements: type 1 and a double,
+            // or type 2 and a Pascal string.
+            var block = new List<byte> { (byte)columns, (byte)(rows.Count >> 8), (byte)rows.Count };
+            foreach (var r in rows)
+            {
+                foreach (var element in r)
+                {
+                    if (element is double number)
+                    {
+                        block.Add(1);
+                        var bytes = new byte[8];
+                        BinaryPrimitives.WriteDoubleBigEndian(bytes, number);
+                        block.AddRange(bytes);
+                    }
+                    else
+                    {
+                        var text = (byte[])element;
+                        block.Add(2);
+                        block.Add((byte)text.Length);
+                        block.AddRange(text);
+                    }
+                }
+            }
+
+            return new ArrayNode(start.Position, [.. block]);
         }
 
         private Node ParsePrimaryReference(int external)
@@ -605,9 +756,9 @@ public static class ExcelFormulaParser
         {
             var token = _current;
             Advance();
-            if (_current.Kind == TokenKind.OpenParen && external is null)
+            if (_current.Kind == TokenKind.OpenParen)
             {
-                return ParseCall(token);
+                return external is { } sheet ? ParseExternalMacroCall(token, sheet) : ParseCall(token);
             }
 
             if (external is null && string.Equals(token.Text, "TRUE", StringComparison.OrdinalIgnoreCase))
@@ -633,32 +784,20 @@ public static class ExcelFormulaParser
 
         private Node ParseCall(Token name)
         {
-            Expect(TokenKind.OpenParen, "(");
-            var arguments = new List<Node>();
-            if (_current.Kind != TokenKind.CloseParen)
-            {
-                while (true)
-                {
-                    arguments.Add(_current.Kind is TokenKind.Comma or TokenKind.CloseParen
-                        ? new MissingNode(_current.Position)
-                        : ParseComparison());
-                    if (_current.Kind == TokenKind.Comma)
-                    {
-                        Advance();
-                        continue;
-                    }
-
-                    break;
-                }
-            }
-
-            Expect(TokenKind.CloseParen, ")");
+            var arguments = ParseArguments();
 
             bool dialog = name.Text.EndsWith('?') && name.Text.Length > 1;
-            int number = ExcelFunctions.FindNumber(dialog ? name.Text[..^1] : name.Text);
+            int number = ExcelFunctions.FindNumber(dialog ? name.Text[..^1] : name.Text, _version);
             if (number >= 0)
             {
-                var function = ExcelFunctions.Get(number)!;
+                var function = ExcelFunctions.Get(number, _version)!;
+                if (number > 255)
+                {
+                    // Excel 1.5 numbers these above 255; how a file stores such a number is not known (spec §9.3).
+                    throw new ExcelFormulaSyntaxException($"{function.Name} (function {number}) cannot be written: the encoding of function numbers above 255 is unknown", name.Position);
+                }
+
+                HighestFunction = Math.Max(HighestFunction, number);
                 if (dialog && !function.HasDialogForm)
                 {
                     throw new ExcelFormulaSyntaxException($"{function.Name} has no dialog-box form", name.Position);
@@ -690,6 +829,44 @@ public static class ExcelFormulaParser
             }
 
             throw new ExcelFormulaSyntaxException($"Unknown function '{name.Text}'", name.Position);
+        }
+
+        // 'Other Sheet'!Macro(arguments): a user-defined function on another sheet.
+        private FunctionNode ParseExternalMacroCall(Token name, int external)
+        {
+            var macro = new NameNode(name.Position, ResolveExternalName(external, name.Text, name.Position), external);
+            var arguments = ParseArguments();
+            if (arguments.Count > 254)
+            {
+                throw new ExcelFormulaSyntaxException("Too many arguments", name.Position);
+            }
+
+            return new FunctionNode(name.Position, 255, null, macro, arguments);
+        }
+
+        private List<Node> ParseArguments()
+        {
+            Expect(TokenKind.OpenParen, "(");
+            var arguments = new List<Node>();
+            if (_current.Kind != TokenKind.CloseParen)
+            {
+                while (true)
+                {
+                    arguments.Add(_current.Kind is TokenKind.Comma or TokenKind.CloseParen
+                        ? new MissingNode(_current.Position)
+                        : ParseComparison());
+                    if (_current.Kind == TokenKind.Comma)
+                    {
+                        Advance();
+                        continue;
+                    }
+
+                    break;
+                }
+            }
+
+            Expect(TokenKind.CloseParen, ")");
+            return arguments;
         }
 
         private void Expect(TokenKind kind, string text)
@@ -857,29 +1034,52 @@ public static class ExcelFormulaParser
     private sealed class Emitter
     {
         private readonly bool _definition;
+        private readonly ExcelVersion _version;
 
-        public Emitter(bool definition) => _definition = definition;
+        public Emitter(bool definition, ExcelVersion version)
+        {
+            _definition = definition;
+            _version = version;
+        }
 
         public List<byte> Expression { get; } = [];
 
         public List<byte> Fixups { get; } = [];
 
+        public List<byte[]> ArrayConstants { get; } = [];
+
+        private bool _insideMemoryFunction;
+
         private static byte WithClass(byte baseCode, int tokenClass) => (byte)((baseCode & 0x1F) | (tokenClass << 5));
 
-        private static int OperandClass(Context context) => context.Kind switch
+        // In an array formula or a name definition, operator operands and arguments that accept arrays take array
+        // class where they would otherwise take value class; the formula as a whole does not (spec §9.4).
+        private int InArrayFormula(Context context, int tokenClass)
+            => (ArrayFormula || _definition) && tokenClass == ValueClass
+                && (context.Kind == ContextKind.Operator
+                    || (context.Kind is ContextKind.Argument or ContextKind.IfArgument && (context.Accepts & ExcelValueTypes.Array) != 0))
+                ? ArrayClass
+                : tokenClass;
+
+        public bool ArrayFormula { get; init; }
+
+        private int OperandClass(Context context) => InArrayFormula(context, context.Kind switch
         {
             ContextKind.DefinitionTop or ContextKind.Range or ContextKind.MacroTarget => ReferenceClass,
             ContextKind.Argument or ContextKind.IfArgument => (context.Accepts & ExcelValueTypes.Reference) != 0 ? ReferenceClass : ValueClass,
             _ => ValueClass,
-        };
+        });
 
-        private static int FunctionClass(Context context, ExcelValueTypes returns) => context.Kind switch
+        // Excel 1.00–1.03 give every function call inside IF or CHOOSE reference class; Excel 1.04 and 1.5 treat them like
+        // other arguments (spec §9.4).
+        private int FunctionClass(Context context, ExcelValueTypes returns) => InArrayFormula(context, context.Kind switch
         {
-            ContextKind.Range or ContextKind.MacroTarget or ContextKind.IfArgument or ContextKind.DefinitionTop => ReferenceClass,
-            ContextKind.Argument when returns == ExcelValueTypes.Array && (context.Accepts & ExcelValueTypes.Array) != 0 => ArrayClass,
-            ContextKind.Argument when (context.Accepts & ExcelValueTypes.Reference) != 0 && (returns & ExcelValueTypes.Reference) != 0 => ReferenceClass,
+            ContextKind.Range or ContextKind.MacroTarget or ContextKind.DefinitionTop => ReferenceClass,
+            ContextKind.IfArgument when _version < ExcelVersion.Excel104 => ReferenceClass,
+            ContextKind.Argument or ContextKind.IfArgument when returns == ExcelValueTypes.Array && (context.Accepts & ExcelValueTypes.Array) != 0 => ArrayClass,
+            ContextKind.Argument or ContextKind.IfArgument when (context.Accepts & ExcelValueTypes.Reference) != 0 && (returns & ExcelValueTypes.Reference) != 0 => ReferenceClass,
             _ => ValueClass,
-        };
+        });
 
         private void Add(byte value) => Expression.Add(value);
 
@@ -941,6 +1141,26 @@ public static class ExcelFormulaParser
                 case MissingNode:
                     Add(0x16);
                     break;
+                case ArrayNode array:
+                    // 0x20 (array class, (assumed) everywhere): column count, row count, three stale bytes. The data
+                    // goes in the fix-ups of a cell formula, or after the names for a name definition.
+                    Add(0x60);
+                    Add(array.Block[0]);
+                    Add(array.Block[1]);
+                    Add(array.Block[2]);
+                    Add(0);
+                    Add(0);
+                    Add(0);
+                    if (_definition)
+                    {
+                        ArrayConstants.Add(array.Block);
+                    }
+                    else
+                    {
+                        Fixups.AddRange(array.Block);
+                    }
+
+                    break;
                 case RefNode reference:
                     EmitExternal(reference.External, () =>
                     {
@@ -971,19 +1191,26 @@ public static class ExcelFormulaParser
                     bool reference = binary.Operator is 0x10 or 0x11;
                     var operandContext = reference ? Context.Range : Context.Operator;
 
-                    // A range or union whose operands call functions is wrapped in a memory-function
-                    // token giving the length of the subexpression.
+                    // The outermost union, or range whose operands are not both plain references, is wrapped in a
+                    // memory-function token (0x29; 0x2E in a definition) giving the length of what follows.
                     int start = -1;
-                    if (reference && ContainsCall(binary))
+                    if (reference && !_insideMemoryFunction
+                        && (binary.Operator == 0x10 || !(IsPlainReference(binary.Left) && IsPlainReference(binary.Right))))
                     {
-                        Add(0x29);
+                        Add(_definition ? (byte)0x2E : (byte)0x29);
                         Add(0);
                         start = Expression.Count;
+                        _insideMemoryFunction = true;
                     }
 
                     Emit(binary.Left, operandContext);
                     Emit(binary.Right, operandContext);
                     Add(binary.Operator);
+                    if (start >= 0)
+                    {
+                        _insideMemoryFunction = false;
+                    }
+
                     if (start >= 0)
                     {
                         int length = Expression.Count - start;
@@ -1013,14 +1240,9 @@ public static class ExcelFormulaParser
             }
         }
 
-        private static bool ContainsCall(Node node) => node switch
-        {
-            FunctionNode => true,
-            BinaryNode binary => ContainsCall(binary.Left) || ContainsCall(binary.Right),
-            UnaryNode unary => ContainsCall(unary.Operand),
-            ParenNode paren => ContainsCall(paren.Inner),
-            _ => false,
-        };
+        // Excel evaluates a range or union directly only when both operands are cell references or areas;
+        // anything else (a name, a function call, another range) is wrapped in a memory-function token.
+        private static bool IsPlainReference(Node node) => node is RefNode or AreaNode;
 
         private void EmitName(int index, int tokenClass)
         {
@@ -1060,7 +1282,7 @@ public static class ExcelFormulaParser
                 Add(0);
             }
 
-            Add((byte)index);
+            Add(_definition ? (byte)index : (byte)0);
             if (!_definition)
             {
                 AddFixup(index);
@@ -1077,7 +1299,7 @@ public static class ExcelFormulaParser
         {
             if (function.Macro is { } macro)
             {
-                EmitName(macro.Index, ReferenceClass);
+                EmitExternal(macro.External, () => EmitName(macro.Index, ReferenceClass));
                 foreach (var argument in function.Arguments)
                 {
                     Emit(argument, new Context(ContextKind.Argument, (ExcelValueTypes)0x7F));

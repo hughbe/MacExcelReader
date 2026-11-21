@@ -118,7 +118,9 @@ public sealed class ExcelFormula
     /// <param name="text">The formula text; the leading '=' is optional.</param>
     /// <param name="document">Resolves defined names and external documents; may be null if there are none.</param>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
-    public static ExcelFormula Parse(string text, ExcelDocument? document = null) => ExcelFormulaParser.Parse(text, document);
+    /// <param name="version">The Excel release whose functions and encoding to use (see <see cref="ExcelFormulaParser"/>).</param>
+    public static ExcelFormula Parse(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
+        => ExcelFormulaParser.Parse(text, document, version);
 
     /// <summary>Gets the name indices and external-document indices from the fix-ups, in token order.</summary>
     public IReadOnlyList<ushort> GetFixupWords() => FormulaTokens.ReadFixupWords(Expression, Fixups);
@@ -128,7 +130,98 @@ public sealed class ExcelFormula
     /// </summary>
     /// <param name="document">The document, used to resolve names and external documents; may be null.</param>
     public string ToText(ExcelDocument? document = null)
-        => "=" + FormulaDecompiler.Decompile(Expression, GetFixupWords(), document, fixupsInPlace: false);
+    {
+        if (IsArrayFormula || IsTable)
+        {
+            return SharedText(document);
+        }
+
+        return "=" + FormulaDecompiler.Decompile(Expression, GetFixupWords(), document, fixupsInPlace: false, FormulaTokens.ReadArrayBlocks(Expression, Fixups));
+    }
+
+    /// <summary>Gets whether the cell is part of an array formula (spec §8.6).</summary>
+    public bool IsArrayFormula => FormulaTokens.IsSharedReference(Expression) && FormulaTokens.Normalize(Expression[0]) == 0x01;
+
+    /// <summary>Gets whether the cell is part of a data table made with the Table command (spec §8.6).</summary>
+    public bool IsTable => FormulaTokens.IsSharedReference(Expression) && FormulaTokens.Normalize(Expression[0]) == 0x02;
+
+    /// <summary>
+    /// Gets whether this cell holds the shared record of its array formula or table (the top-left cell);
+    /// other cells of the range refer to it.
+    /// </summary>
+    public bool IsSharedAnchor => (IsArrayFormula || IsTable) && Fixups.Length >= 2 && Fixups[0] == 0x40 && Fixups[1] == 0x00;
+
+    /// <summary>
+    /// Gets the cell that holds the shared record, for a cell of an array formula or table.
+    /// </summary>
+    public ExcelCellAddress? SharedAnchor
+    {
+        get
+        {
+            if (!(IsArrayFormula || IsTable) || Fixups.Length < 3)
+            {
+                return null;
+            }
+
+            if (IsSharedAnchor)
+            {
+                // The anchor's shared header starts with the range: first row word, last row word, first column.
+                return Fixups.Length >= 13 ? new ExcelCellAddress(BinaryPrimitives.ReadUInt16BigEndian(Fixups.Slice(3)) & 0x3FFF, Fixups[7]) : null;
+            }
+
+            return new ExcelCellAddress(BinaryPrimitives.ReadUInt16BigEndian(Fixups) & 0x3FFF, Fixups[2]);
+        }
+    }
+
+    /// <summary>
+    /// Gets the range an array formula or table covers, from its anchor's shared header.
+    /// </summary>
+    public ExcelRange? SharedRange
+        => IsSharedAnchor && Fixups.Length >= 13
+            ? new ExcelRange(BinaryPrimitives.ReadUInt16BigEndian(Fixups.Slice(3)), BinaryPrimitives.ReadUInt16BigEndian(Fixups.Slice(5)), Fixups[7], Fixups[8])
+            : null;
+
+    /// <summary>
+    /// Gets the shared expression of an array formula, held by its anchor cell; empty for other formulas.
+    /// </summary>
+    public ReadOnlySpan<byte> SharedExpression
+        => IsArrayFormula && IsSharedAnchor && Fixups.Length >= 13 && Fixups.Length >= 13 + Fixups[12] ? Fixups.Slice(13, Fixups[12]) : default;
+
+    /// <summary>Gets the fix-ups of the shared expression (see <see cref="SharedExpression"/>).</summary>
+    public ReadOnlySpan<byte> SharedFixups
+        => SharedExpression.IsEmpty ? default : Fixups.Slice(13 + Fixups[12]);
+
+    private string SharedText(ExcelDocument? document)
+    {
+        if (!IsSharedAnchor)
+        {
+            // Another cell holds the shared record.
+            if (document is not null && SharedAnchor is { } anchor
+                && document.Cells.TryGet(anchor.Row, anchor.Column)?.Formula is { IsSharedAnchor: true } shared)
+            {
+                return shared.SharedText(document);
+            }
+
+            return IsTable ? "{=TABLE()}" : "{array formula}";
+        }
+
+        if (IsTable || Fixups.Length < 13)
+        {
+            return "{=TABLE()}";
+        }
+
+        // Anchor: 0x4000, 0, a 10-byte header whose last byte is the shared expression's length, the shared
+        // expression, then its fix-ups.
+        int length = Fixups[12];
+        if (Fixups.Length < 13 + length)
+        {
+            return "{array formula}";
+        }
+
+        var expression = Fixups.Slice(13, length);
+        var fixups = Fixups.Slice(13 + length);
+        return "{=" + FormulaDecompiler.Decompile(expression, FormulaTokens.ReadFixupWords(expression, fixups), document, fixupsInPlace: false, FormulaTokens.ReadArrayBlocks(expression, fixups)) + "}";
+    }
 
     /// <summary>
     /// Measures a formula record at the start of <paramref name="tail"/>.

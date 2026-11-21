@@ -1,20 +1,20 @@
 # MacExcelReader
 
-MacExcelReader is a fast, allocation-conscious .NET library for reading and writing Microsoft Excel 1.x for Macintosh documents: worksheets (Finder type `XLBN`), macro sheets (`XLPG`) and charts (`MCBN`).
+MacExcelReader is a fast, allocation-conscious .NET library for reading and writing Microsoft Excel 1.x for Macintosh documents (Excel 1.00 to 1.5): worksheets (Finder type `XLBN`), macro sheets (`XLPG`) and charts (`MCBN`).
 
-The file format was reverse-engineered from Excel 1.03 and is documented in [docs/Spec.md](docs/Spec.md). The full API is described in the [usage guide](docs/Usage.md).
+The file format was reverse-engineered from the code of Excel 1.00, 1.03 and 1.5 and is documented in [docs/Spec.md](docs/Spec.md). The full API is described in the [usage guide](docs/Usage.md).
 
 ---
 
 ## Features
 
-- **Exact round-trips.** Every sample document from the Excel 1.03 disk reads and writes back byte for byte. Fields the library does not model are preserved untouched.
+- **Exact round-trips.** All 37 sample documents from the Excel 1.00, 1.03 and 1.5 disks, sheets and charts, read and write back byte for byte, including Excel 1.5's version-18 files. Fields the library does not model are preserved untouched.
 - **Cells.** Integers, numbers, text and formulas with their current values, plus number formats, alignment, bold and italic, borders, and protection flags.
-- **Formulas, both ways.** Decompile tokens to A1-style text (`=IF(NOT(FORMULA.FIND(B19,1,2,1)),RETURN())`) and compile text back to tokens with `ExcelFormula.Parse`. The parser reproduces Excel's own encoding byte for byte for every formula in the samples: token classes, `IF` and `CHOOSE` jumps, the one-argument `SUM` attribute, volatile and memory-function tokens, macro commands, dialog-box forms (`RUN?()`), names, external references and calls to user-defined macros. Allocation-free token walking.
-- **Display formatting.** All 19 built-in number formats, with dates in the 1904 date system.
+- **Formulas, both ways.** Decompile tokens to A1-style text (`=IF(NOT(FORMULA.FIND(B19,1,2,1)),RETURN())`) and compile text back to tokens with `ExcelFormula.Parse`. The parser reproduces Excel's own encoding byte for byte for 1,281 of the samples' 1,282 formulas and all 206 name definitions, for whichever release saved them: token classes, `IF` and `CHOOSE` jumps, the one-argument `SUM` attribute, volatile and memory-function tokens, array formulas and array constants, macro commands, dialog-box forms (`RUN?()`), names, external references and calls to macros on this or another sheet. Every function Excel 1.00–1.5 knows, with each release's argument rules. Allocation-free token walking.
+- **Display formatting.** All 19 built-in number formats, with dates in the 1904 date system. User-defined formats are read and written.
 - **Everything else in the file.** Calculation settings, column widths, fonts, protection and the password hash, defined names and command-macro shortcuts, external documents, windows and selections, page breaks and Page Setup.
 - **Writing.** Create new worksheets and macro sheets with Excel 1.03's defaults, or edit existing ones; only the cells you touch are re-encoded.
-- **Charts.** Chart type and options, axes and scales, legend, titles and data labels, and the series data. Numbers use Microsoft's 8-byte decimal format.
+- **Charts.** Chart type and options, axes and scales, legend, titles, data labels and free text, and the series data. Numbers use Microsoft's 8-byte decimal format.
 - **Robust.** Malformed input only ever raises `ExcelFormatException`. This is checked by fuzzing the samples with hundreds of thousands of random corruptions.
 
 ---
@@ -63,7 +63,7 @@ sheet.Cells["A2"].SetValue(42);
 sheet.Cells["A2"].Bold = true;
 
 var formula = ExcelFormula.Parse("=A2*2");
-formula.SetResult(84);   // the cached value; Excel recalculates on open
+formula.SetResult(84);   // the value Excel shows until it recalculates
 sheet.Cells["A3"].SetFormula(formula);
 
 sheet.Save("Totals");   // set Finder type sheet.FinderType ("XLBN") and creator "XCEL"
@@ -129,7 +129,8 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `info <file>` | A summary: kind, size, cell counts, names, protection |
 | `cells <file> [-r A1:D20] [--all]` | Every non-empty cell with its displayed value, format, style and formula |
 | `cell <file> <address>` | Everything about one cell: value, date, formats, flags, formula, result, raw bytes and a token-by-token breakdown |
-| `parse <formula> [-f file] [--name]` | Compile formula text and show the tokens Excel would store |
+| `parse <formula> [-f file] [--name] [--array] [--excel 1.5]` | Compile formula text and show the tokens Excel would store |
+| `coverage <output> [--experimental]` | Write a macro sheet that uses every kind of formula, for checking in Excel |
 | `names <file>` | Defined names, command shortcuts and definitions |
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |
@@ -138,8 +139,8 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `chart <file>` | A chart file: charts, axes, scales, text objects and series data |
 
 ```sh
-dotnet run --project dumper -- cell tests/Samples/REPLACE.xlm B27
-dotnet run --project dumper -- export tests/Samples/Expenses.xls -r A10:D20
+dotnet run --project dumper -- cell "tests/Samples/Excel 1.00/REPLACE" B27
+dotnet run --project dumper -- export "tests/Samples/Excel 1.00/Expenses" -r A10:D20
 dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
 ```
 
@@ -149,8 +150,9 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
 
 - New documents carry empty embedded p-code segments. Excel 1.03 never uses a file's own copy, but a different build of Excel linking to the document while it is closed would; copy the segments from an existing document if that matters.
 - The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`; Excel recalculates it when it opens the file.
-- The parser's rules were derived from Excel's function table and checked against every sample formula; Excel's own parser code was not disassembled in full, so formulas unlike any in the samples could encode differently.
-- Array formulas, tables, array constants, user number formats, page breaks, Page Setup and charts are implemented from the spec alone, because none of the sample files contain them.
+- The parser's rules come from Excel's code and tables and were checked against every sample formula; formulas unlike any in the samples could still encode differently. Excel 1.5 functions numbered above 255 cannot be written, because how 1.5 stores them is unknown.
+- Tables (the Table command) and page breaks are implemented from the spec alone, because no sample contains them.
+- Nothing written by the library has been opened in Excel itself yet.
 
 ---
 
@@ -161,7 +163,7 @@ dotnet build
 dotnet test
 ```
 
-The tests use the five documents from the Excel 1.03 disk in `tests/Samples`.
+The tests run over the sample documents in `tests/Samples`, grouped by the disk they come from: `Excel 1.00` (the 1.00 data disk, whose Expenses, REPLACE, COMMANDS and DB.FORM are identical to the 1.03 disk's), `Excel 1.03` (Worksheet1) and `Excel 1.5` (the 1.5 sampler, including two charts).
 
 ---
 

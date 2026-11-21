@@ -205,6 +205,14 @@ public sealed class ExcelSheetState
     /// </summary>
     internal void SetExtent(int rows, int columns)
     {
+        // The grid size is stored as last row/column plus the word at 0x020. Excel normally stores the last
+        // index and 1, but some files (LOAN1 from Excel 1.5) store the count and 0; keep whatever pair gives
+        // the right size.
+        if (RowCount == rows && ColumnCountInTable == columns)
+        {
+            return;
+        }
+
         if (rows == 0 || columns == 0)
         {
             SetWord(LastRowOffset, 0);

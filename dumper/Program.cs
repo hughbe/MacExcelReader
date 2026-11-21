@@ -29,6 +29,9 @@ public sealed class Program
                 .WithDescription("Compile formula text to Excel's tokens, optionally resolving names against a file.")
                 .WithExample("parse", "=IF(A1>0,SUM(A1:A3),-1)")
                 .WithExample("parse", "=COLUMNS(!ADD)", "--file", "DB.FORM");
+            config.AddCommand<CoverageCommand>("coverage")
+                .WithDescription("Write a macro sheet that uses every formula feature, for checking in Excel.")
+                .WithExample("coverage", "Formulas", "--experimental");
             config.AddCommand<ExportCommand>("export")
                 .WithDescription("Export the sheet as CSV (or TSV), as displayed values or formulas.")
                 .WithExample("export", "Expenses", "-o", "expenses.csv");
@@ -193,6 +196,14 @@ sealed class ParseSettings : CommandSettings
     [Description("A worksheet or macro sheet whose defined names and external documents the formula uses.")]
     public string? File { get; init; }
 
+    [CommandOption("--excel <VERSION>")]
+    [Description("The Excel release to compile for: 1.0 (1.00–1.03, the default), 1.04 or 1.5.")]
+    public string Excel { get; init; } = "1.0";
+
+    [CommandOption("--array")]
+    [Description("Compile as an array formula (the shared expression).")]
+    public bool Array { get; init; }
+
     [CommandOption("--name")]
     [Description("Compile as a name definition (indices stored inside the tokens).")]
     public bool Name { get; init; }
@@ -206,15 +217,30 @@ sealed class ParseCommand : Command<ParseSettings>
         try
         {
             byte[] expression;
+            var version = settings.Excel switch
+            {
+                "1.0" or "1.00" or "1.03" => ExcelVersion.Excel100,
+                "1.04" => ExcelVersion.Excel104,
+                "1.5" => ExcelVersion.Excel150,
+                _ => throw new ExcelFormulaSyntaxException($"Unknown Excel version '{settings.Excel}' (use 1.0, 1.04 or 1.5)", 0),
+            };
             var table = new Table().AddColumn("Field").AddColumn("Value");
             if (settings.Name)
             {
-                expression = ExcelFormulaParser.ParseNameDefinition(settings.Formula, document);
-                table.AddRow("Decompiled", Program.Escape("=" + FormulaDecompiler.Decompile(expression, [], document, fixupsInPlace: true)));
+                var (definition, arrays) = ExcelFormulaParser.ParseNameDefinition(settings.Formula, document, version);
+                expression = definition;
+                table.AddRow("Decompiled", Program.Escape("=" + FormulaDecompiler.Decompile(expression, [], document, fixupsInPlace: true, arrays)));
+                table.AddRow("Array data", Program.Escape(string.Join(" ", arrays.Select(a => Convert.ToHexString(a)))));
+            }
+            else if (settings.Array)
+            {
+                var (shared, fixups) = ExcelFormulaParser.ParseArrayFormula(settings.Formula.Trim('{', '}'), document, version);
+                expression = shared;
+                table.AddRow("Fix-ups", Program.Hex(fixups));
             }
             else
             {
-                var formula = ExcelFormula.Parse(settings.Formula, document);
+                var formula = ExcelFormula.Parse(settings.Formula, document, version);
                 expression = formula.Expression.ToArray();
                 table.AddRow("Decompiled", Program.Escape(formula.ToText(document)));
                 table.AddRow("Fix-ups", $"{Program.Hex(formula.Fixups)}  words: {string.Join(", ", formula.GetFixupWords())}");

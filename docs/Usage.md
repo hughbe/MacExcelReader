@@ -122,7 +122,7 @@ ExcelFormulaResult result = formula.Result; // Kind: Number, Text, Boolean or Er
 ```
 
 Passing the document lets the decompiler resolve defined names and external documents. Formulas are stored
-as **parsed expressions** (spec §9): reverse-Polish tokens closely related to BIFF2. You can walk them
+as **parsed expressions** (spec §15): reverse-Polish tokens closely related to BIFF2. You can walk them
 without allocating:
 
 ```csharp
@@ -132,8 +132,12 @@ foreach (var token in FormulaTokens.Enumerate(formula.Expression))
 }
 ```
 
-Functions are identified by number; `ExcelFunctions.Get(n)` gives the name and argument counts, and
-`ExcelFunctions.FindNumber("SUM")` goes the other way.
+Array formulas decompile from the cell that holds the shared formula, as `{=TREND(B1:B5)}`; `IsArrayFormula`,
+`IsSharedAnchor`, `SharedAnchor` and `SharedRange` describe the range.
+
+Functions are identified by number (spec Appendix A). `ExcelFunctions.Get(n)` gives the name, argument
+counts and types, flags and the release that introduced it; `ExcelFunctions.Get(n, ExcelVersion.Excel150)`
+gives a particular release's rules, and `ExcelFunctions.FindNumber("SUM")` goes the other way.
 
 ### Writing a formula
 
@@ -141,7 +145,7 @@ Functions are identified by number; `ExcelFunctions.Get(n)` gives the name and a
 
 ```csharp
 var formula = ExcelFormula.Parse("=IF(A1>0,SUM($A$1:$A$5)*2,-1)");
-formula.SetResult(0);            // the cached value; Excel recalculates when it opens the file
+formula.SetResult(0);            // the value Excel shows until it recalculates
 document.Cells["B1"].SetFormula(formula);
 ```
 
@@ -152,24 +156,46 @@ The leading `=` is optional. It supports:
 - the operators `: , % ^ * / + - & = <> < > <= >=`, with Excel's precedence, and parentheses;
 - every Excel 1.x function and macro command, with argument counts checked against Excel's function
   table, and dialog-box forms of commands such as `RUN?()`;
-- defined names and calls to user-defined function macros (`=MYMACRO(1,2)`);
-- external references (`Budget!A1`, `'My Budget'!A1`) and the active sheet (`!A1`), which need a matching
-  entry in `document.ExternalDocuments`.
+- array constants (`{1,2;3,"x"}`);
+- defined names and calls to user-defined function macros (`=MYMACRO(1,2)`, `='Other Sheet'!MACRO(1)`);
+- external references (`Budget!A1`, `'My Budget'!A1`, `Budget!Total`) and the active sheet (`!A1`), which
+  need a matching entry in `document.ExternalDocuments`, with the names used from it in that entry's
+  `Names`.
+
+**Excel versions.** The encoding differs slightly between releases, and Excel 1.5 adds functions. Pass the
+release the file is for; the default, `ExcelVersion.Excel100`, produces formulas every Excel 1.x reads:
+
+```csharp
+var formula = ExcelFormula.Parse("=LEFT(A1,3)", document, ExcelVersion.Excel150);
+```
+
+A formula that uses a function added after 1.03 raises the document's `FunctionCount`, which tells older
+releases they cannot read it.
+
+**Array formulas** cover a range of cells:
+
+```csharp
+document.SetArrayFormula(new ExcelRange(FirstRow: 0, LastRow: 4, FirstColumn: 2, LastColumn: 2), "{=B1:B5*2}");
+```
 
 Pass the document whenever the formula uses names or external references; otherwise `null` is fine.
 Invalid text raises `ExcelFormulaSyntaxException`, whose `Position` is the zero-based offset of the problem.
 
-Name definitions store their indices inside the tokens, so they have their own entry point:
+Name definitions store their indices inside the tokens, so they have their own entry point. They can also be
+unions without parentheses (`=$A$1,$C$3`) and array constants:
 
 ```csharp
-var name = new ExcelDefinedName("Totals", ExcelFormulaParser.ParseNameDefinition("=$A$1:$A$5", document));
+var name = new ExcelDefinedName("Totals");
+name.SetDefinition("=$A$1:$A$5", document);
 ```
 
-The rules the parser follows (token classes, `IF` and `CHOOSE` jumps, the `SUM` attribute, volatile and memory-function tokens) are in
-[spec §9.4](Spec.md#94-how-excel-compiles-formula-text). To see what it produces:
+The rules the parser follows (token classes, `IF` and `CHOOSE` jumps, the `SUM` attribute, volatile and
+memory-function tokens, and how they differ between releases) are in
+[spec §15.4](Spec.md#154-how-excel-compiles-formula-text). To see what it produces:
 
 ```sh
-dotnet run --project dumper -- parse '=COLUMNS(!ADD)' --file DB.FORM
+dotnet run --project dumper -- parse '=COLUMNS(!DATABASE)' --file "tests/Samples/Excel 1.00/DB.FORM"
+dotnet run --project dumper -- parse '=GET.DOCUMENT(1)' --excel 1.5
 ```
 
 ### Building tokens by hand
@@ -213,6 +239,10 @@ foreach (var name in document.Names)
 Name definitions are parsed expressions too; name tokens inside them refer to other names by 1-based index
 into `document.Names`. `document.ExternalDocuments` lists the other documents
 the sheet links to; each entry's `Names` are the names the sheet uses from that document.
+
+Excel 1.5 can save **version-18** files (`document.Version` is 18) when a document uses something older
+releases cannot read; the library reads and writes them, including their longer number-format and window
+records.
 
 ## Sheet settings, protection and printing
 
@@ -268,8 +298,9 @@ foreach (var series in chart.Series)
 ```
 
 A chart file stores a copy of the plotted data, so the values are available without the worksheet. Numbers
-in chart files use Microsoft's 8-byte decimal format; `MicrosoftDecimal` converts them. Chart support is
-derived from Excel's code alone; no real chart file was available to test against.
+in chart files use Microsoft's 8-byte decimal format; `MicrosoftDecimal` converts them. Chart support was
+derived from Excel's code and is confirmed by three real charts from Excel 1.00 and 1.5, which read and write
+back byte for byte.
 
 ## Performance
 

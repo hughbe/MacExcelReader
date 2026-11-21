@@ -164,7 +164,9 @@ public sealed class ChartDocument
         var reader = new BigEndianReader(data, position);
         int start = position;
         int totalLength = reader.ReadUInt16();
-        int stringsOffset = reader.ReadUInt16();
+
+        // The offset of the second array from the start of the record (the first array may hold strings).
+        int secondArrayOffset = reader.ReadUInt16();
         var series = new ChartSeries(reader.ReadBytes(ChartSeries.HeaderSize));
         int count = new BigEndianReader(series.Header, 60).ReadUInt16();
         for (int i = 0; i < count; i++)
@@ -179,12 +181,12 @@ public sealed class ChartDocument
             }
         }
 
+        reader.Position = start + secondArrayOffset;
         for (int i = 0; i < count; i++)
         {
             series.SecondValues.Add(MicrosoftDecimal.FromBytes(reader.ReadBytes(8)));
         }
 
-        reader.Position = start + stringsOffset;
         series.Name = reader.ReadPascalString();
         series.FirstLabel = reader.ReadPascalString();
         series.SecondLabel = reader.ReadPascalString();
@@ -350,12 +352,12 @@ public sealed class ChartDocument
             }
         }
 
+        int secondArrayOffset = 4 + body.Position;
         for (int i = 0; i < count; i++)
         {
             body.WriteBytes((i < series.SecondValues.Count ? series.SecondValues[i] : MicrosoftDecimal.Zero).ToBytes());
         }
 
-        int stringsOffset = 4 + body.Position;
         body.WritePascalString(series.Name);
         body.WritePascalString(series.FirstLabel);
         body.WritePascalString(series.SecondLabel);
@@ -370,7 +372,7 @@ public sealed class ChartDocument
 
         var bytes = body.ToArray();
         writer.WriteUInt16((ushort)(lastInList ? 0 : 4 + bytes.Length));
-        writer.WriteUInt16(checked((ushort)stringsOffset));
+        writer.WriteUInt16(checked((ushort)secondArrayOffset));
         writer.WriteBytes(bytes);
     }
 }

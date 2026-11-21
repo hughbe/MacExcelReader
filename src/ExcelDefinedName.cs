@@ -55,7 +55,25 @@ public sealed class ExcelDefinedName
     /// Gets the definition as A1-style text, without '='.
     /// </summary>
     public string GetDefinitionText(ExcelDocument? document = null)
-        => FormulaDecompiler.Decompile(Definition, [], document, fixupsInPlace: true);
+        => FormulaDecompiler.Decompile(Definition, [], document, fixupsInPlace: true, ArrayConstants);
+
+    /// <summary>
+    /// Gets the data of the array constants (<c>0x20</c> tokens) in the definition, one block per token in order
+    /// (spec §8.5). They are stored after the list of names (spec §11).
+    /// </summary>
+    public List<byte[]> ArrayConstants { get; } = [];
+
+    /// <summary>
+    /// Sets the definition from formula text, such as <c>=$A$1:$B$5</c> or <c>={1,2,3}</c>.
+    /// </summary>
+    /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
+    public void SetDefinition(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
+    {
+        var (definition, arrays) = ExcelFormulaParser.ParseNameDefinition(text, document, version);
+        Definition = definition;
+        ArrayConstants.Clear();
+        ArrayConstants.AddRange(arrays);
+    }
 
     internal static ExcelDefinedName Read(BigEndianReader reader, byte nameLength)
     {
