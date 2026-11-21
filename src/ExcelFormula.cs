@@ -182,6 +182,29 @@ public sealed class ExcelFormula
             : null;
 
     /// <summary>
+    /// Gets a table's input cells, from its anchor's 18-byte record (spec §12.6): the row input and the column
+    /// input, either of which may be absent. Null for anything but a table's anchor.
+    /// </summary>
+    public (ExcelCellAddress? RowInput, ExcelCellAddress? ColumnInput)? TableInputs
+    {
+        get
+        {
+            if (!IsTable || !IsSharedAnchor || Fixups.Length < 3 + 18)
+            {
+                return null;
+            }
+
+            // Record bytes 9–10 and 15–16: an input's column byte, then a word with its row in bits 15–2. Byte 14:
+            // bit 6 = the first input is the row input, bit 7 = there is a second input (the column input).
+            var record = Fixups.Slice(3, 18);
+            var first = new ExcelCellAddress(BinaryPrimitives.ReadUInt16BigEndian(record.Slice(10)) >> 2, record[9]);
+            var second = new ExcelCellAddress(BinaryPrimitives.ReadUInt16BigEndian(record.Slice(16)) >> 2, record[15]);
+            byte flags = record[14];
+            return (flags & 0x40) != 0 ? (first, (flags & 0x80) != 0 ? second : null) : (null, first);
+        }
+    }
+
+    /// <summary>
     /// Gets the shared expression of an array formula, held by its anchor cell; empty for other formulas.
     /// </summary>
     public ReadOnlySpan<byte> SharedExpression
@@ -205,9 +228,14 @@ public sealed class ExcelFormula
             return IsTable ? "{=TABLE()}" : "{array formula}";
         }
 
-        if (IsTable || Fixups.Length < 13)
+        if (IsTable)
         {
-            return "{=TABLE()}";
+            return TableInputs is var (row, column) ? $"{{=TABLE({row},{column})}}" : "{=TABLE()}";
+        }
+
+        if (Fixups.Length < 13)
+        {
+            return "{array formula}";
         }
 
         // Anchor: 0x4000, 0, a 10-byte header whose last byte is the shared expression's length, the shared

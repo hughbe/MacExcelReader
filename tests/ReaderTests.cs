@@ -275,4 +275,24 @@ public class ReaderTests
 
         return -1;
     }
+
+    [Fact]
+    public void Table_ReadsItsInputCells()
+    {
+        // Made by Excel 1.03's TABLE(Y7,X5) on A1:C3: the table's cells are B2:C3.
+        var document = Load("Table");
+        var anchor = document.Cells["B2"].Formula!;
+        Assert.True(anchor.IsTable);
+        Assert.Equal((ExcelCellAddress.Parse("Y7"), ExcelCellAddress.Parse("X5")), anchor.TableInputs);
+        Assert.Equal("{=TABLE(Y7,X5)}", anchor.ToText(document));
+        Assert.Equal("{=TABLE(Y7,X5)}", document.Cells["C3"].Formula!.ToText(document));
+    }
+
+    [Fact]
+    public void ChartSize_IsTheWindowContentInTwips()
+    {
+        var chart = MacExcelReader.Charts.ChartDocument.Load(SamplePath("CLOCK.CH"));
+        Assert.Equal(5580, chart.ChartWidth);   // 279 pixels: the 295-pixel window less 16
+        Assert.Equal(4540, chart.ChartHeight);
+    }
 }

@@ -46,8 +46,28 @@ public sealed class ChartDocument
     /// <summary>Gets the overlay chart, or null.</summary>
     public Chart? OverlayChart => Charts.Count > 1 ? Charts[0] : null;
 
-    /// <summary>Gets or sets the 12-byte window block (two 4-byte points and two words).</summary>
+    /// <summary>
+    /// Gets or sets the 12-byte window block: the window's position (stored negated) and size, then the chart's
+    /// drawing size (see <see cref="ChartWidth"/>, <see cref="ChartHeight"/>).
+    /// </summary>
     public byte[] Window { get; set; } = new byte[12];
+
+    /// <summary>
+    /// Gets or sets the chart's drawing width in twips (1/1440 inch): the window's content width less 16 pixels of
+    /// scroll bar, at 72 pixels to the inch (spec §16.1). Excel scales the chart's fonts from it.
+    /// </summary>
+    public short ChartWidth
+    {
+        get => System.Buffers.Binary.BinaryPrimitives.ReadInt16BigEndian(Window.AsSpan(8));
+        set => System.Buffers.Binary.BinaryPrimitives.WriteInt16BigEndian(Window.AsSpan(8), value);
+    }
+
+    /// <summary>Gets or sets the chart's drawing height in twips, likewise (spec §16.1).</summary>
+    public short ChartHeight
+    {
+        get => System.Buffers.Binary.BinaryPrimitives.ReadInt16BigEndian(Window.AsSpan(10));
+        set => System.Buffers.Binary.BinaryPrimitives.WriteInt16BigEndian(Window.AsSpan(10), value);
+    }
 
     /// <summary>
     /// Gets or sets the 664-byte page-setup body (62 bytes of the print record, 58 zeros, four decimal
@@ -63,7 +83,9 @@ public sealed class ChartDocument
     /// </summary>
     public static ChartDocument Create(ChartType type)
     {
-        var document = new ChartDocument();
+        // The window Excel 1.5 saved for PROFIT CHART: at (58, 4), 276 by 500 pixels, so a chart drawing of
+        // 484 by 260 pixels, in twips.
+        var document = new ChartDocument { Window = Convert.FromHexString("003A00040114 01F4 25D0 1450".Replace(" ", "")) };
         document.Charts.Add(Chart.Create(type));
         return document;
     }

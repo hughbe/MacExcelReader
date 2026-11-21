@@ -77,7 +77,8 @@ public class FormulaParserTests
         foreach (var (row, column, cell) in document.Cells.NonEmptyCells)
         {
             var address = new ExcelCellAddress(row, column);
-            if (cell.Formula is not { } formula || IsKnownException(bytes, formula) || (formula.IsArrayFormula && !formula.IsSharedAnchor))
+            // Tables are made by the TABLE command; their text cannot be compiled.
+            if (cell.Formula is not { } formula || formula.IsTable || IsKnownException(bytes, formula) || (formula.IsArrayFormula && !formula.IsSharedAnchor))
             {
                 continue;
             }
