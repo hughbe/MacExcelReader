@@ -642,7 +642,7 @@ sealed class ChartCommand : Command<FileSettings>
             }
 
             table.AddRow("Category crossing", $"at category {chart.ValueAxisCrossesAtCategory}, between categories {Program.YesNo(chart.ValueAxisCrossesBetweenCategories)}, at maximum {Program.YesNo(chart.ValueAxisCrossesAtMaximumCategory)}, reverse {Program.YesNo(chart.CategoriesInReverseOrder)}, labels every {chart.CategoriesBetweenTickLabels}");
-            table.AddRow("Categories", chart.CategoryCount.ToString(CultureInfo.InvariantCulture));
+            table.AddRow("Categories", $"{chart.CategoryCount} (as Excel 1.5's word over bytes 4–5: {chart.Excel15CategoryCount})");
             if (chart != document.MainChart)
             {
                 table.AddRow("Shares main chart's scale", $"value axis {Program.YesNo(chart.SharesValueAxisScale)}, X axis {Program.YesNo(chart.SharesXAxisScale)}");

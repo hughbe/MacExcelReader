@@ -1456,7 +1456,7 @@ bit 10 set (one label per point) (§16.8).
 | 0 | Word of flags (below) |
 | 2 | Word: **chart type** (below) |
 | 4 | Byte: the number of categories, the largest point count of the chart's series, worked out when the chart is drawn (`37.13` in 1.00; 12 for `PROFIT CHART` once Excel has drawn it, 0 in overlays). The drawing code divides it by the categories between tick labels to place them (`37.2b`). |
-| 5 | Byte: 12 in every main chart Excel 1.00 or 1.03 saves, 0 in overlays and in `CLOCK.CH`. No code in Excel 1.00 that handles the chart record reads or writes it on its own **(unknown)**. |
+| 5 | Byte: not used. Excel 1.00 and 1.03 never write it, so it keeps whatever the file had (0 in a new chart, `0f.05` in 1.00). Excel 1.5 widens the category count to a word over bytes 4–5 (its `37.13` stores a word and `37.2b` reads one), so a chart Excel 1.5 saved last has 0 in byte 4 and the count here: `PROFIT CHART` has 0 and 12. Every main chart in the 1.00 and 1.03 samples that began as `PROFIT CHART` still has that 12; charts made by the library and saved by Excel 1.00 have 0. |
 | 6 | Word: how much narrower the plot became when Excel laid out the axis and tick labels, the width before layout less the width after (`37.03` in 1.00): 266 for `PROFIT CHART`'s column, line, area and scatter forms, 116 for its bar forms, 300 or 405 for its pie forms. |
 | 8 | Word: % overlap (column/bar). Negative means the "Overlapped" option is on; the magnitude is the percentage. |
 | 10 | Word: % cluster spacing (column/bar) |
@@ -1712,8 +1712,8 @@ record by its byte 6 (`3c.01` in 1.00).
 | 6 | Series number; in a chart with one series, the point (category) number, from 0 (`33.10`; the `Point Markers` sample's overrides are points 8 and 10) |
 | 7 | Marker (below) |
 | 8 | Word of flags (below) |
-| 11 | Byte: how far a pie slice is pulled out, as a percentage of the radius: 25 for the first slice of Pie format 3 (a point record), 20 for every slice of Pie format 4 (the default series format) |
-| 0, 5, 9–10 | Not identified. Byte 0 is the line format's unused byte; bytes 5, 9 and 10 are 0 in every record seen, Excel 1.00's Patterns dialogs leave them alone, and nothing in its chart code reads them **(unknown)**. |
+| 10 | Word: how far a pie slice is pulled out, as a percentage of the radius: 25 for the first slice of Pie format 3 (a point record), 20 for every slice of Pie format 4 (the default series format). GALLERY.PIE stores it as a word (`35.18` in 1.00), and the code that works out which Pie format a chart has tests the whole word (`35.17`). |
+| 0, 5, 9 | Not used: byte 0 is the line format's unused byte, byte 5 follows the area pattern, and byte 9 is bits 7–0 of word 8. Excel 1.00 clears the record when it makes one (`0f.12`) and never reads or writes these bytes, so they are 0. |
 
 Point format word 2:
 
@@ -1732,6 +1732,7 @@ Point format word 8:
 | 11 | A data label for the series, made from built-in text object −2 (`33.10` in 1.00; §16.5) |
 | 10 | A data label on each data point, made from built-in text object −1 |
 | 9 | The labels show percentages (for a pie the label code totals the series, `33.00`); Pie format 6 sets it with bit 10 |
+| 14, 8–0 | Not used |
 
 Marker, in the order of the Marker Pattern dialog (`Point Markers` sample, Excel 1.00):
 
@@ -1931,10 +1932,6 @@ None of these affects reading the samples or writing valid files.
 * Most of the 88 extra window-state bytes of version 18 (§13), and what else in a number format makes Excel
   1.5 save version 18 (§2.1).
 * What Excel 1.04 changed besides adding CHANGE.LINK; no 1.04 code or sample is available (§2.1).
-
-**Charts** (§16)
-
-* The chart header's byte 5 (§16.5) and the point format's bytes 5, 9 and 10 (§16.8).
 
 **Workspace files** (Appendix B)
 

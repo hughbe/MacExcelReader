@@ -160,6 +160,22 @@ public class ExperimentTests
         Assert.Equal(0, chart.DefaultSeriesFormat.Explosion);
     }
 
+    [Theory]
+    [InlineData("PROFIT CHART", 0, 12)]
+    [InlineData("Pie Exploded", 12, 12)]
+    [InlineData("Point Markers", 12, 12)]
+    [InlineData("Library Column", 3, 0)]
+    public void ChartHeader_Byte5IsExcel15sCategoryCount(string sample, int byte4, int byte5)
+    {
+        // Excel 1.5 writes the category count as a word over header bytes 4-5; Excel 1.00 and 1.03 write only byte
+        // 4, so charts that began as PROFIT CHART (saved by 1.5) keep its 12 in byte 5, and a chart the library made
+        // and Excel 1.00 saved keeps the library's 0 (spec §16.5).
+        var chart = ChartDocument.Load(SamplePath(sample)).MainChart;
+        Assert.Equal(byte4, chart.CategoryCount);
+        Assert.Equal(byte5, chart.Record[5]);
+        Assert.Equal((byte4 << 8) | byte5, chart.Excel15CategoryCount);
+    }
+
     [Fact]
     public void PieExplodedAll_DefaultSeriesFormatHoldsTheExplosion()
     {

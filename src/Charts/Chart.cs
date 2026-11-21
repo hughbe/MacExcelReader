@@ -148,9 +148,16 @@ public sealed class Chart
     public ChartLineFormat HiLoLines => new(Record, 258);
 
     /// <summary>
-    /// Gets the number of categories, which Excel works out when it draws the chart (header byte 4; 0 in overlays).
+    /// Gets the number of categories, which Excel 1.00 and 1.03 work out when they draw the chart (header byte 4; 0 in
+    /// overlays). Excel 1.5 writes the count as a word over bytes 4–5 instead: see <see cref="Excel15CategoryCount"/>.
     /// </summary>
     public byte CategoryCount => Record[4];
+
+    /// <summary>
+    /// Gets the header word at bytes 4–5, which is the number of categories in a chart Excel 1.5 saved last. Excel
+    /// 1.00 and 1.03 never write byte 5, so in their files it is whatever the chart had before (spec §16.5).
+    /// </summary>
+    public ushort Excel15CategoryCount => GetWord(4);
 
     /// <summary>
     /// Gets or sets whether an overlay chart's value axis is scaled over the data of both charts, so the overlay plots
@@ -479,8 +486,12 @@ public sealed class ChartPointFormat
     /// <summary>Gets or sets whether the labels show percentages (with <see cref="PointLabels"/>, on a pie).</summary>
     public bool PercentLabels { get => (GetWord(8) & 0x0200) != 0; set => SetBit(8, 9, value); }
 
-    /// <summary>Gets or sets how far a pie slice is pulled out, as a percentage of the radius.</summary>
-    public byte Explosion { get => _data[_offset + 11]; set => _data[_offset + 11] = value; }
+    /// <summary>Gets or sets how far a pie slice is pulled out, as a percentage of the radius (the word at 10).</summary>
+    public ushort Explosion
+    {
+        get => GetWord(10);
+        set => BinaryPrimitives.WriteUInt16BigEndian(_data.AsSpan(_offset + 10), value);
+    }
 }
 
 /// <summary>

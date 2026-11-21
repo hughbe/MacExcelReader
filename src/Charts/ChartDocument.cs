@@ -5,10 +5,6 @@ namespace MacExcelReader.Charts;
 /// <summary>
 /// An Excel 1.x chart document, saved in Microsoft Chart format (Finder type MCBN, spec §16).
 /// </summary>
-/// <remarks>
-/// No chart file was available when this was written, so this support is derived from Excel's chart
-/// writer and reader code alone and has only been tested against files it writes itself.
-/// </remarks>
 public sealed class ChartDocument
 {
     /// <summary>The magic number of chart files.</summary>
