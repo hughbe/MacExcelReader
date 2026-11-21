@@ -121,20 +121,22 @@ table, where the writer replaces them with section-relative offsets (§9).
 | Release | Format versions it writes | Functions | What changed |
 |---------|--------------------------|-----------|--------------|
 | 1.00 (September 1985) | 17 | 0–207 | — |
-| 1.03 | 17 | 0–207 | Adds a one-byte extra header (§5) and drops the extra function names (§14), keeping the function-count flag in state word `0x01C` instead (§5, §6). Writes a zero-length name for an external entry that refers to the document itself (§8). Its compiler reads space, `(){}` and `;` as operators, so typed formulas can hold intersections and array constants, and takes the argument separator from a setting (§15.1, §15.4). Function table and tokens identical to 1.00's. |
+| 1.03 | 17 | 0–207 | Adds a one-byte extra header (§5) and drops the extra function names (§14), keeping the function-count flag in state word `0x01C` instead (§5, §6). Writes a zero-length name for an external entry that refers to the document itself (§8). Its compiler takes the argument separator from a setting (§15.4). Function table and tokens identical to 1.00's. |
 | 1.04 | 17 | 0–208 | Adds CHANGE.LINK (208), known only from Excel 1.5's messages. No 1.04 sample or code is available; its encoding is **(assumed)** to be 1.03's. |
 | 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of twelve functions (Appendix A) and the token class of function calls inside IF and CHOOSE (§15.4). Adds frozen panes and gridline colours to windows (§13) and text sections, `@` and colours to number formats (§7). |
 
-The format version is header word 2 (§4). Excel 1.03's Open accepts only version 17 (1.00's and 1.04's are
-**(assumed)** to do the same). Excel 1.5 writes 17 unless the document needs something only it can read,
+The format version is header word 2 (§4). Excel 1.00's Open accepts only version 17 (`46.06`), and so does
+1.03's; 1.04's is **(assumed)** to do the same. Excel 1.5 writes 17 unless the document needs something only it can read,
 then 18 and the warning "This file will only be readable by Excel 1.5 or greater" (`47.0d`). Its Save
 switches to 18 when:
 
 * a window has frozen panes, or a gridline and heading colour other than automatic (§13); or
 * a user number format uses `@` or a colour, which only Excel 1.5 formats have (§7; `47.10`, `0d.1a`).
 
-`SIMUL EQUATIONS`, the one version-18 sample, has neither in its window, so a number format must have set it
-**(inferred)**.
+Save checks the windows first (state bytes 121 and 127, §13), then asks the number-format code whether any
+format needs version 18 (`47.10`, which decompiles each format and watches a flag the decompiler sets).
+`SIMUL EQUATIONS`, the one version-18 sample from Microsoft, has neither window setting and no `@` or colour in
+its formats, so the format check has a further condition that is **(unknown)**.
 
 A version-17 document can also need a later release without changing its version, because it uses a
 function the reader lacks. The function count at the start of the data area (§5) records that, and Excel
@@ -440,7 +442,7 @@ are the US defaults.
 | `07` | | Turns on the thousands separator, inserted every three integer positions |
 | `08`, `1B` | | Reserved. The format compiler (segment `0x05`, procedure `0x09`) never emits them and the routines that read formats skip them. |
 | `09` | 1 byte `n`, `n` chars | Quoted string `"…"` |
-| `0A` | 1 byte `c` | A prefix character from the international table followed by `c` — the repeat-to-fill form **(inferred)** |
+| `0A` | 1 byte `c` | `*c`: fill the cell with `c`. Excel 1.00 compiles `*-0` to `03 01 00 00 0A 2D 06 01`, and `\-0` to `… 02 2D …` (`Fill Format`). The `*` comes from the international table. |
 | `0B`–`0E` | | `d`, `dd`, `ddd`, `dddd` |
 | `0F`–`12` | | `m`, `mm`, `mmm`, `mmmm` (month) |
 | `13`, `14` | | `h`, `hh` (24-hour) |
@@ -485,7 +487,7 @@ Entry:
 | Size | Meaning |
 |-----:|---------|
 | 6 bytes | First 6 bytes of the in-memory entry, which Excel 1.00's Save writes as they are (`47.0b`), followed by the name the 3-byte pointer at entry offset 6 points to. Zero in every file seen, including links Excel had just made and links saved while the linked document was open; what they hold in memory is **(unknown)**. |
-| Pascal string | Document name: usually a file name (`CASHBUDGET`, `GREAT BRITAIN`), but it can be a full path (`::sampler files - current 1/13:Files:DATA`). Excel 1.00's Save always writes the entry's name; Excel 1.03's writes a zero-length name for an entry that refers to this document itself. `DB.FORM` has one entry whose name is the single character `0x00`. Its macros use it as `!DATABASE` and `!FORM`, meaning the names on whichever worksheet is active **(inferred)**. |
+| Pascal string | Document name: usually a file name (`CASHBUDGET`, `GREAT BRITAIN`), but it can be a full path (`::sampler files - current 1/13:Files:DATA`). Excel 1.00's Save always writes the entry's name; Excel 1.03's writes a zero-length name for an entry that refers to this document itself. `DB.FORM` has one entry whose name is the single character `0x00`. Its macros use it as `!DATABASE` and `!FORM`, the names on whichever sheet is active. Excel 1.03 makes such an entry for `=!A1` (`Links` sample), and the test harness's `GET.FORMULA(!B4)` reads B4 of whichever document is active (docs/Testing.md). |
 
 An external reference names its document by the entry's 1-based position in
 this table (§15.2, token `1A`).
@@ -559,8 +561,7 @@ section5_start + (word0 << 4) + (word1 >> 12)
 Data records appear in section 5 in the same order as their cells appear in the
 table, with no gaps, so the offsets are strictly increasing.
 
-Dates are serial numbers in the **1904 system** (29220 = 1 Jan 1984 in
-`Expenses`) **(inferred)**.
+Dates are serial numbers in the **1904 system**: Excel 1.00 gives `DATE(1984,1,1)` as 29220 (`Literals`).
 
 ---
 
@@ -666,7 +667,7 @@ In memory, some tokens hold pointers. Save writes the expression unchanged
 | Token | Appended | Meaning |
 |-------|----------|---------|
 | `0x23` name | word | 1-based index of the name in section 4. Inside an external reference (between `1A` and `1B`) it is instead the 1-based index in that document's list in section 3. |
-| `0x1A` external sheet | word | 1-based index of the external document in §8. An entry named `\0` stands for the active sheet, written `!A1` **(inferred, §8)** |
+| `0x1A` external sheet | word | 1-based index of the external document in §8. An entry named `\0` stands for the active sheet, written `!A1` (§8) |
 | `0x20` array constant | array block (below) | The constant's elements |
 | `0x26` memory area | word `n`, then `n` × 6-byte areas (first row word, last row word, first column byte, last column byte) | The areas the wrapped union or intersection stands for, as the compiler worked them out (§15.4). |
 
@@ -704,7 +705,7 @@ as it is (`46.06` in 1.00) and the TABLE command builds (`4b.06` in 1.00):
 | 2 | word | Last row |
 | 4 | byte | First column |
 | 5 | byte | Last column |
-| 6 | 3 bytes | Memory pointer linking the record into one of two lists whose heads are globals (`g28ea`, `g28ee` in 1.00), or 0 when it is in neither. The TABLE command (`4b.06` in 1.00) sets it to 0, and `1d.06` unlinks the record and clears it. What the lists are for is **(unknown)**. Junk on disk; write 0. |
+| 6 | 3 bytes | Memory pointer linking the record into one of Excel's two table lists, or 0. Open links every table into the list of all tables (`46.06` in 1.00); a table waiting to be calculated goes on the second list, which the table calculation (`3f.00`) takes and empties, and `27.0f` appends to the first. `1d.06` unlinks a record. Junk on disk; write 0. |
 | 9 | byte | Column of the first input cell |
 | 10 | word | Bits 15–2: row of the first input cell. Bit 0: the input cell has been deleted, and the formula shows `#REF!` in its place (`1d.01` in 1.00). Bit 1: a mark the code that moves and deletes cells sets and clears; while it is set that code clears bit 0 (`0e.01`, `4f.0b`) **(inferred)**. |
 | 12 | word | Left over from memory (`FF FF` in every table seen) |
@@ -903,9 +904,9 @@ table (`PCOD` 0 at `0xCE9` in 1.03), which pairs tokens `03 04 0B 0D 07 06 05 08
 and `0F` is the space, Excel's intersection operator. Excel compiles `=2^3` to `07`,
 `=A1:B2 B1:C3` to `0F`, `=+A1` to `12` and `=A1%` to `14`, the same meanings as in BIFF.
 
-Excel 1.00 accepts the operator characters `+-^*/,&:<>=!`, so a formula typed into 1.00 cannot contain an
-intersection or an array constant **(inferred from the character sets)**. Excel 1.03 and 1.5 add space,
-`(){}` and `;`: `+-^*/,&:<>= (){};!`.
+Excel 1.00's operator-character table holds `+-^*/,&:<>=!`; Excel 1.03's and 1.5's hold `+-^*/,&:<>= (){};!`.
+The difference is in the table only: Excel 1.00 compiles `=R1C1 R1C2` (an intersection) and `={1,2;3,4}` like
+1.03 does (`Literals` and `Array Constants` samples).
 
 | Token | Meaning | Token | Meaning |
 |------:|---------|------:|---------|
@@ -1025,10 +1026,11 @@ Type bytes are bit masks: `0x01` number, `0x02` text, `0x04` logical, `0x08` ref
 
 A writer that wants Excel's exact bytes must follow these rules. Rules read from Excel's formula compiler
 (`0f.00`) are marked *(code)*; the others come from the function tables and the samples. They were checked
-by decompiling all 1,282 cell formulas (including array formulas) and 206 name definitions in the samples and
-compiling the text again for the release that saved each file (§2.3): the tokens match byte for byte, apart
-from the bytes §15.2 describes as left over from memory, in every case except the pre-release 1.5 build's
-FORMULA calls (§2.3). Rules no sample exercises are marked **(assumed)**.
+by decompiling every cell formula (including array formulas) and name definition in the samples, Microsoft's
+and the ones Excel saved in experiments, and compiling the text again for the release that saved each file
+(§2.3): the tokens match byte for byte, apart from the bytes §15.2 describes as left over from memory, in every
+case except the pre-release 1.5 build's FORMULA calls (§2.3) and the few formulas the unit tests list as
+exceptions, which Excel kept from an earlier version of the library or which A1 text cannot express.
 
 Excel 1.03's compiler produces the same tokens as 1.00's (`11.00`); the two differ only in reading text. 1.00
 always separates arguments and array elements with a comma (character 44 in its tokeniser); 1.03 reads
@@ -1110,15 +1112,16 @@ index         jump       table      choice 1   skip       choice 2   skip       
 ```
 
 **Numbers.** Whole numbers 0–65535 are `1E` words; other numbers are `1F` doubles. The samples contain no
-constants above 65535, so the upper limit comes from the word's size **(inferred)**. A minus sign directly on
+constants above 65535; Excel 1.00 compiles `=65535` to `1E FF FF` and `=65536` to a `1F` double (`Literals`). A minus sign directly on
 a number constant is folded into it: `-1` is `1F BF F0 00 00 00 00 00 00`, not `1E 00 01 13`. A minus sign on
 anything else is `13`.
 
 **TRUE and FALSE** without parentheses are `1D` constants.
 
-**Array constants.** `{1,2;3,4}` (rows separated by `;`) is a `20` token in array class (`60`) followed by
-the data block of §12.5. The samples' array constants are both in name definitions; the same encoding in cell
-formulas is **(assumed)**.
+**Array constants.** `{1,2;3,4}` (rows separated by `;`) is a `20` token followed by the data block of §12.5.
+It takes array class (`60`) in a name definition and as a function argument (`SUM({1,2,3})`,
+`TRANSPOSE({1,2})`, `INDEX({1,2},1)`, `IF(1,{1,2},0)`), and value class (`40`) at the top of a cell formula
+or as an operand of an operator (`={1,2}`, `={1,2}+1`), as Excel 1.00 compiles them (`Array Constants`).
 
 **Volatile functions.** A formula that calls a function with table flag `0x08` (INDEX, RAND, NOW, AREAS,
 ROWS, COLUMNS) anywhere starts with `19 01 xx`. Formulas that call none of these never have the attribute.
@@ -1155,7 +1158,7 @@ folded into it; on anything else it is token `12`. A typed `#REF!` compiles to a
 
 * `1A`, then the operand, then `1B` (operand bytes in §15.2).
 * `Budget!A1` names an entry in §8. `!A1` names the entry called `00`, which stands for the active sheet
-  **(inferred, §8)**.
+  (§8).
 * A name after the `!` (`!DATABASE`) is looked up in that document's list in section 3, not in this sheet's
   names (§10).
 * A call to a user-defined function on another sheet, `'COMMISSION MACROS'!Bonus(SALES)`, is `1A`, the
@@ -1168,12 +1171,12 @@ folded into it; on anything else it is token `12`. A typed `#REF!` compiles to a
 3. `22 (argc + 1) FF`.
 
 **Function count.** A formula that uses a function numbered above 207 needs the document's function count
-(§5) raised to at least one more than that number. Numbers above 255 do not fit the token; how Excel 1.5
-writes them is **(unknown)** (§15.2, token `38`).
+(§5) raised to at least one more than that number. Excel 1.5 writes functions numbered 256 and up with
+tokens `39` and `3A` and the number less 256 (§15.2).
 
-**Deleted references.** A name whose definition is `#REF!` stores `2A`, a deleted cell reference, not the
-error constant `1C 17`. No cell formula in the samples contains `#REF!`. Encoding it there as the error
-constant is **(assumed)**.
+**Deleted references.** `#REF!` typed as a constant compiles to `2A`, a deleted cell reference, not the error
+constant `1C 17`: in a name definition (`2A`) and in a cell formula, where it takes the operand class (`=#REF!`
+is `4A`, Excel 1.00's `Literals` and 1.03's `Errors`).
 
 ---
 
@@ -1596,7 +1599,6 @@ None of these affects reading the samples or writing valid files.
 **Worksheets and macro sheets**
 
 * What the six bytes at the start of an external-document entry hold in memory; Excel writes zeros (§8).
-* What the lists a table record's link at offset 6 joins are for (§12.6).
 * Most of the 88 extra window-state bytes of version 18 (§13).
 * What Excel 1.04 changed besides adding CHANGE.LINK; no 1.04 code or sample is available (§2.1).
 
@@ -1624,7 +1626,7 @@ rules from the function tables (§15.3), and numbers 208–291 from Excel 1.5's 
   any other uses `22` (§15.4).
 * **Returns**, **First**, **Others**: what the function returns and what its first and later arguments
   accept: **N** number, **T** text, **L** logical, **R** reference, **E** error, **C** command, **A** array,
-  **?** type bit `0x80` (unknown).
+  **?** type bit `0x80`: the argument may be left empty **(inferred, §15.3)**.
 * **Flags**: **M** macro sheets only, **D** has a dialog-box form (`NAME?(…)`), **V** volatile (formulas start
   with `19 01`), **X** flag `0x02` (§15.3).
 * **Since**: the first release with the function (§2.1).

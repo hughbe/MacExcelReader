@@ -256,4 +256,106 @@ public class ExperimentTests
         // Excel 1.5 saves version 18 for colour or @ number formats, gridline colours and frozen panes (spec §2.1).
         Assert.Equal(ExcelDocument.Excel15FormatVersion, Load(name).Version);
     }
+
+    [Fact]
+    public void Literals_IntegerConstantsStopAt65535()
+    {
+        // Excel 1.00: FORMULA("=65535") and FORMULA("=65536") (spec §15.4).
+        var document = Load("Literals");
+        Assert.Equal([0x1E, 0xFF, 0xFF], document.Cells["C2"].Formula!.Expression.ToArray());
+        Assert.Equal(0x1F, document.Cells["C3"].Formula!.Expression[0]);
+    }
+
+    [Fact]
+    public void Literals_DatesUseThe1904System()
+    {
+        // Excel 1.00: DATE(1984,1,1) is serial number 29220 (spec §12.3).
+        Assert.Equal(29220.0, Convert.ToDouble(Load("Literals").Cells["C4"].Value));
+    }
+
+    [Fact]
+    public void Literals_Excel100CompilesIntersectionsAndDeletedReferences()
+    {
+        // Excel 1.00 reads a space as the intersection operator: two cells that do not overlap give a memory error
+        // holding #NULL!. "=#REF!" is a deleted reference (2A), not the error constant (spec §15.4).
+        var document = Load("Literals");
+        var intersection = document.Cells["C5"].Formula!;
+        Assert.Equal(0x47, intersection.Expression[0]);
+        Assert.Equal(0x00, intersection.Expression[2]);
+        Assert.Equal(0x0F, intersection.Expression[^1]);
+        Assert.Equal(0x4A, document.Cells["C7"].Formula!.Expression[0]);
+    }
+
+    [Theory]
+    [InlineData("C2", 0x60)]   // =SUM({1,2,3})
+    [InlineData("C4", 0x40)]   // ={1,2}+1
+    [InlineData("C5", 0x40)]   // ={1,2;3,4}
+    [InlineData("C6", 0x60)]   // =TRANSPOSE({1,2})
+    public void ArrayConstants_TakeArrayClassOnlyAsArguments(string address, byte token)
+    {
+        // Excel 1.00 (spec §15.4).
+        var document = Load("Array Constants");
+        var formula = document.Cells[address].Formula!;
+        Assert.Equal(token, formula.Expression.ToArray().First(b => (b & 0x1F) == 0x00 && b >= 0x40));
+        Assert.Equal(
+            FormulaTokens.ClearStaleBytes(formula.Expression),
+            FormulaTokens.ClearStaleBytes(ExcelFormula.Parse(formula.ToText(document), document).Expression));
+    }
+
+    [Fact]
+    public void FillFormat_StarIsTheRepeatToken()
+    {
+        // Excel 1.00: FORMAT.NUMBER("*-0") stores 0A 2D (fill with "-"); "\-0" stores the literal 02 2D (spec §7).
+        var formats = Load("Fill Format").NumberFormats;
+        Assert.Equal([0x03, 0x01, 0x00, 0x00, 0x0A, 0x2D, 0x06, 0x01], formats[0].Body);
+        Assert.Equal([0x03, 0x01, 0x00, 0x00, 0x02, 0x2D, 0x06, 0x01], formats[1].Body);
+    }
+
+    [Fact]
+    public void TableDeletedInput_ShowsRef()
+    {
+        // Excel 1.00: Y7, the row input of TABLE(Y7,X5), deleted with EDIT.DELETE(2). GET.FORMULA then gives
+        // =TABLE(#REF!,R5C24) (spec §12.6).
+        var document = Load("Table Deleted Input");
+        var formula = document.Cells["B2"].Formula!;
+        Assert.True(formula.RowInputDeleted);
+        Assert.False(formula.ColumnInputDeleted);
+        Assert.Equal("{=TABLE(#REF!,$X$5)}", formula.ToText(document));
+    }
+
+    [Fact]
+    public void LinkOpen_EntryStillStartsWithZeros()
+    {
+        // Excel 1.00 saved this with Src, the linked sheet, open (spec §8).
+        var bytes = Sample("Link Open");
+        var document = ExcelDocument.Read(bytes);
+        Assert.Equal(["Src"], document.ExternalDocuments.Select(d => d.Name));
+        int name = bytes.AsSpan().IndexOf("\u0003Src"u8);
+        Assert.True(name >= 6);
+        Assert.Equal(new byte[6], bytes[(name - 6)..name]);
+    }
+
+    [Fact]
+    public void OverlayAxis_ShowingAnOverlayAxisSetsItsLinePattern()
+    {
+        // Excel 1.00: Chart > Axes, "Overlay Chart Axis" under Category Axes, on the Combination sample. The overlay's
+        // category axis line pattern becomes 1; its option flags do not change (spec §16.5).
+        var overlay = ChartDocument.Load(SamplePath("Overlay Axis")).OverlayChart!;
+        Assert.Equal(1, overlay.CategoryAxis.AxisLinePattern);
+        Assert.Equal(0, overlay.ValueAxis.AxisLinePattern);
+        Assert.Equal(0x0F, overlay.Record[22]);
+    }
+
+    [Theory]
+    [InlineData("PROFIT CHART")]
+    [InlineData("CLOCK.CH")]
+    public void ChartLayout_DrawingRectangleIsCentredInTheWindow(string name)
+    {
+        // The margins either side of the chart area add up to the window's drawing size (spec §16.5, §16.6).
+        var document = ChartDocument.Load(SamplePath(name));
+        var chart = document.MainChart;
+        var (top, left) = chart.DrawingMargins;
+        Assert.InRange(document.ChartHeight - (2 * top + chart.ChartAreaBox.Height), -1, 1);
+        Assert.InRange(document.ChartWidth - (2 * left + chart.ChartAreaBox.Width), -1, 1);
+    }
 }

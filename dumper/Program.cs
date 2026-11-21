@@ -639,7 +639,19 @@ sealed class ChartCommand : Command<FileSettings>
             }
 
             table.AddRow("Category crossing", $"at category {chart.ValueAxisCrossesAtCategory}, between categories {Program.YesNo(chart.ValueAxisCrossesBetweenCategories)}, at maximum {Program.YesNo(chart.ValueAxisCrossesAtMaximumCategory)}, reverse {Program.YesNo(chart.CategoriesInReverseOrder)}, labels every {chart.CategoriesBetweenTickLabels}");
-            table.AddRow("Point formats", chart.PointFormats.Count.ToString(CultureInfo.InvariantCulture));
+            table.AddRow("Categories", chart.CategoryCount.ToString(CultureInfo.InvariantCulture));
+            if (chart != document.MainChart)
+            {
+                table.AddRow("Shares main chart's scale", $"value axis {Program.YesNo(chart.SharesValueAxisScale)}, X axis {Program.YesNo(chart.SharesXAxisScale)}");
+            }
+
+            var (top, left) = chart.DrawingMargins;
+            table.AddRow("Layout (twips)", $"margins top {top}, left {left}; chart area {Box(chart.ChartAreaBox)}; plot area {Box(chart.PlotAreaBox)}; tick length {chart.ValueAxis.TickLength}");
+            table.AddRow("Default series format", PointFormat(chart.DefaultSeriesFormat));
+            for (int i = 0; i < chart.PointFormats.Count; i++)
+            {
+                table.AddRow($"Point format {i + 1}", PointFormat(chart.GetPointFormat(i)));
+            }
             AnsiConsole.Write(table);
 
             if (chart.Texts.Count > 0)
@@ -674,6 +686,13 @@ sealed class ChartCommand : Command<FileSettings>
 
         return 0;
     }
+
+    private static string Box(ChartBox box) => $"top {box.Top}, left {box.Left}, {box.Height} × {box.Width}";
+
+    private static string PointFormat(ChartPointFormat format)
+        => $"series {format.SeriesNumber}; line pattern {format.LinePattern}{(format.AutomaticLine ? " (auto)" : string.Empty)}, weight {format.LineWeight}; area pattern {format.AreaPattern}{(format.AutomaticArea ? " (auto)" : string.Empty)}; marker {format.Marker}{(format.AutomaticMarker ? " (auto)" : string.Empty)}"
+            + (format.SeriesLabel ? "; series label" : string.Empty) + (format.PointLabels ? "; point labels" : string.Empty)
+            + (format.Explosion != 0 ? $"; pulled out {format.Explosion}%" : string.Empty);
 
     private static string Axis(ChartAxis axis)
         => $"ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition}; line {(axis.AxisLinePattern == 0 ? "hidden" : "shown")}; gridlines major {(axis.MajorGridlinePattern == 0 ? "off" : "on")}, minor {(axis.MinorGridlinePattern == 0 ? "off" : "on")}";

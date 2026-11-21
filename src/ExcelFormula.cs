@@ -205,6 +205,30 @@ public sealed class ExcelFormula
     }
 
     /// <summary>
+    /// Gets whether the table's row input cell has been deleted (bit 0 of the input's row word); Excel then shows
+    /// <c>#REF!</c> in its place.
+    /// </summary>
+    public bool RowInputDeleted => TableInputDeleted(row: true);
+
+    /// <summary>Gets whether the table's column input cell has been deleted.</summary>
+    public bool ColumnInputDeleted => TableInputDeleted(row: false);
+
+    private bool TableInputDeleted(bool row)
+    {
+        if (!IsTable || !IsSharedAnchor || Fixups.Length < 21)
+        {
+            return false;
+        }
+
+        var record = Fixups.Slice(3, 18);
+        bool firstIsRow = (record[14] & 0x40) != 0;
+        bool hasSecond = (record[14] & 0x80) != 0;
+        // The first input is the row input when bit 6 is set, otherwise the column input; the second is the column input.
+        int word = row ? (firstIsRow ? 10 : -1) : (firstIsRow ? (hasSecond ? 16 : -1) : 10);
+        return word >= 0 && (record[word + 1] & 0x01) != 0;
+    }
+
+    /// <summary>
     /// Gets the shared expression of an array formula, held by its anchor cell; empty for other formulas.
     /// </summary>
     public ReadOnlySpan<byte> SharedExpression
@@ -243,7 +267,9 @@ public sealed class ExcelFormula
         if (IsTable)
         {
             // The inputs are fixed cells: Excel's GET.FORMULA gives them as absolute references (R7C25).
-            return TableInputs is var (row, column) ? $"{{=TABLE({Absolute(row)},{Absolute(column)})}}" : "{=TABLE()}";
+            return TableInputs is var (row, column)
+                ? $"{{=TABLE({(RowInputDeleted ? "#REF!" : Absolute(row))},{(ColumnInputDeleted ? "#REF!" : Absolute(column))})}}"
+                : "{=TABLE()}";
         }
 
         if (Fixups.Length < 13)

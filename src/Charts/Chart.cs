@@ -127,6 +127,21 @@ public sealed class Chart
     public List<byte[]> PointFormats { get; } = [];
 
     /// <summary>
+    /// Gets the top and left margins, in twips, of the chart's drawing rectangle, which Excel centres in the window's
+    /// drawing size when it draws the chart (record offsets 14 and 16).
+    /// </summary>
+    public (short Top, short Left) DrawingMargins => (unchecked((short)GetWord(14)), unchecked((short)GetWord(16)));
+
+    /// <summary>Gets the chart area's box in twips, as Excel last laid it out: (0, 0, height, width).</summary>
+    public ChartBox ChartAreaBox => ReadBox(24 + 8);
+
+    /// <summary>Gets the plot area's box in twips, relative to the chart area, as Excel last laid it out.</summary>
+    public ChartBox PlotAreaBox => ReadBox(138 + 8);
+
+    private ChartBox ReadBox(int offset)
+        => new(unchecked((short)GetWord(offset)), unchecked((short)GetWord(offset + 2)), unchecked((short)GetWord(offset + 4)), unchecked((short)GetWord(offset + 6)));
+
+    /// <summary>
     /// Gets the number of categories, which Excel works out when it draws the chart (header byte 4; 0 in overlays).
     /// </summary>
     public byte CategoryCount => Record[4];
@@ -313,6 +328,9 @@ public sealed class ChartAxis
     /// <summary>Gets or sets the axis line pattern; 0 hides the axis.</summary>
     public byte AxisLinePattern { get => _data[_offset + 13]; set => _data[_offset + 13] = value; }
 
+    /// <summary>Gets the tick-mark length in twips, which Excel works out when it draws the chart.</summary>
+    public short TickLength => unchecked((short)BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + 6)));
+
     /// <summary>Gets or sets the major gridline pattern; 0 hides them.</summary>
     public byte MajorGridlinePattern { get => _data[_offset + 17]; set => _data[_offset + 17] = value; }
 
@@ -322,6 +340,11 @@ public sealed class ChartAxis
     /// <summary>Gets the tick-label font descriptor bytes (on disk, Microsoft Chart codes).</summary>
     public ReadOnlySpan<byte> Font => _data.AsSpan(_offset + 2, 4);
 }
+
+/// <summary>
+/// A box in a chart, in twips, as Excel lays it out when it draws the chart.
+/// </summary>
+public readonly record struct ChartBox(short Top, short Left, short Height, short Width);
 
 /// <summary>
 /// A view of a 12-byte data-point format record, or the default series format (spec §16.8).

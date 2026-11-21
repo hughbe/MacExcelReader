@@ -1175,9 +1175,12 @@ public static class ExcelFormulaParser
                     Add(0x16);
                     break;
                 case ArrayNode array:
-                    // 0x20 (array class, (assumed) everywhere): column count, row count, three stale bytes. The data
-                    // goes in the fix-ups of a cell formula, or after the names for a name definition.
-                    Add(0x60);
+                    // 0x20: column count, row count, three stale bytes. The data goes in the fix-ups of a cell formula,
+                    // or after the names for a name definition. Array class in a definition and where an argument
+                    // accepts arrays; elsewhere the class of a value, so ={1,2} in a cell is 40 (spec §15.4).
+                    Add(WithClass(0x20, _definition || (context.Kind is ContextKind.Argument or ContextKind.IfArgument && (context.Accepts & ExcelValueTypes.Array) != 0)
+                        ? ArrayClass
+                        : InArrayFormula(context, ValueClass)));
                     Add(array.Block[0]);
                     Add(array.Block[1]);
                     Add(array.Block[2]);
