@@ -410,4 +410,15 @@ public class ExperimentTests
         Assert.Equal(b, a);
         Assert.Equal(saved.FirstLabel, ours.FirstLabel);
     }
+
+    [Fact]
+    public void TableRelinked_SavedLinkIsCleared()
+    {
+        // Excel 1.00 opened a table whose record had 00 01 00 at offset 6 (a list link) and saved it back with zeros.
+        // Byte 14's low bits came back as 0E (spec §12.6).
+        var formula = Load("Table Relinked").Cells["B6"].Formula!;
+        var record = formula.Fixups.Slice(3, 18).ToArray();
+        Assert.Equal(new byte[3], record[6..9]);
+        Assert.Equal(0xCE, record[14]);
+    }
 }

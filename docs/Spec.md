@@ -682,11 +682,11 @@ reads as it is (`46.06` in 1.00) and the TABLE command builds (`4b.06` in 1.00):
 | 2 | word | Last row |
 | 4 | byte | First column |
 | 5 | byte | Last column |
-| 6 | 3 bytes | Memory pointer linking the record into one of Excel's two table lists, or 0. Open links every table into the list of all tables (`46.06` in 1.00); a table waiting to be calculated goes on the second list, which the table calculation (`3f.00`) takes and empties, and `27.0f` appends to the first. `1d.06` unlinks a record. Left over from memory; write 0. |
+| 6 | 3 bytes | Memory pointer linking the record into one of Excel's table lists, or 0. A table waiting to be calculated goes on a list that the table calculation (`3f.00` in 1.00) takes and empties, and `1d.06` unlinks a record. Open reads the saved value: when it is not 0, Open links the table into a list again (`46.06`). A table saved with a non-zero value in Excel 1.00 was not calculated on Open and was saved back with 0. Write 0, as every saved table has. |
 | 9 | byte | Column of the first input cell |
 | 10 | word | Bits 15–2: row of the first input cell. Bit 0: the input cell has been deleted, and the formula shows `#REF!` in its place (`1d.01` in 1.00). Bit 1: a mark the code that moves and deletes cells sets and clears; while it is set that code clears bit 0 (`0e.01`, `4f.0b`) **(inferred)**. |
 | 12 | word | Left over from memory (`FF FF` in every table seen) |
-| 14 | byte | Bit 6: the first input is the row input. Bit 7: there is a second input, the column input. Without bit 6 the first input is the column input. |
+| 14 | byte | Bit 6: the first input is the row input. Bit 7: there is a second input, the column input. Without bit 6 the first input is the column input. Bits 5–0: not identified; they differ between saves of the same table (`C0`, `C6`, `C8`, `CE`) **(unknown)**. |
 | 15 | byte | Column of the second input cell |
 | 16 | word | Bits 15–2: row of the second input cell. Bits 1–0 as in the word at offset 10. |
 
@@ -1555,6 +1555,7 @@ None of these affects reading the samples or writing valid files.
 **Worksheets and macro sheets**
 
 * What the six bytes at the start of an external-document entry hold in memory; Excel writes zeros (§8).
+* Bits 5–0 of a table record's byte 14 (§12.6).
 * Most of the 88 extra window-state bytes of version 18 (§13), and what else in a number format makes Excel
   1.5 save version 18 (§2.1).
 * What Excel 1.04 changed besides adding CHANGE.LINK; no 1.04 code or sample is available (§2.1).
@@ -1565,7 +1566,7 @@ None of these affects reading the samples or writing valid files.
 
 **Workspace files** (Appendix B)
 
-* The layout of the preferred chart format.
+* The layout of the preferred chart format before offset 1058, the in-memory chart document.
 
 ---
 
@@ -1899,7 +1900,7 @@ calculation settings. It holds no cell data. Written by `64.00` and read by `64.
 | 20 bytes | Calculation settings, laid out as offsets 0x000–0x013 of the sheet state block (§6): maximum iterations, calculation mode, precision, reference style, unused word, maximum change (double), iteration. In 1.00 they are global, not per document. |
 | word | 1 if a window was **zoomed** to fill the screen (the FULL command or the zoom box; global `g0c5a`), else 0. Open zooms the front window again (`17.0c`). The rectangles below are always the windows' normal size: Excel un-zooms a window before recording it. |
 | … | The document windows, front to back, each as below, then a `0x00` byte |
-| word | `n`, then `n` bytes: the **preferred chart format** (Chart > Set Preferred Format, applied by Gallery > Preferred), Excel's in-memory image of a chart, whose first word is its own length. `n` = 0 when none has been set (1,640 bytes for `CLOCK.CH`'s format). From offset 1058 it holds the chart record of §16.5 at its in-memory offsets (the table's second column); the first 1,058 bytes are other in-memory chart structures **(unknown)**. |
+| word | `n`, then `n` bytes: the **preferred chart format** (Chart > Set Preferred Format, applied by Gallery > Preferred). Set Preferred Format keeps the active chart document's whole in-memory block (`5a.13` in 1.00), and this is that block as it is: its first word is its own length, as for every block on Excel's heap, which the memory manager (`0a.03`) moves like any other. `n` = 0 when none has been set (1,640 bytes for `CLOCK.CH`'s format). From offset 1058 it holds the chart record of §16.5 at its in-memory offsets (the table's second column); the rest of the block's layout is **(unknown)**. |
 | byte | 0 |
 | 3 words | **Printer Setup** (dialog 288, PRINTER.SETUP): printer type (0 Macintosh, 1 TTY), baud rate (0–5 for 300, 600, 1200, 2400, 4800, 9600) and port (0 printer, 1 modem). The sample's `0, 5, 0` is a Macintosh printer; `PRINTER.SETUP(2,2,3)` gives `1, 2, 1`. |
 | byte | 0 |
