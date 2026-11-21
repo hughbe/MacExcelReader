@@ -168,6 +168,7 @@ Things to know:
 | Nov 2026 | 1.00 | Format > Patterns on two markers of a line series | Marker values and point-keyed overrides (spec §16.8); the 15 fill patterns came from `PCOD` 0 |
 | Nov 2026 | 1.00 | Library charts opened on screen, and variants mixing Excel's and the library's records | Library charts drew nothing: `ChartSeries.Create` left series bit 10 clear and `Chart.Create` wrote an invisible default series format. Fixed; all four library charts now draw (spec §16.9) |
 | Nov 2026 | 1.00 | Format > Patterns on a column series; series with and without a source document | Point-format border and area; Excel 1.x series need a source document, references without `=` (spec §16.8, §16.9) |
+| Nov 2026 | 1.00 | Two sheets of overflowing text, state word 0x01A 0 and 1 | No visible difference; Excel ran its whole-sheet pass and saved 0 (spec §6) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every
