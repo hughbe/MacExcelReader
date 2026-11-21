@@ -1706,14 +1706,15 @@ record by its byte 6 (`3c.01` in 1.00).
 
 | Offset | Meaning |
 |-------:|---------|
+| 0 | Not used (the line format's unused byte) |
 | 1 | Line or border pattern |
 | 2 | Word: line weight and automatic line (below) |
 | 4 | Area pattern |
+| 5 | Not used |
 | 6 | Series number; in a chart with one series, the point (category) number, from 0 (`33.10`; the `Point Markers` sample's overrides are points 8 and 10) |
 | 7 | Marker (below) |
 | 8 | Word of flags (below) |
 | 10 | Word: how far a pie slice is pulled out, as a percentage of the radius: 25 for the first slice of Pie format 3 (a point record), 20 for every slice of Pie format 4 (the default series format). GALLERY.PIE stores it as a word (`35.18` in 1.00), and the code that works out which Pie format a chart has tests the whole word (`35.17`). |
-| 0, 5, 9 | Not used: byte 0 is the line format's unused byte, byte 5 follows the area pattern, and byte 9 is bits 7–0 of word 8. Excel 1.00 clears the record when it makes one (`0f.12`) and never reads or writes these bytes, so they are 0. |
 
 Point format word 2:
 
@@ -1727,12 +1728,16 @@ Point format word 8:
 | Bits | Meaning |
 |-----:|---------|
 | 15 | Automatic marker |
+| 14 | Not used |
 | 13 | Set when a format is made (`0f.12`), never read |
 | 12 | Automatic area |
 | 11 | A data label for the series, made from built-in text object −2 (`33.10` in 1.00; §16.5) |
 | 10 | A data label on each data point, made from built-in text object −1 |
 | 9 | The labels show percentages (for a pie the label code totals the series, `33.00`); Pie format 6 sets it with bit 10 |
-| 14, 8–0 | Not used |
+| 8–0 | Not used |
+
+Excel 1.00 clears a point-format record when it makes one (`0f.12`) and never reads or writes bytes 0 and 5 or
+the unused bits of word 8, so they are 0.
 
 Marker, in the order of the Marker Pattern dialog (`Point Markers` sample, Excel 1.00):
 
