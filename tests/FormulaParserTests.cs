@@ -35,6 +35,25 @@ public class FormulaParserTests
             }
         }
 
+        // A memory area (26) with no cached areas: an earlier version of this library compiled an intersection of
+        // cells that do not overlap that way, and Excel kept the tokens ("Memory Error", "Recalculated"). Excel
+        // itself compiles it to a memory error (27).
+        foreach (var token in FormulaTokens.Enumerate(formula.Expression))
+        {
+            if (token.Code == FormulaTokens.MemoryArea && formula.Fixups.Length >= 2 && formula.Fixups[0] == 0 && formula.Fixups[1] == 0)
+            {
+                return true;
+            }
+        }
+
+        // A name on another document that looks like a cell reference: Excel 1.03 read Other!A1 in R1C1 mode as the
+        // name A1 ("Links"). A1 text has no way to write it that reads back as a name.
+        if (codes.Contains(0x23) && codes.Contains(0x1A) && ExcelDocument.Read(file).ExternalDocuments
+                .Any(d => d.Names.Any(n => n.Length >= 2 && char.IsAsciiLetter(n[0]) && char.IsAsciiDigit(n[^1]) && n.All(char.IsAsciiLetterOrDigit))))
+        {
+            return true;
+        }
+
         if (!IsPreRelease15(file))
         {
             return false;

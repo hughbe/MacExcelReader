@@ -118,7 +118,8 @@ public static class FormulaTokens
     /// Returns a copy of a parsed expression with the bytes Excel leaves over from memory set to zero (spec §15.2),
     /// so that two encodings of the same formula compare equal: the pointer bytes of name (<c>23</c>),
     /// external-sheet (<c>1A</c>, <c>1B</c>), array-constant (<c>20</c>) and deleted-reference (<c>2A</c>) tokens, and
-    /// the skip byte of an IF or CHOOSE attribute, and the pointer bytes of a memory area (<c>26</c>).
+    /// the skip byte of an IF or CHOOSE attribute, and the pointer bytes of a memory area (<c>26</c>) or memory error (<c>27</c>), and the shared-record pointer of an
+    /// array formula or table cell (<c>01</c>, <c>02</c>).
     /// </summary>
     /// <param name="expression">The expression.</param>
     /// <param name="definition">Whether it is a name definition, whose fix-ups are applied in place (spec §11).</param>
@@ -145,6 +146,12 @@ public static class FormulaTokens
                     break;
                 case MemoryArea:
                     operands[..3].Clear();
+                    break;
+                case 0x27:
+                    operands[2] = 0;
+                    break;
+                case 0x01 or 0x02 when token.Offset == 0:
+                    operands.Clear();
                     break;
                 case 0x19 when operands[0] is 0x01 or 0x10:
                     operands[1] = 0;

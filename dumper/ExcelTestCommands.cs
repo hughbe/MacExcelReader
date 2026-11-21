@@ -336,9 +336,20 @@ sealed class CheckCommand : Command<CheckSettings>
             AnsiConsole.MarkupLine(original.Data.AsSpan().SequenceEqual(saved.Data)
                 ? "  Bytes: identical."
                 : $"  Bytes: ours {original.Data.Length:N0}, Excel {saved.Data.Length:N0}; {DifferingBytes(original.Data, saved.Data):N0} differ in the common length.");
-            problems += original.Type == "MCBN"
-                ? CompareJson(JsonCommand.ChartModel(ChartDocument.Read(original.Data)), JsonCommand.ChartModel(ChartDocument.Read(saved.Data)), settings.All)
-                : CheckSheet(original, saved, results, settings);
+            if (original.Type == "MCBN")
+            {
+                var ours = ChartDocument.Read(original.Data);
+                var excel = ChartDocument.Read(saved.Data);
+                problems += CompareJson(JsonCommand.ChartModel(ours), JsonCommand.ChartModel(excel), settings.All);
+                if (settings.Bytes)
+                {
+                    CompareChartBytes(ours, excel);
+                }
+            }
+            else
+            {
+                problems += CheckSheet(original, saved, results, settings);
+            }
         }
 
         AnsiConsole.MarkupLine(problems == 0 ? "[green]No unexpected differences.[/]" : $"[yellow]{problems} unexpected difference(s).[/]");
@@ -443,6 +454,43 @@ sealed class CheckCommand : Command<CheckSettings>
         }
 
         return differences.Count;
+    }
+
+    // Chart records, text objects and the window block, byte by byte (offsets as in spec §16).
+    private static void CompareChartBytes(ChartDocument ours, ChartDocument excel)
+    {
+        ReportBytes("Window", ours.Window, excel.Window);
+        for (int i = 0; i < Math.Min(ours.Charts.Count, excel.Charts.Count); i++)
+        {
+            ReportBytes($"Chart {i + 1} record", ours.Charts[i].Record, excel.Charts[i].Record);
+            for (int t = 0; t < Math.Min(ours.Charts[i].Texts.Count, excel.Charts[i].Texts.Count); t++)
+            {
+                ReportBytes($"Chart {i + 1} text {t + 1}", ours.Charts[i].Texts[t].Record, excel.Charts[i].Texts[t].Record);
+            }
+
+            if (ours.Charts[i].Texts.Count != excel.Charts[i].Texts.Count)
+            {
+                AnsiConsole.MarkupLine($"  [blue]Chart {i + 1} text objects[/]: ours {ours.Charts[i].Texts.Count}, Excel {excel.Charts[i].Texts.Count}");
+            }
+        }
+    }
+
+    private static void ReportBytes(string what, ReadOnlySpan<byte> a, ReadOnlySpan<byte> b, Func<int, bool>? skip = null)
+    {
+        var parts = new List<string>();
+        for (int i = 0; i < Math.Max(a.Length, b.Length); i++)
+        {
+            int x = i < a.Length ? a[i] : -1, y = i < b.Length ? b[i] : -1;
+            if (x != y && skip?.Invoke(i) != true)
+            {
+                parts.Add($"{i}: {(x < 0 ? "--" : x.ToString("X2"))}→{(y < 0 ? "--" : y.ToString("X2"))}");
+            }
+        }
+
+        if (parts.Count > 0)
+        {
+            AnsiConsole.MarkupLine($"  [blue]{Markup.Escape(what)}[/] {string.Join(", ", parts)}");
+        }
     }
 
     // Raw differences in the parts the JSON model leaves out. Informational: they do not count as problems.

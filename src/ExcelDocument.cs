@@ -665,7 +665,16 @@ public sealed class ExcelDocument
 
         for (int i = 0; i < sections.Length; i++)
         {
-            writer.PatchUInt32(sectionTable + 4 * i, (uint)(((sections[i] / 512) << 16) | (sections[i] % 512)));
+            // Excel's 512-byte buffer is written out only when the next byte arrives, so a position on a block
+            // boundary is the end of the full block before it: (block - 1, 512) (spec §1.2).
+            int block = sections[i] / 512, offset = sections[i] % 512;
+            if (offset == 0 && block > 0)
+            {
+                block--;
+                offset = 512;
+            }
+
+            writer.PatchUInt32(sectionTable + 4 * i, (uint)((block << 16) | offset));
         }
 
         return writer.ToArray();

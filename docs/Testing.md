@@ -97,6 +97,8 @@ Things to know when writing commands:
 - The macro command FORMULA takes **R1C1** text: `=FORMULA("=SUM(R1C1:R2C2)")`. A1 text gives `#VALUE!`.
 - CALCULATION and A1.R1C1 are global, so they carry on into every later file on the disk.
 - In Excel 1.00 a window's title includes its volume (`Ws:F 01 saved`), which ACTIVATE needs.
+- Excel does not recalculate the formulas it loads, so a sheet the library wrote keeps its stored results. Add
+  `recalc 1` to the list to have Excel recalculate it on Open.
 - Excel 1.00 writes a workspace (`Resume Excel`, next to the application) on every Quit, so leaving files open
   with `--keep-open`, running `--end` commands and quitting shows what the workspace records.
 
@@ -118,6 +120,7 @@ external Budget Rate Total      an external document and the names used from it 
 name Total =$B$2                a defined name; add "macro", or "command K" for a command macro with key K
 cell D1 =ARGUMENT("x")          a cell outside columns A and B, such as the macro a name points at
 {=TRANSPOSE(A1:B1)} 2           an array formula over 2 rows
+recalc 1                        state word 0x018 (1 marks the sheet as needing recalculation)
 ```
 
 The same format works for any new experiment: write a list and build it.
@@ -149,5 +152,12 @@ Things to know:
 | Nov 2026 | 1.03 | Experiments: CALCULATION, A1.R1C1, SET.PAGE.BREAK, TABLE, DEFINE.NAME, links, intersections | Calculation-mode values, reference style, page-break numbering, the macro-kind byte, state words 0x024 and 0x03E, intersection encoding (spec §6, §11, §14, §15). Tables do not fit the inferred layout (§12.6). |
 | Nov 2026 | 1.00 | FULL, PRINTER.SETUP, Set Preferred Format, then Quit | All three unknown workspace fields (spec Appendix B) |
 | Nov 2026 | 1.5 | FORMAT.NUMBER with `@` and colours, FREEZE.PANES, DISPLAY colour | Tokens `23`, `24`, window bytes 121, 127, 128 and the version-18 rule (spec §7, §13) |
+| Nov 2026 | 1.03 | Every Gallery format and COMBINATION on `PROFIT CHART` (`--bytes`) | Explosion and data-label bits of point formats, overlay option flags, the gallery table (spec §16.5, §16.8, §16.10) |
+| Nov 2026 | 1.03 | COLUMN.WIDTH, error formulas, `recalc 1`, `=(R1C1,R2C2)`, TABLE with one input | Column widths in pixels, all seven error codes, state word 0x018 makes Open recalculate, memory error `27` with #NULL! or #VALUE!, table byte 14 (spec §6, §12.4, §12.6, §15.4) |
+| Nov 2026 | 1.5 | Re-saved version-18 sheets as samples | A stream position on a block boundary is stored as offset 512 (spec §1.2) |
+
+The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
+`Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every
+sample is also read, written back byte for byte and, for formulas, recompiled by the unit tests.
 
 Bugs and quirks of Excel found this way are in [Excel bugs and quirks](ExcelBugs.md).

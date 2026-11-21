@@ -82,6 +82,13 @@ different formula: a range of two whole-row areas wrapped in a memory area (`46 
 * Array formulas come back without braces: `{=A1:A2*2}` becomes `=R[-59]C[-1]:R[-58]C[-1]*2`.
 * Small numbers are written out in full: `1.5E-10` becomes `0.00000000015`.
 
+## Loaded formulas keep their stored values (Excel 1.03)
+
+Seen in Excel 1.03 under Mini vMac. A sheet written with every formula's result set to 0 and state word `0x018`
+at 0 still showed 0 for `=1/0` and `=SQRT(-1)` after CALCULATE.NOW, in automatic calculation. Excel recalculates
+a loaded formula only when something it depends on changes, or when it opens a file whose state word `0x018` is
+1 or 2 (§6). A writer that cannot work out the results should set that word.
+
 ## Old fixed-argument tokens in Excel 1.5 (deliberate)
 
 Not a bug, but it looks like one. It was read from Excel 1.5's Save code, and the samples bear it out. Excel

@@ -214,6 +214,18 @@ public sealed class ExcelFormula
     public ReadOnlySpan<byte> SharedFixups
         => SharedExpression.IsEmpty ? default : Fixups.Slice(13 + Fixups[12]);
 
+    private static string Absolute(ExcelCellAddress? address)
+    {
+        if (address is null)
+        {
+            return string.Empty;
+        }
+
+        string text = address.ToString()!;
+        int digits = text.IndexOfAny("0123456789".ToCharArray());
+        return "$" + text[..digits] + "$" + text[digits..];
+    }
+
     private string SharedText(ExcelDocument? document)
     {
         if (!IsSharedAnchor)
@@ -230,7 +242,8 @@ public sealed class ExcelFormula
 
         if (IsTable)
         {
-            return TableInputs is var (row, column) ? $"{{=TABLE({row},{column})}}" : "{=TABLE()}";
+            // The inputs are fixed cells: Excel's GET.FORMULA gives them as absolute references (R7C25).
+            return TableInputs is var (row, column) ? $"{{=TABLE({Absolute(row)},{Absolute(column)})}}" : "{=TABLE()}";
         }
 
         if (Fixups.Length < 13)

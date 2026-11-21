@@ -126,6 +126,12 @@ public sealed class Chart
     /// <summary>Gets the 12-byte data-point format records.</summary>
     public List<byte[]> PointFormats { get; } = [];
 
+    /// <summary>Gets the chart's default series format (the point-format record at offset 366).</summary>
+    public ChartPointFormat DefaultSeriesFormat => new(Record, 366);
+
+    /// <summary>Gets a view of one of the <see cref="PointFormats"/>.</summary>
+    public ChartPointFormat GetPointFormat(int index) => new(PointFormats[index], 0);
+
     private ushort GetWord(int offset) => BinaryPrimitives.ReadUInt16BigEndian(Record.AsSpan(offset));
 
     private void SetWord(int offset, ushort value) => BinaryPrimitives.WriteUInt16BigEndian(Record.AsSpan(offset), value);
@@ -299,6 +305,60 @@ public sealed class ChartAxis
 
     /// <summary>Gets the tick-label font descriptor bytes (on disk, Microsoft Chart codes).</summary>
     public ReadOnlySpan<byte> Font => _data.AsSpan(_offset + 2, 4);
+}
+
+/// <summary>
+/// A view of a 12-byte data-point format record, or the default series format (spec §16.8).
+/// </summary>
+public sealed class ChartPointFormat
+{
+    private readonly byte[] _data;
+    private readonly int _offset;
+
+    internal ChartPointFormat(byte[] data, int offset)
+    {
+        _data = data;
+        _offset = offset;
+    }
+
+    private ushort GetWord(int offset) => BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + offset));
+
+    private void SetBit(int offset, int bit, bool value)
+    {
+        ushort word = GetWord(offset);
+        BinaryPrimitives.WriteUInt16BigEndian(_data.AsSpan(_offset + offset), (ushort)(value ? word | (1 << bit) : word & ~(1 << bit)));
+    }
+
+    /// <summary>Gets or sets the line or border pattern; 0 means none.</summary>
+    public byte LinePattern { get => _data[_offset + 1]; set => _data[_offset + 1] = value; }
+
+    /// <summary>Gets or sets the line or border weight (bits 15–12 of the word at offset 2).</summary>
+    public int LineWeight
+    {
+        get => GetWord(2) >> 12;
+        set => BinaryPrimitives.WriteUInt16BigEndian(_data.AsSpan(_offset + 2), (ushort)((GetWord(2) & 0x0FFF) | ((value & 0xF) << 12)));
+    }
+
+    /// <summary>Gets or sets whether the line or border is automatic.</summary>
+    public bool AutomaticLine { get => (GetWord(2) & 0x0400) != 0; set => SetBit(2, 10, value); }
+
+    /// <summary>Gets or sets the area pattern.</summary>
+    public byte AreaPattern { get => _data[_offset + 4]; set => _data[_offset + 4] = value; }
+
+    /// <summary>Gets or sets the series number the record applies to.</summary>
+    public byte SeriesNumber { get => _data[_offset + 6]; set => _data[_offset + 6] = value; }
+
+    /// <summary>Gets or sets the marker; 0 means none.</summary>
+    public byte Marker { get => _data[_offset + 7]; set => _data[_offset + 7] = value; }
+
+    /// <summary>Gets or sets whether the marker is automatic.</summary>
+    public bool AutomaticMarker { get => (GetWord(8) & 0x8000) != 0; set => SetBit(8, 15, value); }
+
+    /// <summary>Gets or sets whether the area is automatic.</summary>
+    public bool AutomaticArea { get => (GetWord(8) & 0x1000) != 0; set => SetBit(8, 12, value); }
+
+    /// <summary>Gets or sets how far a pie slice is pulled out, as a percentage of the radius.</summary>
+    public byte Explosion { get => _data[_offset + 11]; set => _data[_offset + 11] = value; }
 }
 
 /// <summary>

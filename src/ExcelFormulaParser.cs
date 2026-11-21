@@ -1228,15 +1228,27 @@ public static class ExcelFormulaParser
                     // wrapped in a memory token giving the length of what follows. Built from cell references alone,
                     // it is a memory area (0x26: three stale bytes, then the length), and Excel caches the resulting
                     // areas in the fix-ups; otherwise a memory function (0x29; 0x2E in a definition). Both take
-                    // the class of a reference in their place (confirmed by Excel 1.03's own compilation).
+                    // the class of a reference in their place, as Excel 1.03's own compilation shows.
                     int start = -1;
                     if (reference && !_insideMemoryFunction
                         && (binary.Operator != 0x11 || !(IsPlainReference(binary.Left) && IsPlainReference(binary.Right))))
                     {
                         var areas = _definition ? null : Areas(binary);
-                        if (areas is not null)
+                        int memoryClass = OperandClass(context);
+                        if (areas is not null && areas.Count != 1 && memoryClass == ValueClass)
                         {
-                            Add(WithClass(0x26, OperandClass(context)));
+                            // A single value is needed but the area list is not one area: Excel 1.03 compiles a
+                            // memory error (0x27) instead, with no cached areas: #NULL! (0x00) when there are no areas,
+                            // as for an intersection of cells that do not overlap, otherwise #VALUE! (0x0F) (spec §15.2).
+                            Add(WithClass(0x27, memoryClass));
+                            Add(0);
+                            Add(areas.Count == 0 ? (byte)0x00 : (byte)0x0F);
+                            Add(0);
+                            Add(0);
+                        }
+                        else if (areas is not null)
+                        {
+                            Add(WithClass(0x26, memoryClass));
                             Add(0);
                             Add(0);
                             Add(0);
@@ -1255,7 +1267,7 @@ public static class ExcelFormulaParser
                         }
                         else
                         {
-                            Add(_definition ? (byte)0x2E : WithClass(0x29, OperandClass(context)));
+                            Add(_definition ? (byte)0x2E : WithClass(0x29, memoryClass));
                             Add(0);
                         }
 

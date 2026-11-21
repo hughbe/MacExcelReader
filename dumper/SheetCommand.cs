@@ -172,6 +172,7 @@ sealed class SheetCommand : Command<SheetSettings>
 /// external Budget Rate Total      an external document and the names used from it ("!" = the active sheet)
 /// name Total =$B$2                a defined name; add "macro", or "command K" for a command macro with key K
 /// cell D1 =ARGUMENT("x")          a cell outside columns A and B, such as a macro the names point at
+/// recalc 1                        the recalculation state word (0x018): 1 marks the sheet as needing it
 /// </code>
 /// Then "## Heading" lines and formulas, one per line. "{=formula} N" is an array formula over N rows.
 /// </summary>
@@ -181,6 +182,7 @@ sealed class FormulaList
     public List<(string Name, List<string> Names)> Externals { get; } = [];
     public List<(string Name, string Definition, byte Flags, char Key)> Names { get; } = [];
     public List<(string Address, string Formula)> Cells { get; } = [];
+    public ushort? RecalculationState { get; private set; }
     public List<Line> Lines { get; } = [];
 
     public sealed record Line(string? Heading, string? Formula, int ArrayRows);
@@ -243,6 +245,9 @@ sealed class FormulaList
 
                     list.Names.Add((words[1], words[2], flags, key));
                     break;
+                case "recalc" when words.Count == 2:
+                    list.RecalculationState = ushort.Parse(words[1]);
+                    break;
                 case "cell" when words.Count >= 3:
                     list.Cells.Add((words[1], line[(line.IndexOf(words[1], 4, StringComparison.Ordinal) + words[1].Length)..].Trim()));
                     break;
@@ -294,6 +299,11 @@ sealed class FormulaList
             var formula = ExcelFormula.Parse(text, document, version);
             formula.SetResult(0);
             document.Cells[address].SetFormula(formula);
+        }
+
+        if (RecalculationState is { } state)
+        {
+            document.State.RecalculationState = state;
         }
 
         return document;
