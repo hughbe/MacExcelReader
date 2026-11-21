@@ -72,8 +72,10 @@ misbehaves, for example with a file that breaks a rule given here.
 * All multi-byte integers are **big-endian**.
 * `byte` = 8 bits, `word` = 16 bits, `long` = 32 bits, `double` = IEEE 754 64-bit.
 * *Pascal string* = one length byte followed by that many characters (Mac Roman).
-* Bits are numbered from 0, the least significant: bit 15 is the top bit of a word. Fields are written "bit N:
-  meaning" or "bits N–M: meaning", highest first; flags given by mask are written "`0x04`: meaning".
+* Bits are numbered from 0, the least significant: bit 15 is the top bit of a word. A field that packs several
+  flags or bit fields has its own table under the record table: a **Bits** column (highest first) where the
+  spec numbers bits, or a **Flag** column where Excel's code tests masks (`0x04`). A field holding one bit
+  field says so in its row: "bits 15–12: weight".
 * Rows and columns are **zero-based** on disk. Row limit 16,384 (14 bits), column limit 256.
 * The whole document lives in the **data fork**. The resource fork is empty.
 * **Left over from memory.** Excel saves many structures by copying them straight out of memory, so some bytes
@@ -603,11 +605,34 @@ The defined names, then the data of the array constants their definitions contai
 |-----:|---------|
 | byte | `cch` = name length (never 0; 0 is the terminator) |
 | byte | `cce` = definition length |
-| byte | Flags. `0x04`: the definition is a reference, one cell or area token (`2C`, `2D`) or a union in its definition form (`2E`). Every such name in the samples has it, on worksheets and macro sheets alike, and no other name does. Excel sets it when it saves, so macro names, which point at a cell, have it too. `0x20`: the definition is array-valued, so formulas using the name get cell word 2 bit 13 (§9); `0x40`: a macro, function or command, and two extra bytes follow. Open keeps only bits `0x64`, so the `0x01`, `0x02` and `0x80` some samples have are in-memory marks Save writes out and Open discards. |
-| 2 bytes | Only if flag `0x40`: the shortcut key (the character typed with Option-Command; 0 for none), then the **macro kind**. `0x40`: command macro, listed in Macro > Run; `0x80`: function macro, called from formulas. Open keeps those two bits and discards the low nibble (left over from memory in the samples: `0x40`–`0x4E`, `0x80`–`0x8A`). For example, `DEFINE.NAME("Cmd",…,2,"q")` gives flags `0x44`, key `q`, kind `0x44`, and `DEFINE.NAME("Fn",…,1)` gives flags `0x44`, key 0, kind `0x80`. In the samples, `MATRIX`'s INV and MULT and `BEARINGS`'s Coordinates are function macros; every other macro is a command. |
+| byte | Flags (below) |
+| 2 bytes | Only if flag `0x40`: the shortcut key (the character typed with Option-Command; 0 for none), then the **macro kind** (below) |
 | cce bytes | Definition, a parsed expression (§15) |
 | byte | Copy of `cce` |
 | cch bytes | Name characters |
+
+Name flags:
+
+| Flag | Meaning |
+|-----:|---------|
+| `0x04` | The definition is a reference: one cell or area token (`2C`, `2D`) or a union in its definition form (`2E`). Every such name in the samples has it, on worksheets and macro sheets alike, and no other name does. Excel sets it when it saves, so macro names, which point at a cell, have it too. |
+| `0x20` | The definition is array-valued, so formulas using the name get cell word 2 bit 13 (§9). |
+| `0x40` | A macro, function or command; two more bytes follow. |
+
+Open keeps only `0x64`, so the `0x01`, `0x02` and `0x80` some samples have are in-memory marks that Save
+writes out and Open discards.
+
+Macro kind:
+
+| Flag | Meaning |
+|-----:|---------|
+| `0x40` | Command macro, listed in Macro > Run |
+| `0x80` | Function macro, called from formulas |
+
+Open keeps those two bits and discards the low nibble (left over from memory in the samples: `0x40`–`0x4E`,
+`0x80`–`0x8A`). For example, `DEFINE.NAME("Cmd",…,2,"q")` gives flags `0x44`, key `q`, kind `0x44`, and
+`DEFINE.NAME("Fn",…,1)` gives flags `0x44`, key 0, kind `0x80`. In the samples, `MATRIX`'s INV and MULT and
+`BEARINGS`'s Coordinates are function macros; every other macro is a command.
 
 Definitions differ from cell formulas:
 
@@ -647,11 +672,19 @@ Pascal string (up to 255 characters).
 | 8  | 2 bytes | Left over from memory: values such as `FF FF` and `77 F2` occur in the samples. Ignore; write zero. |
 | 10 | byte | Recalculation scratch; varies. Ignore; write zero. |
 | 11 | byte | Column |
-| 12 | word | Row in bits 13–0. Bit 14 mirrors "alignment is Fill" for the cell (set from bit 2 of the alignment code whenever alignment is applied). Bit 15 is a transient "needs fix-up" mark set while importing and cleared by a later pass. Both are zero in the samples. |
+| 12 | word | Row and two marks (below) |
 | 14 | byte | `cce` = length of the parsed expression |
 | 15 | cce bytes | Parsed expression (§15) |
 | … | Pascal string | Present only if the value is a string |
 | … | | Trailing fix-ups (§12.5) |
+
+Row word (offset 12):
+
+| Bits | Meaning |
+|-----:|---------|
+| 15 | A transient "needs fix-up" mark, set while importing and cleared by a later pass; 0 in the samples |
+| 14 | Mirrors "alignment is Fill" for the cell, set from bit 2 of the alignment code whenever alignment is applied; 0 in the samples |
+| 13–0 | Row |
 
 ### 12.4 Current value
 
@@ -722,11 +755,27 @@ reads as it is (`46.06` in 1.00) and the TABLE command builds (`4b.06` in 1.00):
 | 5 | byte | Last column |
 | 6 | 3 bytes | Memory pointer linking the record into one of Excel's table lists, or 0. A table waiting to be calculated goes on a list that the table calculation (`3f.00` in 1.00) takes and empties, and `1d.06` unlinks a record. Open reads the saved value: when it is not 0, Open links the table into a list again (`46.06`). A table saved with a non-zero value in Excel 1.00 was not calculated on Open and was saved back with 0. Write 0, as every saved table has. |
 | 9 | byte | Column of the first input cell |
-| 10 | word | Bits 15–2: row of the first input cell. Bit 0: the input cell has been deleted, and the formula shows `#REF!` in its place (`1d.01` in 1.00). Bit 1: a mark the code that moves and deletes cells sets and clears; while it is set that code clears bit 0 (`0e.01`, `4f.0b`) **(inferred)**. |
+| 10 | word | Row of the first input cell, with two flags (input word, below) |
 | 12 | word | With bits 5–0 of byte 14, a pointer linking the record into Excel's list of all tables; Open links every table it reads (`3f.04`, `46.06` in 1.00). Left over from memory (`FF FF` in every table seen). |
-| 14 | byte | Bit 7: there is a second input, the column input; bit 6: the first input is the row input (without it, the column input); bits 5–0: the top of the pointer at offset 12, left over from memory, so they differ between saves of the same table (`C0`, `C6`, `C8`, `CE`). |
+| 14 | byte | Input flags and the top of the pointer at offset 12 (below) |
 | 15 | byte | Column of the second input cell |
-| 16 | word | Bits 15–2: row of the second input cell. Bits 1–0 as in the word at offset 10. |
+| 16 | word | Row of the second input cell, with the same flags as offset 10 |
+
+Input word (offsets 10 and 16):
+
+| Bits | Meaning |
+|-----:|---------|
+| 15–2 | Row of the input cell |
+| 1 | A mark the code that moves and deletes cells sets and clears; while it is set that code clears bit 0 (`0e.01`, `4f.0b`) **(inferred)** |
+| 0 | The input cell has been deleted, and the formula shows `#REF!` in its place (`1d.01` in 1.00) |
+
+Byte 14:
+
+| Bits | Meaning |
+|-----:|---------|
+| 7 | There is a second input, the column input |
+| 6 | The first input is the row input (without it, the column input) |
+| 5–0 | The top of the pointer at offset 12, left over from memory, so they differ between saves of the same table (`C0`, `C6`, `C8`, `CE`) |
 
 `TABLE(Y7,X5)` on B2:C3 is `00 01 00 02 01 02 00 00 00 18 00 18 FF FF C0 17 00 10`. `TABLE(,X1)` has X1 as its
 first input and byte 14 = 0; `TABLE(Y7,)` has Y7 as its first input and byte 14 = `40`, and bytes 15–17 are
@@ -979,8 +1028,15 @@ that involve a relative reference (and 19 to a cell reference whose column falls
 `37`); the matching pass subtracts the same amount to restore them. They have the same operands as the token
 they stand for and are not expected in a saved file.
 
-Row words in references: bit 15: row is relative; bit 14: column is relative; bits 13–0: row (`C0 12` =
-relative row 18, relative column).
+Row words in references:
+
+| Bits | Meaning |
+|-----:|---------|
+| 15 | The row is relative |
+| 14 | The column is relative |
+| 13–0 | Row |
+
+`C0 12` is relative row 18 with a relative column.
 
 ### 15.3 Function numbers
 
@@ -1008,21 +1064,47 @@ numbers from 56 on; its translation table (§2.2) maps between them. Functions 1
 
 | Byte | Meaning |
 |-----:|---------|
-| 0–1 | Bits 15–4: the offset of the function's name in the name list. In Excel 1.00 the list is the Pascal strings at `PCOD` 0 offset `0x14FA` (COUNT is at `0x00B`, TRUE at 0); Save's function-name list (§14) reads names this way. Excel 1.03 and 1.5 build the list at start-up and use the same field as an offset into it (`g0812` in 1.03), with different values. Bits 3–0: flags, below. |
-| 1 | Low nibble: flags. `0x01`: macro sheets only. `0x04`: has a dialog-box form: the compiler accepts `NAME?(…)` only for functions with this flag (`0f.00`). `0x08`: volatile; it is set on INDEX, RAND, NOW, AREAS, ROWS and COLUMNS, and formulas that call these start with `19 01`. `0x02` is set on SERIES (a chart-only function) and on functions 176, 203 and 204, and marks functions that cannot be used in a cell formula: Excel 1.00's FORMULA would not enter `=SERIES("a",R1C1,R1C2,1)` in a macro-sheet cell (`Empty Arguments` sample).. The high nibble belongs to the name offset. |
+| 0–1 | Word: name offset and flags (below) |
 | 2 | Low nibble = minimum arguments; high nibble − 1 = maximum arguments |
 | 3 | Return type |
 | 4 | Type the first argument accepts |
 | 5 | Type the other arguments accept |
 | 6–9 | How the function is implemented. Byte 7 selects a family of routines (in 1.03, `0x1C` for commands, `0x11` for SUM-like aggregates, `0x12` for IF and CHOOSE, `0x16` for date and financial functions); byte 6 is an argument to it; for commands bytes 8–9 are the segment and procedure that carry them out (PROTECT.DOCUMENT is `22.07`, TABLE `4a.05`). Excel 1.5's families are renumbered (`0x28` for commands). |
 
-Type bytes are bit masks. `0x01`: number; `0x02`: text; `0x04`: logical; `0x08`: reference; `0x10`: error;
-`0x20`: command; `0x40`: array; `0x80`: an empty argument means "not given". `0x80` is on the arguments of the
-commands whose omitted arguments mean "leave unchanged" or "use the dialog's setting" (STYLE, BORDER, FONT,
-PAGE.SETUP, CALCULATION, SORT…), OPEN's second, INPUT's later ones and DCOUNT's field, and on no function that
-needs every argument **(inferred from which functions have it)**. The compiler accepts an empty argument
-anywhere (`=ROUND(1,)` is `1E 00 01 16 41 1B`); where the bit is absent the function sees 0, so `=ROUND(1,)`
-gives 1 and `=MID("abc",,1)` gives #VALUE! in Excel 1.00 (`Empty Arguments` sample).
+Bytes 0–1:
+
+| Bits | Meaning |
+|-----:|---------|
+| 15–4 | The offset of the function's name in the name list. In Excel 1.00 the list is the Pascal strings at `PCOD` 0 offset `0x14FA` (COUNT is at `0x00B`, TRUE at 0); Save's function-name list (§14) reads names this way. Excel 1.03 and 1.5 build the list at start-up and use the same field as an offset into it (`g0812` in 1.03), with different values. |
+| 3–0 | Flags (below) |
+
+Function flags:
+
+| Flag | Meaning |
+|-----:|---------|
+| `0x01` | Macro sheets only |
+| `0x02` | Cannot be used in a cell formula: set on SERIES, which belongs in charts, and on the unnamed placeholders 176, 203 and 204. Excel 1.00's FORMULA would not enter `=SERIES("a",R1C1,R1C2,1)` in a macro-sheet cell (`Empty Arguments` sample). |
+| `0x04` | Has a dialog-box form: the compiler accepts `NAME?(…)` only for functions with this flag (`0f.00`) |
+| `0x08` | Volatile: set on INDEX, RAND, NOW, AREAS, ROWS and COLUMNS; formulas that call these start with `19 01` |
+
+Type bytes are bit masks:
+
+| Flag | Meaning |
+|-----:|---------|
+| `0x01` | Number |
+| `0x02` | Text |
+| `0x04` | Logical |
+| `0x08` | Reference |
+| `0x10` | Error |
+| `0x20` | Command |
+| `0x40` | Array |
+| `0x80` | An empty argument means "not given" |
+
+`0x80` is on the arguments of the commands whose omitted arguments mean "leave unchanged" or "use the dialog's
+setting" (STYLE, BORDER, FONT, PAGE.SETUP, CALCULATION, SORT…), OPEN's second, INPUT's later ones and DCOUNT's
+field, and on no function that needs every argument **(inferred from which functions have it)**. The compiler
+accepts an empty argument anywhere (`=ROUND(1,)` is `1E 00 01 16 41 1B`); where the bit is absent the function
+sees 0, so `=ROUND(1,)` gives 1 and `=MID("abc",,1)` gives #VALUE! in Excel 1.00 (`Empty Arguments` sample).
 
 ### 15.4 How Excel compiles formula text
 
@@ -1234,7 +1316,8 @@ Chart files do not store IEEE doubles. Every number is converted to Microsoft's 
 
 | Byte | Meaning |
 |-----:|---------|
-| 0 | Bit 7: sign (1 = negative); bits 6–0: decimal exponent + 64 |
+| 0, bit 7 | Sign (1 = negative) |
+| 0, bits 6–0 | Decimal exponent + 64 |
 | 1–7 | 14 BCD digits, most significant first, two per byte |
 
 ```
@@ -1253,7 +1336,8 @@ below −63 as exponent −63 with digits `10 00 …`. So 1.0 is `41 10 00 00 00
 | 0 | Not used |
 | 1 | Font |
 | 2 | Size |
-| 3 | Bit 5: bold; bit 4: italic |
+| 3, bit 5 | Bold |
+| 3, bit 4 | Italic |
 
 In memory bytes 1 and 2 are a Macintosh font number and point size. On disk they are Microsoft Chart codes:
 the font byte is 16 for New York (font 2), 1 for Geneva (font 3) and 32 for anything else, plus `0x40` for
@@ -1285,8 +1369,16 @@ Line weight:
 | 1 | Border pattern (0 = none) |
 | 2 | Word: bits 15–12: border weight |
 | 5 | Background pattern (0 = none) |
-| 6 | Word: bit 15: set when a chart is loaded; bit 14: automatic size (text boxes), also set on load; bits 11–8: shadow when non-zero |
+| 6 | Word of flags (below) |
 | 8 | Four words: the box as top, left, height and width, in twips, worked out when the chart is drawn (`37.03` in 1.00). The chart area's is (0, 0, height, width) of the drawing rectangle (§16.5); the plot area's is relative to it. `PROFIT CHART`'s chart area is (0, 0, 4784, 9075) and its plot area (996, 1336, 2824, 7213). |
+
+Area format word at offset 6:
+
+| Bits | Meaning |
+|-----:|---------|
+| 15 | Set when a chart is loaded |
+| 14 | Automatic size (text boxes); also set on load |
+| 11–8 | Shadow when non-zero |
 
 Pattern bytes index Excel's 15 patterns, in the order the Patterns dialogs show them, with 0 meaning
 invisible. "Automatic" is a separate flag where the object supports it. The patterns are 8-byte QuickDraw
@@ -1341,11 +1433,15 @@ come from and go back to.
 
 **Overlay option flags** (offset 22, bits 11–8; mem 18, bits 15–12). Excel sets all four when it makes an
 overlay chart, and hides the overlay's axes at the same time (`0f.04` in 1.00); they are clear in every main
-chart. Bit 9 scales the overlay's value axis over the data of both charts, so the overlay plots against the
-main chart's axis (`37.0a`); bit 8 does the same for the X axis of a scatter overlay. Bits 11–10 have no
-effect: a new chart's record clears all four (`0f.06`), the reader and writer copy them, and nothing else in
-Excel 1.00 reads them. Showing an overlay axis with Chart > Axes sets that axis's line pattern (`Overlay Axis`
-sample), not these bits. The word's low byte is 0 from Excel 1.00 and 1.03 and `0x0F` in the 1.5 samples.
+chart.
+
+| Bits | Meaning |
+|-----:|---------|
+| 11–10 | No effect: a new chart's record clears them (`0f.06`), the reader and writer copy them, and nothing else in Excel 1.00 reads them |
+| 9 | Scale the overlay's value axis over the data of both charts, so the overlay plots against the main chart's axis (`37.0a`) |
+| 8 | The same for the X axis of a scatter overlay |
+ Showing an overlay axis with Chart > Axes sets that axis's line pattern (`Overlay Axis` sample), not these
+ bits. The word's low byte is 0 from Excel 1.00 and 1.03 and `0x0F` in the 1.5 samples.
 
 The two built-in text objects are addressed as indices −2 and −1 of the chart's text list and are formatted
 together with the axis labels by "apply to all". They are the templates for data labels: a new chart makes
@@ -1357,7 +1453,7 @@ bit 10 set (one label per point) (§16.8).
 
 | Offset | Meaning |
 |-------:|---------|
-| 0 | Word of flags: bit 14: 100%; bit 13: stacked; bit 12: bars (horizontal) rather than columns; bit 11: vary colours by category; bit 10 (overlay only): automatic series distribution; bits 9–2 (overlay only): first series in the overlay chart |
+| 0 | Word of flags (below) |
 | 2 | Word: **chart type** (below) |
 | 4 | Byte: the number of categories, the largest point count of the chart's series, worked out when the chart is drawn (`37.13` in 1.00; 12 for `PROFIT CHART` once Excel has drawn it, 0 in overlays). The drawing code divides it by the categories between tick labels to place them (`37.2b`). |
 | 5 | Byte: 12 in every main chart Excel 1.00 or 1.03 saves, 0 in overlays and in `CLOCK.CH`. No code in Excel 1.00 that handles the chart record reads or writes it on its own **(unknown)**. |
@@ -1366,6 +1462,17 @@ bit 10 set (one label per point) (§16.8).
 | 10 | Word: % cluster spacing (column/bar) |
 | 12 | Word: angle of the first pie slice, degrees from vertical (0–359) |
 | 14 | Two words: the top and left margins, in twips, of the chart's drawing rectangle, which Excel centres in the window's drawing size (§16.6) when it draws the chart (`37.03` in 1.00). The rectangle's height and width are in the chart area format (bytes 8–15). `PROFIT CHART`: margins 208 and 302 around 4784 by 9075, in a 5200 by 9680 drawing size. |
+
+Header word 0:
+
+| Bits | Meaning |
+|-----:|---------|
+| 14 | 100% |
+| 13 | Stacked |
+| 12 | Bars (horizontal) rather than columns |
+| 11 | Vary colours by category |
+| 10 | Overlay only: automatic series distribution |
+| 9–2 | Overlay only: the first series in the overlay chart |
 
 Chart type:
 
@@ -1384,7 +1491,7 @@ Scatter → 5.
 
 | Offset | Meaning |
 |-------:|---------|
-| 0 | Word: bits 15–12: major tick marks; bits 11–8: minor tick marks; bits 7–4: tick-label position (values below); bit 3: set on load |
+| 0 | Word: tick marks and tick labels (below) |
 | 2 | Font descriptor for the tick labels |
 | 6 | Word: tick-mark length in twips, worked out when the chart is drawn as the smaller side of the area being laid out divided by 70 (`37.03` in 1.00) |
 | 8 | Word: where the tick labels are drawn, in twips, worked out from the tick-label position when the chart is drawn; 0 when the axis has no tick labels (`37.3e` in 1.00) |
@@ -1392,6 +1499,15 @@ Scatter → 5.
 | 12 | **Axis line** format; 0 pattern = axis hidden. Bits 9–2 of its word at +2 hold the saved Macintosh font number. |
 | 16 | **Major gridlines** format. Bits 9–2 of its word at +2 hold the saved font size. |
 | 20 | **Minor gridlines** format |
+
+Axis word 0:
+
+| Bits | Meaning |
+|-----:|---------|
+| 15–12 | Major tick marks (values below) |
+| 11–8 | Minor tick marks |
+| 7–4 | Tick-label position (values below) |
+| 3 | Set on load |
 
 Tick marks:
 
@@ -1428,14 +1544,29 @@ Tick-label position:
 | Offset | mem | Meaning |
 |-------:|----:|---------|
 | 0 | 134 | Byte: value axis crosses at category number |
-| 1 | 135 | Byte: bit 7: value axis crosses between categories; bit 6: crosses at maximum category; bit 5: categories in reverse order |
+| 1 | 135 | Byte: crossing and order flags (below) |
 | 2 | 136 | Byte: number of categories between tick labels |
 | 3 | 137 | Byte: not used; nothing in Excel 1.00 reads or writes it |
 | 4 | 138 | Word: non-zero (a memory pointer) when an X-axis scale record follows the chart record |
 | 6 | 140 | **Plot area** format (16 bytes) |
-| 22 | 156 | Word: bits 15–13: **legend position** (below); bits 8–1: saved legend font number |
+| 22 | 156 | Word: **legend position** and saved font number (below) |
 | 24 | 158 | **Legend** font descriptor |
 | 28 | 162 | **Legend** area format. Its byte at +7 holds the saved legend font size. |
+
+Byte 1:
+
+| Bits | Meaning |
+|-----:|---------|
+| 7 | The value axis crosses between categories |
+| 6 | The value axis crosses at the maximum category |
+| 5 | Categories in reverse order |
+
+Word 22:
+
+| Bits | Meaning |
+|-----:|---------|
+| 15–13 | Legend position (values below) |
+| 8–1 | Saved legend font number |
 
 Legend position:
 
@@ -1482,16 +1613,35 @@ memory offsets:
 | mem | Meaning |
 |----:|---------|
 | 0 | Word: horizontal position in thousandths of the chart's drawing rectangle; Excel keeps it and the box's twips position at mem 30–33 in step (`33.19` in 1.00). The matching vertical position, mem 6, is not saved; Open works it out again. |
-| 2 | Word: bits 15–14: cleared on load; bits 3–0: **kind** (below) |
+| 2 | Word: **kind** (bits 3–0, values below); bits 15–14 are cleared on load |
 | 4 | Byte: series number (data labels) |
 | 5 | Byte: point number, 255 = the whole series (data labels) |
 | 8 | Pointer to the string, left over from memory |
-| 10 | Word: bit 13: **automatic text**; bit 12: vertical orientation; bits 11–9: horizontal alignment; bits 8–6: vertical alignment (values below); bit 5: show key; bit 4: show value |
+| 10 | Word: text options (below) |
 | 12 | Font descriptor |
 | 16 | An arrow's line format (§16.4). Byte 17 is its pattern: 0 for text, so a non-zero byte 17 is what makes the object an **arrow**. The word at 18 holds the shaft weight in bits 13–12 (line weight values). |
-| 20 | Text: bytes 20 and 21 hold the saved Macintosh font number and size. Arrow: a word, bits 13–12: head width; bits 9–8: head length, 0 meaning no head; bit 7: the head is open rather than filled (values below). |
+| 20 | Text: bytes 20 and 21 hold the saved Macintosh font number and size. Arrow: the head word (below). |
 | 22 | Area format of the text box. Bit 14 of its word at +6 is automatic size, and its box (+8) is the text's position and size in twips. |
 | 38, 46, 48 | The arrow's other end, held as mem 0 and mem 30–33 hold the first: thousandths at 38 (and 44, not saved), twips at 46 and 48 (`33.19`). The arrowhead is drawn at this end: in the `Arrow` and `Arrow Heads` samples it is the end with the larger x, where Excel 1.00 draws the head. |
+
+Text options (mem 10):
+
+| Bits | Meaning |
+|-----:|---------|
+| 13 | Automatic text |
+| 12 | Vertical orientation |
+| 11–9 | Horizontal alignment (values below) |
+| 8–6 | Vertical alignment (values below) |
+| 5 | Show key |
+| 4 | Show value |
+
+Arrow head word (mem 20):
+
+| Bits | Meaning |
+|-----:|---------|
+| 13–12 | Head width (values below) |
+| 9–8 | Head length, 0 meaning no head (values below) |
+| 7 | The head is open rather than filled |
 
 An arrow is a free object (kind 6) with automatic text and no string; Chart > Add Arrow makes one, and its
 Format > Patterns dialog sets the fields above (`Arrow`, `Arrow Patterns` and `Arrow Heads` samples, Excel
@@ -1557,13 +1707,31 @@ record by its byte 6 (`3c.01` in 1.00).
 | Offset | Meaning |
 |-------:|---------|
 | 1 | Line or border pattern |
-| 2 | Word: bits 15–12: weight; bit 10: automatic line/border |
+| 2 | Word: line weight and automatic line (below) |
 | 4 | Area pattern |
 | 6 | Series number; in a chart with one series, the point (category) number, from 0 (`33.10`; the `Point Markers` sample's overrides are points 8 and 10) |
 | 7 | Marker (below) |
-| 8 | Word: bit 15: automatic marker; bit 13: set when a format is made (`0f.12`), never read; bit 12: automatic area; bit 11: a data label for the series, made from built-in text object −2; bit 10: a data label on each data point, made from built-in text object −1 (`33.10` in 1.00; §16.5); bit 9: the labels show percentages (for a pie the label code totals the series, `33.00`); Pie format 6 sets it with bit 10 |
+| 8 | Word of flags (below) |
 | 11 | Byte: how far a pie slice is pulled out, as a percentage of the radius: 25 for the first slice of Pie format 3 (a point record), 20 for every slice of Pie format 4 (the default series format) |
 | 0, 5, 9–10 | Not identified. Byte 0 is the line format's unused byte; bytes 5, 9 and 10 are 0 in every record seen, Excel 1.00's Patterns dialogs leave them alone, and nothing in its chart code reads them **(unknown)**. |
+
+Point format word 2:
+
+| Bits | Meaning |
+|-----:|---------|
+| 15–12 | Line or border weight (line weight values, §16.4) |
+| 10 | Automatic line or border |
+
+Point format word 8:
+
+| Bits | Meaning |
+|-----:|---------|
+| 15 | Automatic marker |
+| 13 | Set when a format is made (`0f.12`), never read |
+| 12 | Automatic area |
+| 11 | A data label for the series, made from built-in text object −2 (`33.10` in 1.00; §16.5) |
+| 10 | A data label on each data point, made from built-in text object −1 |
+| 9 | The labels show percentages (for a pie the label code totals the series, `33.00`); Pie format 6 sets it with bit 10 |
 
 Marker, in the order of the Marker Pattern dialog (`Point Markers` sample, Excel 1.00):
 
@@ -1610,18 +1778,43 @@ Microsoft Chart.
 
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
-| 0 † | word | Bits 15–13: series type (below); bit 11: always 1; bit 10: belongs to the first list; bit 7: always 1 |
-| 2 † | word | Bits 14–13: always 2; bits 12–10: format class of the first array; bits 9–6: its sub-code; bits 5–4: always 1 |
-| 4 † | word | Bits 14–13: always 2; bits 12–10: format class of the second array; bits 9–6: its sub-code |
+| 0 † | word | Series type and flags (below) |
+| 2 † | word | Format of the first array (below) |
+| 4 † | word | Format of the second array, as word 2 |
 | 6 | 2 bytes | 10, 10 |
 | 8 | 2 words | 60, 60 |
-| 14 † | word | Bits 15–14: how the first reference is held (2 literal text, 3 formula); bits 13–8: Excel number-format index of the first array |
+| 14 † | word | How the first reference is held, and the first array's number format (below) |
 | 16 † | word | The same for the second reference and array |
 | 22 | 2 words | Copied from the series structure |
 | 26 | 4 × 8 bytes | Four decimal numbers, all 1.0 |
 | 60 † | 2 words | Point count, twice |
 | 64 | 4 bytes | 0, 1, 1, 0 (byte 66 † is used for date series) |
 | 68 | 11 words | All 2 |
+
+Series word 0:
+
+| Bits | Meaning |
+|-----:|---------|
+| 15–13 | Series type (values below) |
+| 11 | Always 1 |
+| 10 | The series belongs to the first list |
+| 7 | Always 1 |
+
+Series words 2 and 4:
+
+| Bits | Meaning |
+|-----:|---------|
+| 14–13 | Always 2 |
+| 12–10 | Format class of the array (below) |
+| 9–6 | Its sub-code |
+| 5–4 | Word 2 only: always 1 |
+
+Series words 14 and 16:
+
+| Bits | Meaning |
+|-----:|---------|
+| 15–14 | How the reference is held: 2 literal text, 3 formula |
+| 13–8 | Excel number-format index of the array |
 
 Series type:
 
@@ -1760,7 +1953,7 @@ rules from the function tables (§15.3), and numbers 208–291 from Excel 1.5's 
   **N** number, **T** text, **L** logical, **R** reference, **E** error, **C** command, **A** array, **?**
   type bit `0x80`: an empty argument means "not given" **(inferred, §15.3)**.
 * **Flags**: **M** macro sheets only, **D** has a dialog-box form (`NAME?(…)`), **V** volatile (formulas start
-  with `19 01`), **X** flag `0x02` (§15.3).
+  with `19 01`), **X** cannot be used in a cell formula (flag `0x02`, §15.3).
 * **Since**: the first release with the function (§2.1).
 * **Changed in 1.5**: argument rules Excel 1.5's table gives instead. A file saved by 1.5 follows them, except
   that a call using only the old arguments keeps the old encoding (§15.4); one saved by an earlier release

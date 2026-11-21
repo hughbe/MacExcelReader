@@ -17,8 +17,10 @@ specification it is built from. The library is unreleased, so its API can change
 - The spec states facts plainly. Mark only what is not established: **(inferred)**, **(assumed)** or
   **(unknown)**. Never label things "confirmed".
 - List every set of values a field can take (chart types, tick marks, alignments, arrow heads and so on) as a
-  value/meaning table under the record table, not inline in a sentence. Bit fields are written "bit N: …" or
-  "bits N–M: …", highest first; flags given by mask "`0x04`: …".
+  value/meaning table under the record table, not inline in a sentence. A field that packs several flags or
+  bit fields gets its own table too (a `Bits` column, highest first, or a `Flag` column for masks such as
+  `0x04`), and its row in the record table says "(below)". Only a field holding a single bit field describes
+  it in its row ("bits 15–12: weight").
 - Bytes Excel copies straight from memory are "left over from memory" (defined in the spec's Conventions); do not
   call them junk, garbage or stale.
 - Write version differences from earlier to later ("1.03 adds…"), not the other way round.
