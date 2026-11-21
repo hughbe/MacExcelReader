@@ -264,10 +264,18 @@ At `header.dataOffset`:
 |-------:|-----:|---------|
 | 0 | word | **Function count**: one more than the highest function number the document may use (below) |
 | 2 | 630 bytes | Sheet state block (§6) |
-| 632 | byte | **Document kind**: `0x10` worksheet, `0x40` macro sheet. (`0x20` is the in-memory kind for charts, which never reach this writer.) |
+| 632 | byte | **Document kind** (below) |
 | 633 | 8 longs | Section table: stream positions (§1.2) of sections 0…7. Written last, by seeking back. Open *skips* this table and reads sequentially; it is redundant but reliable. |
 | 665 | word | `n` = number of extra header bytes that follow: 0 from Excel 1.00, 1 from 1.03 and 1.5. Excel 1.00's Open reads `n` and skips that many bytes, so it reads later files' extra header without trouble. |
 | 667 | n bytes | Extra header. Byte 0, when present, is a system/locale code (high byte of an application global; 0 in every sample); Open warns with alert 0x106 if it differs from the reader's. Open skips any further bytes, so this is the format's forward-compatibility hook. |
+
+Document kind:
+
+| Value | Kind |
+|---:|---|
+| `0x10` | Worksheet |
+| `0x40` | Macro sheet |
+| `0x20` | Chart: the in-memory kind only, since charts never reach this writer (§16) |
 
 Section 0 begins immediately after the extra header.
 
@@ -2064,7 +2072,7 @@ Window entry:
 
 | Size | Meaning |
 |-----:|---------|
-| byte | Document kind: `0x10` worksheet, `0x40` macro sheet, `0x20` chart (the in-memory kinds of §5) |
+| byte | Document kind, as in §5 (`0x20` for a chart) |
 | Pascal string | Document name. Excel 1.00 writes the window title, which includes the volume for a document on another disk (`Ws:Clock saved`). |
 | Pascal string | Folder: the volume name and any folder names, each followed by `:` |
 | word | 0 unless the system has HFS (low-memory `FSFCBLen` above 0). Then it is the low word of the directory ID of the document's folder, from an HFS Dispatch call whose parameter block returns it at offset 50, `ioWDDirID`'s low word (`48.22` in 1.00) **(inferred from the parameter-block offsets)**. 2, the ID of a volume's root directory, for a document at the top of a floppy; 0 for one on the startup disk. |
