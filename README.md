@@ -154,7 +154,7 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
 - New documents carry empty embedded p-code segments. Excel 1.03 never uses a file's own copy, but a different build of Excel linking to the document while it is closed would; copy the segments from an existing document if that matters.
 - The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`, and Excel keeps it until something the formula depends on changes. Set `document.State.RecalculationState = 1` to have Excel recalculate the sheet when it opens it.
 - The parser's rules come from Excel's code and tables and were checked against every sample formula; formulas unlike any in the samples could still encode differently. Excel 1.5's functions numbered above 255 follow its Save code, as no sample uses one; Excel 1.5 accepts them.
-- Files written by the library have been checked in Excel 1.00, 1.03 and 1.5 under Mini vMac: every formula in `tests/Data` in 1.03, part of the 1.5 list including functions above 255, and the experiments listed in [Testing in a real Excel](docs/Testing.md), including charts the library builds from scratch, which Excel 1.00 opens and re-saves with no change to their content.
+- Files written by the library have been checked in Excel 1.00, 1.03 and 1.5 under Mini vMac: every formula in `tests/Data` in 1.03, part of the 1.5 list including functions above 255, and the experiments listed in [Testing in a real Excel](docs/Testing.md), including charts the library builds from scratch, which Excel 1.00 draws and re-saves with no change to their content.
 
 ---
 

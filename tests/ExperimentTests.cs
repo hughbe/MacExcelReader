@@ -394,11 +394,14 @@ public class ExperimentTests
 
     [Theory]
     [InlineData("Library Column")]
+    [InlineData("Library Line")]
+    [InlineData("Library Pie")]
     [InlineData("Library Scatter")]
     public void LibraryCharts_SeriesHeaderMatchesExcels(string name)
     {
-        // Charts built with ChartDocument.Create and ChartSeries.Create, opened and saved by Excel 1.00. Excel's series
-        // header matches the library's apart from bytes 22–25, which it copies from memory (spec §16.9).
+        // Charts built with ChartDocument.Create and ChartSeries.Create, which Excel 1.00 drew and saved. Excel's series
+        // header matches the library's apart from bytes 22–25, which it copies from memory, and so does the default
+        // series format (spec §16.8, §16.9).
         var saved = ChartDocument.Load(SamplePath(name)).Series[0];
         var built = ChartDocument.Create(ChartType.Line);
         built.Series.Add(ChartSeries.Create(saved.SecondValues.Select(v => v.ToDouble()), saved.Name, saved.FirstReference));
@@ -409,6 +412,8 @@ public class ExperimentTests
         b.AsSpan(22, 4).Clear();
         Assert.Equal(b, a);
         Assert.Equal(saved.FirstLabel, ours.FirstLabel);
+        var excelChart = ChartDocument.Load(SamplePath(name)).MainChart;
+        Assert.Equal(excelChart.Record[366..378], Chart.Create(excelChart.Type).Record[366..378]);
     }
 
     [Fact]

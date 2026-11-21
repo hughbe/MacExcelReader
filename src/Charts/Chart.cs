@@ -287,6 +287,9 @@ public sealed class Chart
         chart.ValueAxis.MajorTickMarks = TickMarkType.Outside;
         chart.CategoryAxis.Line.Pattern = ChartPattern.Solid;
         chart.ValueAxis.Line.Pattern = ChartPattern.Solid;
+        // The default series format Excel writes: solid automatic line, hollow diamonds, automatic marker and area.
+        // Without it the series are invisible (spec §16.8).
+        Convert.FromHexString("00010C00000000" + "02B0000000").CopyTo(chart.Record, 366);
         var scale = chart.ValueScale;
         scale.AutoMinimum = scale.AutoMaximum = scale.AutoMajorUnit = scale.AutoMinorUnit = scale.AutoCrossesAt = true;
         if (type == ChartType.Scatter)

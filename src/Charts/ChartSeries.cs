@@ -30,7 +30,9 @@ public sealed class ChartSeries
     public static ChartSeries Create(IEnumerable<double> values, string name, string reference)
     {
         var header = new byte[HeaderSize];
-        BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(0), 0x2880 | (1 << 13));
+        // Series type 1 (numbers), bits 11 and 7, and bit 10: in the first list, the main chart's. Without bit 10
+        // Excel 1.00 draws nothing of the chart (spec §16.9).
+        BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(0), 0x2C80);
         BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(2), 0x4000 | (2 << 10) | 0x10);
         BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(4), 0x4000 | (2 << 10));
         header[6] = header[7] = 10;

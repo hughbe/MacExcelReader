@@ -47,6 +47,7 @@ For each file, `check` reports:
 - the byte counts, and how many bytes differ.
 
 By default it skips the changes Excel is expected to make:
+- automatic chart scale limits, which Excel works out when it draws;
 - recalculated formula results;
 - windows;
 - the code signature and chart version, which say which Excel saved the file;
@@ -165,6 +166,7 @@ Things to know:
 | Nov 2026 | 1.00 | A table saved with a non-zero list link | Open relinks it but does not calculate it, and Save writes 0 (spec §12.6) |
 | Nov 2026 | 1.00 | Format > Patterns on an arrow, twice | Arrow pattern, shaft weight, head width, length and style (spec §16.7) |
 | Nov 2026 | 1.00 | Format > Patterns on two markers of a line series | Marker values and point-keyed overrides (spec §16.8); the 15 fill patterns came from `PCOD` 0 |
+| Nov 2026 | 1.00 | Library charts opened on screen, and variants mixing Excel's and the library's records | Library charts drew nothing: `ChartSeries.Create` left series bit 10 clear and `Chart.Create` wrote an invisible default series format. Fixed; all four library charts now draw (spec §16.9) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

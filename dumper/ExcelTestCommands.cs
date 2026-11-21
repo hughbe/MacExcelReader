@@ -579,6 +579,12 @@ sealed class CheckCommand : Command<CheckSettings>
                     continue;
                 }
 
+                // An automatic scale limit is whatever Excel worked out the last time it drew the chart (spec §16.5).
+                if (!all && key is "Minimum" or "Maximum" && oa[$"Auto{key}"]?.GetValue<bool>() == true)
+                {
+                    continue;
+                }
+
                 if (key == "cells" && oa[key] is JsonArray ca && ob[key] is JsonArray cb)
                 {
                     CompareCells(ca, cb, differences, all);

@@ -1579,8 +1579,10 @@ Marker, in the order of the Marker Pattern dialog (`Point Markers` sample, Excel
 ### 16.9 Series records
 
 The series lists start at the absolute file offset in header word 26. The first list holds the series flagged
-with header bit 10, the second the rest; the header (word 24) gives the total. A chart file carries a **copy
-of the plotted data**, not just references to it. Each series is:
+with header bit 10, the second the rest; the header (word 24) gives the total. Every series in the samples has
+bit 10 set. A chart whose only series lacks it opens and saves in Excel 1.00, but Excel draws nothing of it,
+not even the title or axes. A chart file carries a **copy of the plotted data**, not just references to it.
+Each series is:
 
 | Size | Meaning |
 |-----:|---------|
