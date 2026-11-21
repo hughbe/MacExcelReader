@@ -367,8 +367,9 @@ public class DocumentWriterTests
         document.Cells[300, 7].SetText("new corner");
 
         var reread = RoundTrip(document);
-        Assert.Equal(301, reread.Cells.RowCount);
-        Assert.Equal(8, reread.Cells.ColumnCount);
+        // The table keeps a blank row and column after the last cell with a value (Excel's margin).
+        Assert.Equal(302, reread.Cells.RowCount);
+        Assert.Equal(9, reread.Cells.ColumnCount);
         Assert.Equal("new corner", reread.Cells[300, 7].TextValue);
         Assert.Equal("Date", reread.Cells["A10"].TextValue);
         Assert.Equal(29220, reread.Cells["A11"].IntegerValue);

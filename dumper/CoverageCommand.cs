@@ -21,6 +21,10 @@ sealed class CoverageSettings : CommandSettings
     [CommandOption("--excel <VERSION>")]
     [Description("Write the sheet for Excel 1.0 (1.00–1.04, the default) or 1.5, which adds functions and encodes a few things differently.")]
     public string Excel { get; init; } = "1.0";
+
+    [CommandOption("--split <COUNT>")]
+    [Description("Write several smaller sheets, \"<output> 01\", \"<output> 02\"…, of at most COUNT formulas each (Excel on a small Mac runs out of memory on the whole sheet).")]
+    public int Split { get; init; }
 }
 
 sealed class CoverageCommand : Command<CoverageSettings>
@@ -49,19 +53,60 @@ sealed class CoverageCommand : Command<CoverageSettings>
         var listing = new StringBuilder();
         int row = 0;
         int formulas = 0;
+        int partFormulas = 0;
+        string heading = string.Empty;
+        var parts = new List<(ExcelDocument Document, StringBuilder Listing, int Formulas)>();
         var skipped = new List<string>();
+
+        void Header()
+        {
+            document.Cells[0, 0].SetText("Intended formula (text)");
+            document.Cells[0, 1].SetText("Formula as Excel shows it");
+            document.Cells[0, 0].Bold = true;
+            document.Cells[0, 1].Bold = true;
+            row = 1;
+        }
+
+        void WriteHeading()
+        {
+            row++;
+            document.Cells[row, 0].SetText(heading);
+            document.Cells[row, 0].Bold = true;
+            listing.AppendLine().AppendLine($"## {heading}");
+            row++;
+        }
+
+        // Starts a new sheet when splitting and the current one is full.
+        void MakeRoom(int needed)
+        {
+            if (settings.Split <= 0 || partFormulas == 0 || partFormulas + needed <= settings.Split)
+            {
+                return;
+            }
+
+            parts.Add((document, listing, partFormulas));
+            document = CreateDocument();
+            listing = new StringBuilder();
+            partFormulas = 0;
+            Header();
+            WriteHeading();
+        }
 
         void Heading(string text)
         {
-            row++;
-            document.Cells[row, 0].SetText(text);
-            document.Cells[row, 0].Bold = true;
-            listing.AppendLine().AppendLine($"## {text}");
-            row++;
+            heading = text;
+            if (settings.Split > 0 && partFormulas > 0 && partFormulas >= settings.Split)
+            {
+                MakeRoom(int.MaxValue);
+                return;
+            }
+
+            WriteHeading();
         }
 
         void Add(string text)
         {
+            MakeRoom(1);
             ExcelFormula formula;
             try
             {
@@ -80,12 +125,10 @@ sealed class CoverageCommand : Command<CoverageSettings>
             listing.AppendLine($"       {Convert.ToHexString(formula.Expression)}" + (formula.Fixups.IsEmpty ? "" : $"  fix-ups {Convert.ToHexString(formula.Fixups)}"));
             row++;
             formulas++;
+            partFormulas++;
         }
 
-        document.Cells[0, 0].SetText("Intended formula (text)");
-        document.Cells[0, 1].SetText("Formula as Excel shows it");
-        document.Cells[0, 0].Bold = true;
-        document.Cells[0, 1].Bold = true;
+        Header();
 
         Heading("Cell references");
         foreach (var text in new[]
@@ -196,6 +239,8 @@ sealed class CoverageCommand : Command<CoverageSettings>
         Heading("Array formulas (each covers two cells: this row and the next)");
         foreach (var text in new[] { "{=A1:A2*2}", "{=TRANSPOSE(A1:B1)}", "{=SUM(A1:A2*B1:B2)}" })
         {
+            MakeRoom(2);
+            partFormulas += 2;
             document.Cells[row, 0].SetText(text);
             document.SetArrayFormula(new ExcelRange((ushort)row, (ushort)(row + 1), 1, 1), text, version);
             listing.AppendLine($"A{row + 1,-5} {text}");
@@ -239,32 +284,24 @@ sealed class CoverageCommand : Command<CoverageSettings>
             }
         }
 
-        var bytes = document.ToArray();
-        WriteOutputs(settings.Output, bytes, "XLPG", listing.ToString());
-        AnsiConsole.MarkupLine($"Wrote [bold]{Markup.Escape(settings.Output)}[/]: {formulas} formulas in {row} rows, {bytes.Length:N0} bytes.");
+        parts.Add((document, listing, partFormulas));
+        if (settings.Split <= 0)
+        {
+            WriteAndCheck(settings.Output, parts[0].Document, parts[0].Listing.ToString());
+        }
+        else
+        {
+            for (int i = 0; i < parts.Count; i++)
+            {
+                WriteAndCheck($"{settings.Output} {i + 1:D2}", parts[i].Document, parts[i].Listing.ToString());
+            }
+        }
+
+        AnsiConsole.MarkupLine($"{formulas} formulas in {parts.Count} sheet(s).");
         foreach (var skip in skipped)
         {
             AnsiConsole.MarkupLine($"[yellow]Skipped[/] {Markup.Escape(skip)}");
         }
-
-        // Make sure what we wrote reads back to the same text.
-        var reread = ExcelDocument.Read(bytes);
-        int mismatches = 0;
-        for (int r = 0; r < reread.Cells.RowCount; r++)
-        {
-            if (reread.Cells[r, 1].Formula is { } formula && reread.Cells[r, 0].Type == ExcelCellType.Text)
-            {
-                string expected = reread.Cells[r, 0].TextValue;
-                string actual = formula.ToText(reread);
-                if (!Equivalent(expected, actual))
-                {
-                    mismatches++;
-                    AnsiConsole.MarkupLine($"[yellow]Row {r + 1}[/]: {Markup.Escape(expected)} decompiles as {Markup.Escape(actual)}");
-                }
-            }
-        }
-
-        AnsiConsole.MarkupLine(mismatches == 0 ? "[green]Every formula decompiles to its intended text.[/]" : $"[yellow]{mismatches} formulas decompile differently (see above).[/]");
 
         if (settings.Experimental)
         {
@@ -275,6 +312,32 @@ sealed class CoverageCommand : Command<CoverageSettings>
         }
 
         return 0;
+    }
+
+    // Writes a sheet and makes sure every formula reads back to its intended text.
+    private static void WriteAndCheck(string path, ExcelDocument document, string listing)
+    {
+        var bytes = document.ToArray();
+        WriteOutputs(path, bytes, "XLPG", listing);
+        var reread = ExcelDocument.Read(bytes);
+        int checkedFormulas = 0;
+        int mismatches = 0;
+        for (int r = 0; r < reread.Cells.RowCount; r++)
+        {
+            if (reread.Cells[r, 1].Formula is { } formula && reread.Cells[r, 0].Type == ExcelCellType.Text)
+            {
+                checkedFormulas++;
+                string expected = reread.Cells[r, 0].TextValue;
+                string actual = formula.ToText(reread);
+                if (!Equivalent(expected, actual))
+                {
+                    mismatches++;
+                    AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(Path.GetFileName(path))} row {r + 1}[/]: {Markup.Escape(expected)} decompiles as {Markup.Escape(actual)}");
+                }
+            }
+        }
+
+        AnsiConsole.MarkupLine($"Wrote [bold]{Markup.Escape(path)}[/]: {reread.Cells.RowCount} rows, {bytes.Length:N0} bytes" + (mismatches == 0 ? ", every formula reads back as intended." : $", [yellow]{mismatches} of {checkedFormulas} differ[/]."));
     }
 
     // The decompiler writes numbers in their shortest form (1E+100, 1.5E-10) and folds --1 to 1.
@@ -315,7 +378,8 @@ sealed class CoverageCommand : Command<CoverageSettings>
         var definitions = new (string Name, string Definition, byte Flags, char Key)[]
         {
             ("Area", "=$A$1:$B$3", 0, '\0'),
-            ("Command1", "=$D$5", ExcelDefinedName.MacroFlag | ExcelDefinedName.CommandFlag, 'k'),
+            ("Check", "=$E$1", ExcelDefinedName.MacroFlag | ExcelDefinedName.CommandFlag, 'k'),
+            ("Command1", "=$D$5", ExcelDefinedName.MacroFlag | ExcelDefinedName.CommandFlag, 'j'),
             ("Gone", "=#REF!", 0, '\0'),
             ("Macro1", "=$D$1", ExcelDefinedName.MacroFlag, '\0'),
             ("Table", "={1,2;3,4}", 0, '\0'),
@@ -323,14 +387,21 @@ sealed class CoverageCommand : Command<CoverageSettings>
             ("TwoAreas", "=$A$1:$A$3", 0, '\0'),
         };
 
+        // Command macros get bit 0x40 in the shortcut flags byte, as Excel's own do; without it Excel leaves them out
+        // of Macro > Run. Names must be in case-insensitive alphabetical order, since tokens refer to them by position.
         foreach (var (name, _, flags, key) in definitions)
         {
-            document.Names.Add(new ExcelDefinedName(name, [], flags) { ShortcutKey = (byte)key });
+            document.Names.Add(new ExcelDefinedName(name, [], flags)
+            {
+                ShortcutKey = (byte)key,
+                ShortcutExtra = (flags & ExcelDefinedName.CommandFlag) != 0 ? (byte)0x40 : (byte)0,
+            });
         }
 
-        for (int i = 0; i < definitions.Length; i++)
+        document.Names.Sort((a, b) => string.CompareOrdinal(a.Name.ToUpperInvariant(), b.Name.ToUpperInvariant()));
+        foreach (var (name, definition, _, _) in definitions)
         {
-            document.Names[i].SetDefinition(definitions[i].Definition, document);
+            document.Names.Single(n => n.Name == name).SetDefinition(definition, document);
         }
 
         // The macros the names point at.
@@ -338,6 +409,36 @@ sealed class CoverageCommand : Command<CoverageSettings>
         SetFormula(document, 1, 3, "=RETURN(D1)");
         SetFormula(document, 4, 3, "=BEEP()");
         SetFormula(document, 5, 3, "=RETURN()");
+
+        // The Check command macro (Option-Command-K, or Macro > Run): compares Excel's own text for every formula in
+        // column B (GET.FORMULA) with the intended text in column A, counts mismatches in F1, lists their rows in
+        // column G and puts Excel's text for each in column C.
+        string[] check =
+        [
+            "=SET.VALUE(F1,0)",
+            "=SET.VALUE(F2,2)",
+            "=SET.VALUE(F2,F2+1)",
+            "=IF(F2>250,GOTO(E12))",
+            "=IF(INDEX(A1:A250,F2,1)=\"\",GOTO(E3))",
+            "=IF(GET.FORMULA(INDEX(B1:B250,F2,1))=\"\",GOTO(E3))",
+            "=IF(GET.FORMULA(INDEX(B1:B250,F2,1))=INDEX(A1:A250,F2,1),GOTO(E3))",
+            "=SET.VALUE(F1,F1+1)",
+            "=SET.VALUE(INDEX(G1:G250,F1,1),F2)",
+            "=SET.VALUE(INDEX(C1:C250,F2,1),GET.FORMULA(INDEX(B1:B250,F2,1)))",
+            "=GOTO(E3)",
+            "=ALERT(F1&\" mismatches; rows in column G, Excel's text in column C\",2)",
+            "=RETURN()",
+        ];
+        for (int i = 0; i < check.Length; i++)
+        {
+            SetFormula(document, i, 4, check[i]);
+        }
+
+        // Give the check's working cells (F1, F2 and the list in column G) values now, so the grid already covers
+        // them and the macro never has to grow it.
+        document.Cells[0, 5].SetValue(0);
+        document.Cells[1, 5].SetValue(0);
+        document.Cells[0, 6].SetText("Mismatched rows");
         return document;
     }
 

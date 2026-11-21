@@ -328,8 +328,18 @@ nRows = word[0x014] + word[0x020]
 nCols = word[0x274] + word[0x020]
 ```
 
-These size the row index (§8) and the cell table (§9). A new sheet starts with all three words 0, so 0x014
-and 0x274 hold the row and column counts. The first time the grid grows, the grid-sizing routine (`22.08`)
+These size the row index (§8) and the cell table (§9). Excel itself uses only rows `0 … word[0x014] − 1` and
+columns `0 … word[0x274] − 1`, so in the last-index form (0x020 = 1) the table's last row and column are a
+**blank margin**. Every sample in that form has no values there. Excel 1.03 misbehaves when a file breaks this
+(confirmed in Mini vMac):
+
+* values in the margin are not drawn;
+* cells in the last column load on top of one another (D1:F1 all become F1's formula);
+* rows can be lost from the end of the sheet;
+* a one-row table hangs it while it draws the window.
+
+A writer using the last-index form must therefore leave one blank row and column after the last value. A new
+sheet starts with all three words 0, so 0x014 and 0x274 hold the row and column counts. The first time the grid grows, the grid-sizing routine (`22.08`)
 converts them: it sets 0x020 to 1 and subtracts 1 from both, so they hold the last row and column index from
 then on. Most samples are in the second form; `CLOCK.WS`, `CLOCK.MS` (1.00) and `LOAN1` (1.5) are in the
 first. An empty sheet has `nRows = nCols = 0`.
@@ -574,7 +584,7 @@ The defined names, then the data of the array constants their definitions contai
 | byte | `cch` = name length (never 0; 0 is the terminator) |
 | byte | `cce` = definition length |
 | byte | Flags: `0x04` = defined on a macro sheet as a function or command; `0x20` = the definition is array-valued, so formulas using the name get cell word 2 bit 13 (§9); `0x40` = command macro, two extra bytes follow. Open keeps only bits `0x64`, so the `0x01`, `0x02` and `0x80` some samples have are in-memory marks Save writes out and Open discards. |
-| 2 bytes | Only if flag `0x40`: the shortcut key (the character typed with Option-Command), then a flags byte. Open keeps its bits `0x80` and `0x40`, counting the command macros that have each, and discards the low nibble (junk in the samples, `0x40`–`0x4E`, `0x80`–`0x8A`). What the two bits mean is **(unknown)**. |
+| 2 bytes | Only if flag `0x40`: the shortcut key (the character typed with Option-Command), then a flags byte. Open keeps its bits `0x80` and `0x40`, counting the command macros that have each, and discards the low nibble (junk in the samples, `0x40`–`0x4E`, `0x80`–`0x8A`). Every sample sets one of the two. Command macros written with `0x40` appear in Excel 1.03's Macro > Run list with their shortcut. Whether the bit is *required* for that is **(unconfirmed)**: an empty Run list was also seen on a sheet broken by the cell-table margin problem (§6.1). |
 | cce bytes | Definition, a parsed expression (§15) |
 | byte | Copy of `cce` |
 | cch bytes | Name characters |

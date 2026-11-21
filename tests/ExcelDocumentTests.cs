@@ -112,6 +112,25 @@ public class ExcelDocumentTests
     }
 
     [Fact]
+    public void ToArray_KeepsABlankMarginRowAndColumn()
+    {
+        // Excel 1.03 hangs on a one-row table and ignores values in the table's last row and column, so the
+        // writer always leaves them blank. Writing again does not grow the table further.
+        var document = ExcelDocument.CreateMacroSheet();
+        document.Cells[0, 0].SetText("A1");
+        document.Cells[0, 5].SetText("F1");
+
+        var reread = ExcelDocument.Read(document.ToArray());
+        Assert.Equal(2, reread.Cells.RowCount);
+        Assert.Equal(7, reread.Cells.ColumnCount);
+        Assert.Equal("F1", reread.Cells[0, 5].TextValue);
+
+        var again = ExcelDocument.Read(reread.ToArray());
+        Assert.Equal(2, again.Cells.RowCount);
+        Assert.Equal(7, again.Cells.ColumnCount);
+    }
+
+    [Fact]
     public void CreateWorksheet_WriteAndRead_PreservesCells()
     {
         var document = ExcelDocument.CreateWorksheet();
@@ -129,8 +148,9 @@ public class ExcelDocumentTests
         var bytes = document.ToArray();
         var reread = ExcelDocument.Read(bytes);
 
-        Assert.Equal(4, reread.Cells.RowCount);
-        Assert.Equal(2, reread.Cells.ColumnCount);
+        // Four rows and two columns in use, plus Excel's blank margin row and column.
+        Assert.Equal(5, reread.Cells.RowCount);
+        Assert.Equal(3, reread.Cells.ColumnCount);
         Assert.Equal("Hello", reread.Cells[0, 0].TextValue);
         Assert.Equal(42, reread.Cells[1, 0].IntegerValue);
         Assert.Equal(3.25, reread.Cells[2, 0].NumberValue);

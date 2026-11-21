@@ -201,6 +201,13 @@ public sealed class ExcelSheetState
     internal int ColumnCountInTable => GetWord(LastColumnOffset) + GetWord(NonEmptyOffset);
 
     /// <summary>
+    /// Gets whether the extent words hold a table of exactly this size in the count form (word 0x020 = 0), in which
+    /// Excel uses every row and column of the table, so it needs no blank margin.
+    /// </summary>
+    internal bool HoldsCountForm(int rows, int columns)
+        => rows > 0 && GetWord(NonEmptyOffset) == 0 && RowCount == rows && ColumnCountInTable == columns;
+
+    /// <summary>
     /// Updates the extent words so they describe a cell table of the given size.
     /// </summary>
     internal void SetExtent(int rows, int columns)
