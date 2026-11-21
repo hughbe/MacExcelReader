@@ -380,16 +380,16 @@ capped at 64. The 19 built-ins, by index:
 
 | # | Format | # | Format |
 |--:|--------|--:|--------|
-| 0 | General | 10 | m/d/yy |
-| 1 | 0 | 11 | d-mmm-yy |
-| 2 | 0.00 | 12 | d-mmm |
-| 3 | #,##0 | 13 | mmm-yy |
-| 4 | #,##0.00 | 14 | h:mm AM/PM |
-| 5 | $#,##0 ;($#,##0) | 15 | h:mm:ss AM/PM |
-| 6 | $#,##0.00 ;($#,##0.00) | 16 | h:mm |
-| 7 | 0% | 17 | h:mm:ss |
-| 8 | 0.00% | 18 | m/d/yy h:mm |
-| 9 | 0.00E+00 | | |
+| 0 | `General` | 10 | `m/d/yy` |
+| 1 | `0` | 11 | `d-mmm-yy` |
+| 2 | `0.00` | 12 | `d-mmm` |
+| 3 | `#,##0` | 13 | `mmm-yy` |
+| 4 | `#,##0.00` | 14 | `h:mm AM/PM` |
+| 5 | `$#,##0 ;($#,##0)` | 15 | `h:mm:ss AM/PM` |
+| 6 | `$#,##0.00 ;($#,##0.00)` | 16 | `h:mm` |
+| 7 | `0%` | 17 | `h:mm:ss` |
+| 8 | `0.00%` | 18 | `m/d/yy h:mm` |
+| 9 | `0.00E+00` | | |
 
 The format names above are the standard Excel 1.x list (they are not stored as
 text anywhere). The token meanings below come from the routine that turns a
