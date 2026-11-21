@@ -573,6 +573,12 @@ sealed class CheckCommand : Command<CheckSettings>
                     continue;
                 }
 
+                // A series with no second reference gets a few bytes left over from memory as one (spec §16.9).
+                if (!all && key == "secondReference" && oa[key]?.GetValue<string>() is "")
+                {
+                    continue;
+                }
+
                 if (key == "cells" && oa[key] is JsonArray ca && ob[key] is JsonArray cb)
                 {
                     CompareCells(ca, cb, differences, all);

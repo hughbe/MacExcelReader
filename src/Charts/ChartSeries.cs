@@ -31,7 +31,7 @@ public sealed class ChartSeries
     {
         var header = new byte[HeaderSize];
         BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(0), 0x2880 | (1 << 13));
-        BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(2), 0x4000 | (2 << 10) | 0x30);
+        BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(2), 0x4000 | (2 << 10) | 0x10);
         BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(4), 0x4000 | (2 << 10));
         header[6] = header[7] = 10;
         BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(8), 60);
@@ -43,13 +43,14 @@ public sealed class ChartSeries
             MicrosoftDecimal.FromDouble(1).WriteTo(header.AsSpan(26 + 8 * i));
         }
 
-        header[64] = header[65] = 1;
+        header[65] = header[66] = 1;
         for (int i = 0; i < 11; i++)
         {
             BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(68 + 2 * i), 2);
         }
 
-        var series = new ChartSeries(header) { Name = name, FirstReference = reference };
+        // Excel writes each label as the series name and "." (spec §16.9).
+        var series = new ChartSeries(header) { Name = name, FirstReference = reference, FirstLabel = name + ".", SecondLabel = name + "." };
         series.SecondValues.AddRange(values.Select(MicrosoftDecimal.FromDouble));
         for (int i = 1; i <= series.SecondValues.Count; i++)
         {

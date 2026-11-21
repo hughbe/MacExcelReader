@@ -374,4 +374,40 @@ public class ExperimentTests
         var chart = ChartDocument.Load(SamplePath("Pie Exploded")).MainChart;
         Assert.Equal(0, chart.GetPointFormat(0).SeriesNumber);
     }
+
+    [Fact]
+    public void Arrow_IsAFreeObjectWithTwoEnds()
+    {
+        // Excel 1.00: Chart > Add Arrow on PROFIT CHART, whose own fifth text object is already an arrow (spec §16.7).
+        var texts = ChartDocument.Load(SamplePath("Arrow")).MainChart.Texts;
+        Assert.Equal(6, texts.Count);
+        Assert.All(texts.Take(4), t => Assert.False(t.IsArrow));
+        Assert.All(texts.Skip(4), t =>
+        {
+            Assert.True(t.IsArrow);
+            Assert.Equal(ChartTextKind.Free, t.Kind);
+            Assert.True(t.IsAutomaticText);
+            Assert.Null(t.Text);
+        });
+        Assert.True(ChartDocument.Load(SamplePath("PROFIT CHART")).MainChart.Texts[4].IsArrow);
+    }
+
+    [Theory]
+    [InlineData("Library Column")]
+    [InlineData("Library Scatter")]
+    public void LibraryCharts_SeriesHeaderMatchesExcels(string name)
+    {
+        // Charts built with ChartDocument.Create and ChartSeries.Create, opened and saved by Excel 1.00. Excel's series
+        // header matches the library's apart from bytes 22–25, which it copies from memory (spec §16.9).
+        var saved = ChartDocument.Load(SamplePath(name)).Series[0];
+        var built = ChartDocument.Create(ChartType.Line);
+        built.Series.Add(ChartSeries.Create(saved.SecondValues.Select(v => v.ToDouble()), saved.Name, saved.FirstReference));
+        var ours = ChartDocument.Read(built.ToArray()).Series[0];
+        var a = ours.Header.ToArray();
+        var b = saved.Header.ToArray();
+        a.AsSpan(22, 4).Clear();
+        b.AsSpan(22, 4).Clear();
+        Assert.Equal(b, a);
+        Assert.Equal(saved.FirstLabel, ours.FirstLabel);
+    }
 }

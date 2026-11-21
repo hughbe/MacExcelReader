@@ -32,6 +32,9 @@ public sealed class Program
             config.AddCommand<SheetCommand>("sheet")
                 .WithDescription("Build sheets from a formula list, for testing formulas in Excel.")
                 .WithExample("sheet", "tests/Data/formulas-1.0.txt", "Formulas", "--split", "100");
+            config.AddCommand<NewChartCommand>("newchart")
+                .WithDescription("Build a chart file with the library, for testing charts in Excel")
+                .WithExample("newchart", "Line", "out/Chart", "--series", "1,2,3", "--series", "3,1,2", "--title", "Sales");
             config.AddBranch("excel-test", branch =>
             {
                 branch.SetDescription("Test files in a real Excel under an emulator (see docs/Testing.md).");
@@ -659,7 +662,7 @@ sealed class ChartCommand : Command<FileSettings>
                 var texts = new Table().Title("[bold]Text objects[/]").AddColumn("Kind").AddColumn("Text").AddColumn("Attached to").AddColumn("Options");
                 foreach (var text in chart.Texts)
                 {
-                    texts.AddRow(text.Kind.ToString(), Program.Escape(text.Text ?? "(automatic)"),
+                    texts.AddRow(text.Kind.ToString(), Program.Escape(text.IsArrow ? "(arrow)" : text.Text ?? "(automatic)"),
                         text.Kind == ChartTextKind.DataLabel ? $"series {text.SeriesNumber}, point {(text.PointNumber == 255 ? "all" : text.PointNumber)}" : string.Empty,
                         $"{(text.IsVertical ? "vertical" : "horizontal")}, show key {Program.YesNo(text.ShowKey)}, show value {Program.YesNo(text.ShowValue)}");
                 }
@@ -925,6 +928,57 @@ sealed class WorkspaceCommand : Command<FileSettings>
         }
 
         AnsiConsole.Write(windows);
+        return 0;
+    }
+}
+
+
+sealed class NewChartSettings : CommandSettings
+{
+    [CommandArgument(0, "<type>")]
+    [Description("ColumnOrBar, Line, Pie, Area or Scatter.")]
+    public required ChartType Type { get; init; }
+
+    [CommandArgument(1, "<output>")]
+    [Description("The chart file to write.")]
+    public required string Output { get; init; }
+
+    [CommandOption("--series <VALUES>")]
+    [Description("A series as comma-separated numbers; repeat for more series. Default: one series 1,3,2.")]
+    public string[] Series { get; init; } = [];
+
+    [CommandOption("--title <TEXT>")]
+    [Description("A chart title.")]
+    public string? Title { get; init; }
+
+    [CommandOption("--bar")]
+    [Description("Horizontal bars (with ColumnOrBar).")]
+    public bool Bar { get; init; }
+}
+
+/// <summary>
+/// Builds a chart file with <see cref="ChartDocument.Create"/>, so the harness can check what Excel makes of it.
+/// </summary>
+sealed class NewChartCommand : Command<NewChartSettings>
+{
+    public override int Execute(CommandContext context, NewChartSettings settings, CancellationToken cancellationToken)
+    {
+        var document = ChartDocument.Create(settings.Type);
+        document.MainChart.IsBar = settings.Bar;
+        if (settings.Title is { } title)
+        {
+            document.MainChart.Texts.Add(ChartText.Create(ChartTextKind.ChartTitle, title));
+        }
+
+        var series = settings.Series.Length == 0 ? ["1,3,2"] : settings.Series;
+        for (int i = 0; i < series.Length; i++)
+        {
+            var values = series[i].Split(',').Select(v => double.Parse(v, CultureInfo.InvariantCulture)).ToList();
+            document.Series.Add(ChartSeries.Create(values, $"Series {i + 1}", $"=R{i + 1}C1:R{i + 1}C{values.Count}"));
+        }
+
+        File.WriteAllBytes(settings.Output, document.ToArray());
+        AnsiConsole.MarkupLine($"Wrote [bold]{Markup.Escape(settings.Output)}[/]: {settings.Type}, {series.Length} series.");
         return 0;
     }
 }

@@ -55,6 +55,8 @@ By default it skips the changes Excel is expected to make:
 
 `--all` shows them too. The exit code is 0 when nothing unexpected differs.
 
+To test charts, `dumper newchart TYPE OUT [--series 1,2,3]... [--title T] [--bar]` builds one with the library.
+
 Options for `pack`:
 - `--volume NAME`: the disk's name. Driver opens files as `Volume:Name`, so each mounted test disk needs its
   own.
@@ -159,6 +161,7 @@ Things to know:
 | Nov 2026 | 1.00 | A sheet linked to `Src`, saved while `Src` was open | External-document entries still start with 6 zero bytes (spec §8) |
 | Nov 2026 | 1.00 | Number and date constants, intersections, array constants, `=#REF!`, `*` fill formats, deleting a table input | Integer limit, 1904 dates, array-constant classes (a parser fix), `#REF!` as `2A`, token `0A`, the table's deleted-input bit (spec §7, §12, §15.4) |
 | Nov 2026 | 1.00 | Chart code decompiled, checked against the gallery samples | Axis words 8 and 10, the text objects' positions, how point formats are keyed, and that overlay flags 11–10 have no effect (spec §16.5–16.8) |
+| Nov 2026 | 1.00 | Charts built with `dumper newchart`, and Chart > Add Arrow | Excel re-saves library charts unchanged apart from its code segment and memory leftovers; fixed two series-header constants and the label strings; arrows are text objects (spec §16.7, §16.9) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

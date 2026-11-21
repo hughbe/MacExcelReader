@@ -1365,10 +1365,10 @@ Without a page setup the word is 0 and 664 zero bytes follow, so the page setup 
 
 ### 16.7 Text objects
 
-A chart's text objects are the chart title, the axis titles and any attached or free text. The chart record
-gives the count (mem 188); the 46-byte records follow the chart record (or the X-axis scale), titles first.
-After all the records come their strings, one Pascal string per object **except** objects with automatic text,
-which have none.
+A chart's text objects are the chart title, the axis titles, any attached or free text, and arrows. The chart
+record gives the count (mem 188); the 46-byte records follow the chart record (or the X-axis scale), titles
+first. After all the records come their strings, one Pascal string per object **except** objects with
+automatic text, which have none.
 
 Each 46-byte record is four slices of the 60-byte memory structure: bytes 0–5, 8–37, 38–43 and 46–49. In
 memory offsets:
@@ -1376,7 +1376,7 @@ memory offsets:
 | mem | Meaning |
 |----:|---------|
 | 0 | Word: horizontal position in thousandths of the chart's drawing rectangle; Excel keeps it and the box's twips position at mem 30–33 in step (`33.19` in 1.00). The matching vertical position, mem 6, is not saved; Open works it out again. |
-| 2 | Word: bits 15–14: cleared on load; bits 3–0: **kind** (1 chart title, 2 category-axis title, 3 value-axis title, 4 data label, 6 unattached text such as the hour labels of `CLOCK.CH` and "Break-even Point" in `BREAK CHART`) |
+| 2 | Word: bits 15–14: cleared on load; bits 3–0: **kind** (1 chart title, 2 category-axis title, 3 value-axis title, 4 data label, 6 free text or an arrow, such as the hour labels of `CLOCK.CH` and "Break-even Point" and its arrow in `PROFIT CHART`) |
 | 4 | Byte: series number (data labels) |
 | 5 | Byte: point number, 255 = the whole series (data labels) |
 | 8 | Pointer to the string, left over from memory |
@@ -1384,7 +1384,8 @@ memory offsets:
 | 12 | Font descriptor |
 | 20 | Bytes 20 and 21 hold the saved Macintosh font number and size |
 | 22 | Area format of the text box. Bit 14 of its word at +6 is automatic size, and its box (+8) is the text's position and size in twips. |
-| 38, 46, 48 | A second point, as mem 0 and mem 30–33 hold the first: thousandths at 38 (and 44, not saved), twips at 46 and 48. Excel uses it when byte 17 is non-zero (`33.19`); what the point is for is **(unknown)**. |
+| 17 | Byte: 1 for an **arrow**. An arrow is a free object (kind 6) with automatic text and no string; Chart > Add Arrow makes one (`Arrow` sample in Excel 1.00) |
+| 38, 46, 48 | The arrow's other end, held as mem 0 and mem 30–33 hold the first: thousandths at 38 (and 44, not saved), twips at 46 and 48 (`33.19`). The arrowhead is at this end **(inferred from `PROFIT CHART`'s arrow, which points at the break-even point)**. |
 
 On load the titles (kinds 1–3) of the main chart are moved out of the list into Excel's three title slots.
 
@@ -1423,10 +1424,10 @@ of the plotted data**, not just references to it. Each series is:
 | n × 8 bytes, or n strings | First array, `n` = point count: decimal numbers, or `n` Pascal strings for a text series (type 3). A numeric array shorter than `n` is padded with 1, 2, 3 … |
 | n × 8 bytes | Second array, decimal numbers; the strings follow it |
 | Pascal string | Series name |
-| 2 strings | Two label strings, each one length byte, the first part, `.`, and as much of the second part as fits in 255 |
+| 2 strings | Two label strings, each one length byte, the first part, `.`, and as much of the second part as fits in 255. For a series of its own with no second part, Excel 1.00 writes the series name and `.` in both (`Series 1.`). |
 | | Source document: `0x00` if none; otherwise the three bytes `02 1B 06` |
 | Pascal string | Name of the source document (empty if none) |
-| Pascal string | Second reference, **as formula text** (R1C1) |
+| Pascal string | Second reference, **as formula text** (R1C1). A series without one gets a short string left over from memory (5 bytes in every chart Excel 1.00 re-saved in the experiments). |
 | Pascal string | First reference, as formula text |
 | 4 bytes | Four empty strings |
 
@@ -1447,7 +1448,7 @@ Microsoft Chart.
 | 22 | 2 words | Copied from the series structure |
 | 26 | 4 × 8 bytes | Four decimal numbers, all 1.0 |
 | 60 † | 2 words | Point count, twice |
-| 64 | 2 bytes | 1, 1 (byte 66 † is used for date series) |
+| 64 | 4 bytes | 0, 1, 1, 0 (byte 66 † is used for date series) |
 | 68 | 11 words | All 2 |
 
 Format class: 2 for General, 1 for formats 1–4, 4 for the currency formats 5–6, 5 for the percent formats 7–8;
@@ -1560,8 +1561,7 @@ None of these affects reading the samples or writing valid files.
 
 **Charts** (§16)
 
-* The chart header's byte 5 (§16.5), what the second point of a text object is for (§16.7), and the point
-  format's bytes 5, 9 and 10 (§16.8).
+* The chart header's byte 5 (§16.5) and the point format's bytes 5, 9 and 10 (§16.8).
 
 **Workspace files** (Appendix B)
 

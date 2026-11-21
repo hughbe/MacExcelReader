@@ -14,7 +14,7 @@ The file format was reverse-engineered from the code of Excel 1.00, 1.03 and 1.5
 - **Display formatting.** All 19 built-in number formats, with dates in the 1904 date system. User-defined formats are read and written.
 - **Everything else in the file.** Calculation settings, column widths, fonts, protection and the password hash, defined names and command-macro shortcuts, external documents, windows and selections, page breaks and Page Setup.
 - **Writing.** Create new worksheets and macro sheets with Excel 1.03's defaults, or edit existing ones; only the cells you touch are re-encoded.
-- **Charts.** Chart type and options, axes and scales, legend, titles, data labels and free text, point formats (markers, patterns, exploded pie slices, label settings), overlay charts, the layout Excel last drew, and the series data. Numbers use Microsoft's 8-byte decimal format.
+- **Charts.** Chart type and options, axes and scales, legend, titles, data labels, free text and arrows, point formats (markers, patterns, exploded pie slices, label settings), overlay charts, the layout Excel last drew, and the series data. Numbers use Microsoft's 8-byte decimal format.
 - **Robust.** Malformed input only ever raises `ExcelFormatException`. This is checked by fuzzing the samples with hundreds of thousands of random corruptions.
 
 ---
@@ -139,6 +139,7 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `workspace <file>` | A workspace ("Resume Excel", type XLIN) file: settings and the windows it reopens |
 | `layout <file>` | Where each part of the file lies: header, code segments, state block and all eight sections |
 | `chart <file>` | A chart file: charts, axes, scales, text objects and series data |
+| `newchart <type> <output>` | Build a chart with the library, for testing in Excel |
 
 ```sh
 dotnet run --project dumper -- cell "tests/Samples/Excel 1.00/REPLACE" B27
@@ -153,7 +154,7 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
 - New documents carry empty embedded p-code segments. Excel 1.03 never uses a file's own copy, but a different build of Excel linking to the document while it is closed would; copy the segments from an existing document if that matters.
 - The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`, and Excel keeps it until something the formula depends on changes. Set `document.State.RecalculationState = 1` to have Excel recalculate the sheet when it opens it.
 - The parser's rules come from Excel's code and tables and were checked against every sample formula; formulas unlike any in the samples could still encode differently. Excel 1.5's functions numbered above 255 follow its Save code, as no sample uses one; Excel 1.5 accepts them.
-- Files written by the library have been checked in Excel 1.00, 1.03 and 1.5 under Mini vMac: every formula in `tests/Data` in 1.03, part of the 1.5 list including functions above 255, and the experiments listed in [Testing in a real Excel](docs/Testing.md). Charts the library builds from scratch have not been.
+- Files written by the library have been checked in Excel 1.00, 1.03 and 1.5 under Mini vMac: every formula in `tests/Data` in 1.03, part of the 1.5 list including functions above 255, and the experiments listed in [Testing in a real Excel](docs/Testing.md), including charts the library builds from scratch, which Excel 1.00 opens and re-saves with no change to their content.
 
 ---
 

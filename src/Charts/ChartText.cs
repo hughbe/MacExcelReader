@@ -21,6 +21,9 @@ public enum ChartTextKind
 
     /// <summary>A data label attached to a series or point.</summary>
     DataLabel = 4,
+
+    /// <summary>Free text placed anywhere on the chart, or an arrow (see <see cref="ChartText.IsArrow"/>).</summary>
+    Free = 6,
 }
 
 /// <summary>
@@ -82,6 +85,12 @@ public sealed class ChartText
 
     /// <summary>Gets or sets the point number of a data label (255 = the whole series).</summary>
     public byte PointNumber { get => Record[5]; set => Record[5] = value; }
+
+    /// <summary>
+    /// Gets or sets whether the object is an arrow rather than text (memory offset 17). An arrow is a free object
+    /// with automatic text and no string; its two points are the arrow's ends (spec §16.7).
+    /// </summary>
+    public bool IsArrow { get => Record[15] != 0; set => Record[15] = (byte)(value ? 1 : 0); }
 
     /// <summary>Gets or sets whether the text is generated automatically (no string is stored).</summary>
     public bool IsAutomaticText { get => (Flags & 0x2000) != 0; set => SetFlag(13, value); }
