@@ -5,7 +5,46 @@ namespace MacExcelReader.Tests;
 /// </summary>
 internal static class TestData
 {
-    public static string SamplePath(string name) => Path.Combine(AppContext.BaseDirectory, "Samples", name);
+    private static readonly string SamplesDirectory = Path.Combine(AppContext.BaseDirectory, "Samples");
+
+    /// <summary>
+    /// Finds a sample by its Mac file name, in whichever version folder holds it ("Excel 1.00", "Excel 1.03",
+    /// "Excel 1.5"). A ".xls" or ".xlm" suffix is ignored, so "Expenses.xls" finds Expenses.
+    /// </summary>
+    public static string SamplePath(string name)
+    {
+        string bare = Path.GetExtension(name) is ".xls" or ".xlm" ? Path.GetFileNameWithoutExtension(name) : name;
+        return Directory.GetFiles(SamplesDirectory, bare, SearchOption.AllDirectories).Single();
+    }
+
+    /// <summary>Gets every sample file, as "folder/name" relative to the samples directory.</summary>
+    public static IEnumerable<string> AllSamples()
+        => Directory.GetFiles(SamplesDirectory, "*", SearchOption.AllDirectories)
+            .Where(p => !Path.GetFileName(p).StartsWith('.'))
+            .Select(p => Path.GetRelativePath(SamplesDirectory, p))
+            .Order(StringComparer.Ordinal);
+
+    /// <summary>Gets every worksheet and macro sheet sample (magic 0x5327).</summary>
+    public static TheoryData<string> AllSheets()
+        => new(AllSamples().Where(p => File.ReadAllBytes(Path.Combine(SamplesDirectory, p))[0] == 0x53));
+
+    /// <summary>Gets every chart sample (magic 0x018C).</summary>
+    public static TheoryData<string> AllCharts()
+        => new(AllSamples().Where(p => File.ReadAllBytes(Path.Combine(SamplesDirectory, p))[0] == 0x01));
+
+    /// <summary>Gets the full path of a sample given as "folder/name".</summary>
+    public static string SampleFile(string relative) => Path.Combine(SamplesDirectory, relative);
+
+    /// <summary>
+    /// Gets the Excel release whose encoding a sample follows, from the length of its embedded code segment,
+    /// which identifies the build that saved it (spec §3.1).
+    /// </summary>
+    public static ExcelVersion SavedBy(byte[] file) => ((file[14] << 8) | file[15]) switch
+    {
+        0x326 or 0x38A => ExcelVersion.Excel100,
+        0x3FC => ExcelVersion.Excel104,
+        _ => ExcelVersion.Excel150,
+    };
 
     public static byte[] Sample(string name) => File.ReadAllBytes(SamplePath(name));
 

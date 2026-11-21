@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\tests\Samples\*">
+    <Content Include="..\tests\Samples\Excel 1.00\*">
       <Link>Samples\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

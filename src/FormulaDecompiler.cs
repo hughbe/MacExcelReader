@@ -17,7 +17,15 @@ public static class FormulaDecompiler
     /// <param name="document">The document used to resolve names and external documents; may be null.</param>
     /// <param name="fixupsInPlace">True for name definitions, whose indices are stored inside the tokens.</param>
     public static string Decompile(ReadOnlySpan<byte> expression, IReadOnlyList<ushort> fixupWords, ExcelDocument? document, bool fixupsInPlace)
+        => Decompile(expression, fixupWords, document, fixupsInPlace, null);
+
+    /// <summary>
+    /// Converts a parsed expression to text, without the leading '=', rendering array constants from their
+    /// data blocks (spec §8.5), one per <c>0x20</c> token in order.
+    /// </summary>
+    public static string Decompile(ReadOnlySpan<byte> expression, IReadOnlyList<ushort> fixupWords, ExcelDocument? document, bool fixupsInPlace, IReadOnlyList<byte[]>? arrays)
     {
+        int arrayIndex = 0;
         var stack = new Stack<string>();
         int fixupIndex = 0;
         string? externalPrefix = null;
@@ -93,7 +101,7 @@ public static class FormulaDecompiler
                     stack.Push(BinaryPrimitives.ReadDoubleBigEndian(expression.Slice(p)).ToString("R", CultureInfo.InvariantCulture));
                     break;
                 case 0x20:
-                    stack.Push("{array}");
+                    stack.Push(arrays is not null && arrayIndex < arrays.Count ? ArrayText(arrays[arrayIndex++]) : "{array}");
                     break;
                 case 0x21:
                 {
@@ -153,6 +161,50 @@ public static class FormulaDecompiler
             1 => stack.Pop(),
             _ => string.Join(" ", stack.Reverse()),
         };
+    }
+
+    /// <summary>
+    /// Formats an array-constant block (column count, row count, then elements) as <c>{1,2;3,4}</c>.
+    /// Element type 1 is a number and 2 a string; the samples contain no others.
+    /// </summary>
+    public static string ArrayText(ReadOnlySpan<byte> block)
+    {
+        int columns = block[0] == 0 ? 256 : block[0];
+        int rows = BinaryPrimitives.ReadUInt16BigEndian(block.Slice(1));
+        var builder = new StringBuilder("{");
+        int p = 3;
+        for (int r = 0; r < rows; r++)
+        {
+            if (r > 0)
+            {
+                builder.Append(';');
+            }
+
+            for (int c = 0; c < columns; c++)
+            {
+                if (c > 0)
+                {
+                    builder.Append(',');
+                }
+
+                byte type = block[p++];
+                if (type == 2)
+                {
+                    var text = MacRoman.GetString(block.Slice(p + 1, block[p]));
+                    builder.Append('"').Append(text.Replace("\"", "\"\"")).Append('"');
+                    p += 1 + block[p];
+                }
+                else
+                {
+                    builder.Append(type == 1
+                        ? BinaryPrimitives.ReadDoubleBigEndian(block.Slice(p)).ToString("R", CultureInfo.InvariantCulture)
+                        : $"?{type}");
+                    p += 8;
+                }
+            }
+        }
+
+        return builder.Append('}').ToString();
     }
 
     private static string Pop(Stack<string> stack) => stack.Count > 0 ? stack.Pop() : "?";

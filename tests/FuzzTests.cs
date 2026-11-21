@@ -8,15 +8,16 @@ namespace MacExcelReader.Tests;
 /// </summary>
 public class FuzzTests
 {
-    public static TheoryData<string> Samples => ["Worksheet1.xls", "Expenses.xls", "COMMANDS.xlm", "DB.FORM.xlm", "REPLACE.xlm"];
+    // Every sheet and chart, at a lower iteration count than before because there are many more.
+    public static TheoryData<string> Samples => new(AllSamples());
 
     [Theory]
     [MemberData(nameof(Samples))]
     public void CorruptedSamples_OnlyThrowFormatExceptions(string name)
     {
-        var original = Sample(name);
+        var original = File.ReadAllBytes(SampleFile(name));
         var random = new Random(name.GetHashCode(StringComparison.Ordinal) & 0x7FFF);
-        for (int iteration = 0; iteration < 400; iteration++)
+        for (int iteration = 0; iteration < 150; iteration++)
         {
             var bytes = (byte[])original.Clone();
             int changes = 1 + random.Next(4);
@@ -67,6 +68,23 @@ public class FuzzTests
 
     private static void Exercise(byte[] bytes)
     {
+        if (bytes.Length > 0 && bytes[0] == 0x01)
+        {
+            try
+            {
+                _ = ChartDocument.Read(bytes).ToArray();
+            }
+            catch (ExcelFormatException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+                // A corrupted chart can read but not be writable as-is.
+            }
+
+            return;
+        }
+
         try
         {
             var document = ExcelDocument.Read(bytes);

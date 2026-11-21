@@ -2,16 +2,19 @@ namespace MacExcelReader.Tests;
 
 public class ExcelDocumentTests
 {
-    private static string SamplePath(string name) => Path.Combine(AppContext.BaseDirectory, "Samples", name);
+    public static TheoryData<string> Samples => TestData.AllSheets();
 
-    public static TheoryData<string> Samples =>
-    [
-        "Worksheet1.xls",
-        "Expenses.xls",
-        "COMMANDS.xlm",
-        "DB.FORM.xlm",
-        "REPLACE.xlm",
-    ];
+    public static TheoryData<string> Charts => TestData.AllCharts();
+
+    private static string SamplePath(string name) => name.Contains('/') ? TestData.SampleFile(name) : TestData.SamplePath(name);
+
+    [Theory]
+    [MemberData(nameof(Charts))]
+    public void Read_Chart_RoundTripsByteForByte(string name)
+    {
+        var original = File.ReadAllBytes(SamplePath(name));
+        Assert.Equal(original, MacExcelReader.Charts.ChartDocument.Read(original).ToArray());
+    }
 
     [Theory]
     [MemberData(nameof(Samples))]
@@ -35,8 +38,9 @@ public class ExcelDocumentTests
             if (cell.Formula is { } formula)
             {
                 var text = formula.ToText(document);
-                Assert.StartsWith("=", text);
+                Assert.True(text.StartsWith('=') || text.StartsWith("{=", StringComparison.Ordinal), text);
                 Assert.DoesNotContain("FUNCTION", text);
+                Assert.DoesNotContain("{array", text);
             }
         }
 

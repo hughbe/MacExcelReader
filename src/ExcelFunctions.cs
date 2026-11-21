@@ -60,6 +60,12 @@ public sealed record ExcelFunction(
         _flags = flags;
     }
 
+    /// <summary>
+    /// Gets the low nibble of the function-table entry's second byte: 0x01 macro-only, 0x02 not for cell formulas
+    /// (inferred; set on SERIES and the three placeholder functions), 0x04 dialog-box form, 0x08 volatile.
+    /// </summary>
+    public int TableFlags => _flags;
+
     /// <summary>Gets whether the function is only available on macro sheets.</summary>
     public bool IsMacroOnly => (_flags & 0x01) != 0;
 
@@ -77,11 +83,15 @@ public sealed record ExcelFunction(
 
     /// <summary>Gets whether the function takes a fixed number of arguments (encoded with token 0x21).</summary>
     public bool HasFixedArguments => MinArguments == MaxArguments;
+
+    /// <summary>Gets the first Excel release that has the function.</summary>
+    public ExcelVersion IntroducedIn { get; init; } = ExcelVersion.Excel100;
 }
 
 /// <summary>
-/// The functions and macro commands known to Excel 1.03, indexed by function number. Names come
-/// from the application's STR# 257 resource; argument counts and types from its function table.
+/// The functions and macro commands of Excel 1.x, indexed by the function number stored in files. Numbers
+/// 0–207 come from Excel 1.00–1.03 (names from STR# 257, rules from the function table); 208 was added by
+/// Excel 1.04 and 209–291 by Excel 1.5, from Excel 1.5's tables and its file-number translation table.
 /// </summary>
 public static class ExcelFunctions
 {
@@ -297,30 +307,174 @@ public static class ExcelFunctions
         new("UNLOCKED.PREV", 0, 0, 0x04, 0x00, 0x00, 0x1), // 207
     ];
 
+    // Functions added after Excel 1.03, by file number from 208. Gaps are numbers Excel 1.5 never assigns.
+    private static readonly ExcelFunction?[] s_later =
+    [
+        new("CHANGE.LINK", 0, 2, 0x00, 0x02, 0x02, 0x5) { IntroducedIn = ExcelVersion.Excel104 }, // 208
+        new("DIALOG.BOX", 1, 1, 0x05, 0x0A, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 209
+        new("ADD.MENU", 2, 2, 0x01, 0x01, 0x08, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 210
+        new("ADD.COMMAND", 3, 3, 0x01, 0x01, 0x0B, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 211
+        new("ADD.BAR", 0, 0, 0x01, 0x00, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 212
+        new("SHOW.BAR", 0, 1, 0x04, 0x01, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 213
+        new("ENABLE.COMMAND", 4, 4, 0x04, 0x01, 0x07, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 214
+        new("CHECK.COMMAND", 4, 4, 0x04, 0x01, 0x07, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 215
+        new("RENAME.COMMAND", 4, 4, 0x04, 0x01, 0x03, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 216
+        new("DELETE.MENU", 2, 2, 0x04, 0x01, 0x03, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 217
+        new("DELETE.COMMAND", 3, 3, 0x04, 0x01, 0x03, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 218
+        new("GET.BAR", 0, 0, 0x01, 0x00, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 219
+        new("SLN", 3, 3, 0x01, 0x01, 0x01, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 220
+        new("SYD", 4, 4, 0x01, 0x01, 0x01, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 221
+        new("DDB", 4, 4, 0x01, 0x01, 0x01, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 222
+        new("IPMT", 4, 6, 0x01, 0x01, 0x01, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 223
+        new("PPMT", 4, 6, 0x01, 0x01, 0x01, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 224
+        new("REPLACE", 4, 4, 0x02, 0x02, 0x02, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 225
+        new("SUBSTITUTE", 3, 4, 0x02, 0x02, 0x02, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 226
+        new("CODE", 1, 1, 0x01, 0x02, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 227
+        new("FIND", 2, 3, 0x01, 0x02, 0x02, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 228
+        new("MDETERM", 1, 1, 0x01, 0x40, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 229
+        new("MINVERSE", 1, 1, 0x40, 0x40, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 230
+        new("MMULT", 2, 2, 0x40, 0x40, 0x40, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 231
+        new("LOG", 1, 2, 0x01, 0x01, 0x01, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 232
+        null, // 233
+        new("WAIT", 1, 1, 0x04, 0x01, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 234
+        new("SPLIT", 0, 2, 0x04, 0x81, 0x81, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 235
+        new("FREEZE.PANES", 0, 1, 0x04, 0x04, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 236
+        new("GET.CELL", 1, 2, 0x47, 0x01, 0x08, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 237
+        new("GET.DOCUMENT", 1, 2, 0x47, 0x01, 0x02, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 238
+        new("GET.WINDOW", 1, 2, 0x47, 0x01, 0x82, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 239
+        new("GET.WORKSPACE", 1, 1, 0x07, 0x01, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 240
+        new("GET.DEF", 1, 2, 0x02, 0x02, 0x02, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 241
+        new("FILES", 0, 2, 0x40, 0x02, 0x02, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 242
+        new("DIRECTORY", 0, 1, 0x02, 0x02, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 243
+        new("QUIT", 0, 0, 0x04, 0x00, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 244
+        null, // 245
+        null, // 246
+        null, // 247
+        null, // 248
+        null, // 249
+        null, // 250
+        new("CHAR", 1, 1, 0x02, 0x01, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 251
+        new("LOWER", 1, 1, 0x02, 0x02, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 252
+        new("UPPER", 1, 1, 0x02, 0x02, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 253
+        new("PROPER", 1, 1, 0x02, 0x02, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 254
+        null, // 255
+        new("LEFT", 1, 2, 0x02, 0x02, 0x01, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 256
+        new("RIGHT", 1, 2, 0x02, 0x02, 0x01, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 257
+        new("EXACT", 2, 2, 0x04, 0x02, 0x02, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 258
+        new("TRIM", 1, 1, 0x02, 0x02, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 259
+        new("ISERR", 1, 1, 0x04, 0x17, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 260
+        new("ISTEXT", 1, 1, 0x04, 0x1F, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 261
+        new("ISNUMBER", 1, 1, 0x04, 0x1F, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 262
+        new("ISBLANK", 1, 1, 0x04, 0x1F, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 263
+        new("T", 1, 1, 0x02, 0x0F, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 264
+        new("N", 1, 1, 0x01, 0x0F, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 265
+        new("DATEVALUE", 1, 1, 0x01, 0x02, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 266
+        new("TIMEVALUE", 1, 1, 0x01, 0x02, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 267
+        new("CLEAN", 1, 1, 0x02, 0x02, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 268
+        new("COUNTA", 1, 14, 0x01, 0x59, 0x59, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 269
+        new("PRODUCT", 1, 14, 0x01, 0x49, 0x49, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 270
+        new("FACT", 1, 1, 0x01, 0x01, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 271
+        new("DPRODUCT", 3, 3, 0x01, 0x08, 0x0B, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 272
+        new("ISNONTEXT", 1, 1, 0x04, 0x1F, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 273
+        new("TRUNC", 1, 1, 0x01, 0x01, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 274
+        new("ISLOGICAL", 1, 1, 0x04, 0x1F, 0x00, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 275
+        new("DCOUNTA", 3, 3, 0x01, 0x08, 0x8B, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 276
+        new("STDEVP", 1, 14, 0x01, 0x49, 0x49, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 277
+        new("DSTDEVP", 3, 3, 0x01, 0x08, 0x0B, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 278
+        new("VARP", 1, 14, 0x01, 0x49, 0x49, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 279
+        new("DVARP", 3, 3, 0x01, 0x08, 0x0B, 0x0) { IntroducedIn = ExcelVersion.Excel150 }, // 280
+        null, // 281
+        null, // 282
+        new("DELETE.BAR", 1, 1, 0x04, 0x01, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 283
+        new("FOR", 3, 4, 0x20, 0x02, 0x01, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 284
+        new("WHILE", 1, 1, 0x20, 0x04, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 285
+        new("BREAK", 0, 0, 0x20, 0x00, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 286
+        new("NEXT", 0, 0, 0x20, 0x00, 0x00, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 287
+        new("REFTEXT", 1, 2, 0x02, 0x08, 0x04, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 288
+        new("TEXTREF", 1, 2, 0x08, 0x02, 0x04, 0x1) { IntroducedIn = ExcelVersion.Excel150 }, // 289
+        new("INDIRECT", 1, 2, 0x57, 0x02, 0x04, 0x8) { IntroducedIn = ExcelVersion.Excel150 }, // 290
+        new("CELL", 1, 2, 0x07, 0x02, 0x08, 0x8) { IntroducedIn = ExcelVersion.Excel150 }, // 291
+    ];
+
+    // Functions whose argument rules Excel 1.5 changed (from Excel 1.5's function table).
+    private static readonly Dictionary<int, ExcelFunction> s_excel15Rules = new()
+    {
+        [48] = new("TEXT", 2, 2, 0x02, 0x07, 0x02, 0x0),
+        [57] = new("FORMULA", 1, 2, 0x04, 0xC7, 0x8A, 0x1),
+        [106] = new("OPEN", 0, 3, 0x04, 0x02, 0x84, 0x5),
+        [115] = new("DISPLAY", 0, 5, 0x04, 0x84, 0x85, 0x5),
+        [117] = new("ACTIVATE", 1, 2, 0x04, 0x82, 0x01, 0x1),
+        [118] = new("CLOSE", 0, 1, 0x04, 0x04, 0x00, 0x1),
+        [124] = new("PRINT", 0, 9, 0x04, 0x81, 0x85, 0x5),
+        [155] = new("VSCROLL", 1, 2, 0x04, 0x01, 0x04, 0x1),
+        [188] = new("GET.FORMULA", 1, 1, 0x02, 0x0A, 0x00, 0x1),
+        [192] = new("HSCROLL", 1, 2, 0x04, 0x01, 0x04, 0x1),
+        [195] = new("FORMULA.ARRAY", 1, 2, 0x04, 0xC7, 0x8A, 0x1),
+        [196] = new("FORMULA.FILL", 1, 2, 0x04, 0xC7, 0x8A, 0x1),
+    };
+
     /// <summary>
-    /// Gets the number of functions (208), which Excel also writes as the first word of the data area.
+    /// Gets the number of functions in Excel 1.00–1.03 (208), the function count those versions write at the
+    /// start of the data area.
     /// </summary>
     public static int Count => s_functions.Length;
 
-    /// <summary>
-    /// Gets the function with the given number, or null if the number is unknown.
-    /// </summary>
-    public static ExcelFunction? Get(int number)
-        => number >= 0 && number < s_functions.Length ? s_functions[number] : null;
+    /// <summary>Gets the highest function number any Excel 1.x release uses (291, in Excel 1.5).</summary>
+    public static int MaxNumber => s_functions.Length + s_later.Length - 1;
 
     /// <summary>
-    /// Finds a function number by name (case-insensitive), or returns -1.
+    /// Gets the function with the given number, as Excel 1.00–1.03 define it, or (for numbers above 207) as the
+    /// release that added it defines it. Returns null for numbers no release uses.
     /// </summary>
-    public static int FindNumber(string name)
+    public static ExcelFunction? Get(int number)
     {
-        for (int i = 0; i < s_functions.Length; i++)
+        if (number >= 0 && number < s_functions.Length)
         {
-            if (string.Equals(s_functions[i].Name, name, StringComparison.OrdinalIgnoreCase))
+            return s_functions[number];
+        }
+
+        int later = number - s_functions.Length;
+        return later >= 0 && later < s_later.Length ? s_later[later] : null;
+    }
+
+    /// <summary>
+    /// Gets the function with the given number as a particular release defines it, or null if that release
+    /// does not have it.
+    /// </summary>
+    public static ExcelFunction? Get(int number, ExcelVersion version)
+    {
+        var function = Get(number);
+        if (function is null || function.IntroducedIn > version)
+        {
+            return null;
+        }
+
+        return version >= ExcelVersion.Excel150 && s_excel15Rules.TryGetValue(number, out var changed) ? changed : function;
+    }
+
+    /// <summary>
+    /// Finds a function number by name (case-insensitive) among the functions of <paramref name="version"/>,
+    /// or returns -1.
+    /// </summary>
+    public static int FindNumber(string name, ExcelVersion version = ExcelVersion.Excel150)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return s_byName.TryGetValue(name, out int number) && Get(number)!.IntroducedIn <= version ? number : -1;
+    }
+
+    private static readonly Dictionary<string, int> s_byName = BuildNameIndex();
+
+    private static Dictionary<string, int> BuildNameIndex()
+    {
+        var index = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i <= MaxNumber; i++)
+        {
+            if (Get(i) is { } function)
             {
-                return i;
+                index.TryAdd(function.Name, i);
             }
         }
 
-        return -1;
+        return index;
     }
 }

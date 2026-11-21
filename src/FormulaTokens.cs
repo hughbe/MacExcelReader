@@ -21,6 +21,9 @@ public static class FormulaTokens
     private static ReadOnlySpan<byte> OperandSizes =>
     [
         2, 7, 3, 1, 1, 2, 8, 6, 1, 2, 7, 3, 6, 4, 4, 4, 1, 3, 6, 3, 6, 1, 1, 7, 3, 6, 4, 4, 4, 1, 3,
+
+        // Excel 1.5: 0x38, a function call with an argument count (spec §9.2).
+        2,
     ];
 
     /// <summary>Token: name reference.</summary>
@@ -99,6 +102,7 @@ public static class FormulaTokens
         0x2C => "NameReference",
         0x2D => "NameArea",
         >= 0x30 and <= 0x37 => "Marked" + GetName((byte)(code - (code == 0x37 ? 0x13 : 0x0D))),
+        0x38 => "FunctionVarArgsExtended",
         _ => $"Token{code:X2}",
     };
 
@@ -324,6 +328,79 @@ public static class FormulaTokens
     /// index, and for each external-sheet token its external-document index. Array and memory-area
     /// blocks are skipped.
     /// </summary>
+    /// <summary>
+    /// Returns the array-constant blocks (spec §8.5) for the <c>0x20</c> tokens of an expression, in token order,
+    /// from fix-up data laid out as in a cell formula.
+    /// </summary>
+    internal static IReadOnlyList<byte[]> ReadArrayBlocks(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups)
+    {
+        if (!ContainsArray(expression))
+        {
+            return [];
+        }
+
+        var blocks = new List<byte[]>();
+        int position = 0;
+        foreach (var token in Enumerate(expression))
+        {
+            switch (token.Code)
+            {
+                case Name:
+                case ExternalSheet:
+                    Skip(fixups, ref position, 2);
+                    break;
+                case Array:
+                    int start = position;
+                    SkipArrayBlock(fixups, ref position);
+                    blocks.Add(fixups[start..position].ToArray());
+                    break;
+                case MemoryArea:
+                    Skip(fixups, ref position, ReadWord(fixups, ref position) * 6);
+                    break;
+            }
+        }
+
+        return blocks;
+    }
+
+    /// <summary>
+    /// Reads one array-constant block per <c>0x20</c> token of <paramref name="expression"/> from consecutive data
+    /// (as in the array data after the defined names, spec §11).
+    /// </summary>
+    internal static IReadOnlyList<byte[]> ReadConsecutiveArrayBlocks(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> data, ref int position)
+    {
+        if (!ContainsArray(expression))
+        {
+            return [];
+        }
+
+        var blocks = new List<byte[]>();
+        foreach (var token in Enumerate(expression))
+        {
+            if (token.Code == Array)
+            {
+                int start = position;
+                SkipArrayBlock(data, ref position);
+                blocks.Add(data[start..position].ToArray());
+            }
+        }
+
+        return blocks;
+    }
+
+    private static bool ContainsArray(ReadOnlySpan<byte> expression)
+    {
+        foreach (var token in Enumerate(expression))
+        {
+            if (token.Code == Array)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal static List<ushort> ReadFixupWords(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups)
     {
         var words = new List<ushort>();

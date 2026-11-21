@@ -19,8 +19,8 @@ public class ReadBenchmarks
     public void Setup()
     {
         string samples = Path.Combine(AppContext.BaseDirectory, "Samples");
-        _expenses = File.ReadAllBytes(Path.Combine(samples, "Expenses.xls"));
-        _dbForm = File.ReadAllBytes(Path.Combine(samples, "DB.FORM.xlm"));
+        _expenses = File.ReadAllBytes(Path.Combine(samples, "Expenses"));
+        _dbForm = File.ReadAllBytes(Path.Combine(samples, "DB.FORM"));
         _large = CreateLargeWorksheet(2000, 20);
         _dbFormDocument = ExcelDocument.Read(_dbForm);
         _dbFormTexts = _dbFormDocument.Cells.NonEmptyCells

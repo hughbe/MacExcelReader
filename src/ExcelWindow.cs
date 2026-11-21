@@ -17,8 +17,14 @@ public readonly record struct ExcelRange(ushort FirstRow, ushort LastRow, byte F
 /// </summary>
 public sealed class ExcelWindow
 {
-    /// <summary>The size of the window state block.</summary>
+    /// <summary>The size of the window state block in version-17 files.</summary>
     public const int StateSize = 41;
+
+    /// <summary>
+    /// The size of the window state block in version-18 files (Excel 1.5): the 41 bytes, then 88 more bytes
+    /// of the window record (spec §12).
+    /// </summary>
+    public const int Version18StateSize = 129;
 
     /// <summary>
     /// Creates a window with the given state block.
@@ -26,9 +32,9 @@ public sealed class ExcelWindow
     public ExcelWindow(short top, short left, short bottom, short right, byte[] state)
     {
         ArgumentNullException.ThrowIfNull(state);
-        if (state.Length != StateSize)
+        if (state.Length is not (StateSize or Version18StateSize))
         {
-            throw new ArgumentException($"The window state must be {StateSize} bytes.", nameof(state));
+            throw new ArgumentException($"The window state must be {StateSize} (or, for version 18, {Version18StateSize}) bytes.", nameof(state));
         }
 
         Top = top;
@@ -50,7 +56,7 @@ public sealed class ExcelWindow
     /// <summary>Gets or sets the right of the window rectangle.</summary>
     public short Right { get; set; }
 
-    /// <summary>Gets the raw 41-byte window state.</summary>
+    /// <summary>Gets the raw window state: 41 bytes, or 129 in a version-18 file.</summary>
     public byte[] State { get; }
 
     /// <summary>Gets the selected areas.</summary>
@@ -113,9 +119,9 @@ public sealed class ExcelWindow
         return window;
     }
 
-    internal static ExcelWindow Read(BigEndianReader reader)
+    internal static ExcelWindow Read(BigEndianReader reader, int stateSize)
     {
-        var window = new ExcelWindow(reader.ReadInt16(), reader.ReadInt16(), reader.ReadInt16(), reader.ReadInt16(), reader.ReadBytes(StateSize));
+        var window = new ExcelWindow(reader.ReadInt16(), reader.ReadInt16(), reader.ReadInt16(), reader.ReadInt16(), reader.ReadBytes(stateSize));
         int count = reader.ReadUInt16();
         for (int i = 0; i < count; i++)
         {

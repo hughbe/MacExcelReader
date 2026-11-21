@@ -99,7 +99,7 @@ public class ReaderTests
     public void Read_WrongVersion_Throws()
     {
         var bytes = Sample("Worksheet1.xls");
-        bytes[3] = 18;
+        bytes[3] = 19;
         var ex = Assert.Throws<ExcelFormatException>(() => ExcelDocument.Read(bytes));
         Assert.Contains("version", ex.Message);
     }

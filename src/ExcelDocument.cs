@@ -18,8 +18,17 @@ public sealed class ExcelDocument
     /// <summary>The magic number at the start of every worksheet and macro sheet.</summary>
     public const ushort Magic = 0x5327;
 
-    /// <summary>The only format version Excel 1.x reads.</summary>
+    /// <summary>The format version Excel 1.00–1.04 write, and Excel 1.5 writes unless it needs 18.</summary>
     public const ushort FormatVersion = 17;
+
+    /// <summary>The format version Excel 1.5 writes when a document needs features older versions lack.</summary>
+    public const ushort Excel15FormatVersion = 18;
+
+    /// <summary>
+    /// Gets or sets the format version: 17 (readable by every Excel 1.x) or 18 (written by Excel 1.5 when the
+    /// document uses something only Excel 1.5 can read). See spec §3.
+    /// </summary>
+    public ushort Version { get; set; } = FormatVersion;
 
     /// <summary>The code signature of Excel 1.03.</summary>
     public const ushort Excel103Signature = 0xAB27;
@@ -188,9 +197,9 @@ public sealed class ExcelDocument
         }
 
         ushort version = reader.ReadUInt16();
-        if (version != FormatVersion)
+        if (version is not (FormatVersion or Excel15FormatVersion))
         {
-            throw new ExcelFormatException($"Unsupported format version {version}; expected {FormatVersion}.");
+            throw new ExcelFormatException($"Unsupported format version {version}; expected {FormatVersion} or {Excel15FormatVersion}.");
         }
 
         ushort signature = reader.ReadUInt16();
@@ -214,6 +223,7 @@ public sealed class ExcelDocument
         var document = new ExcelDocument(new ExcelSheetState(reader.ReadBytes(ExcelSheetState.Size)))
         {
             Signature = signature,
+            Version = version,
             HeaderReserved = headerReserved,
             FunctionCount = functionCount,
             Kind = (ExcelDocumentKind)reader.ReadByte(),
@@ -272,11 +282,14 @@ public sealed class ExcelDocument
         int count = reader.ReadByte();
         for (int i = 0; i < count; i++)
         {
-            var descriptor = reader.ReadBytes(7);
+            // Version 17: three section offsets, three lengths and a flag. Version 18 (Excel 1.5) adds a fourth
+            // section, for text, so four offsets and four lengths (spec §6.1).
+            int sections = Version >= Excel15FormatVersion ? 4 : 3;
+            var descriptor = reader.ReadBytes(2 * sections + 1);
             int bodyLength = 0;
-            for (int s = 0; s < 3; s++)
+            for (int s = 0; s < sections; s++)
             {
-                bodyLength = Math.Max(bodyLength, descriptor[s] + descriptor[3 + s]);
+                bodyLength = Math.Max(bodyLength, descriptor[s] + descriptor[sections + s]);
             }
 
             NumberFormats.Add(new ExcelNumberFormat(descriptor, reader.ReadBytes(bodyLength)));
@@ -309,6 +322,18 @@ public sealed class ExcelDocument
         {
             Names.Add(ExcelDefinedName.Read(reader, length));
         }
+
+        // After the terminator: the data of every array constant in the definitions, name by name.
+        var data = reader.Data.AsSpan(reader.Position);
+        int position = 0;
+        foreach (var name in Names)
+        {
+            var blocks = FormulaTokens.ReadConsecutiveArrayBlocks(name.Definition, data, ref position);
+            if (blocks.Count > 0)
+            {
+                name.ArrayConstants.AddRange(blocks);
+            }
+        }
     }
 
     private void ReadWindows(BigEndianReader reader)
@@ -320,7 +345,7 @@ public sealed class ExcelDocument
                 throw new ExcelFormatException($"Unexpected window marker 0x{marker:X2}.");
             }
 
-            Windows.Add(ExcelWindow.Read(reader));
+            Windows.Add(ExcelWindow.Read(reader, Version >= Excel15FormatVersion ? ExcelWindow.Version18StateSize : ExcelWindow.StateSize));
         }
     }
 
@@ -380,6 +405,53 @@ public sealed class ExcelDocument
     public string FinderType => Kind == ExcelDocumentKind.MacroSheet ? "XLPG" : "XLBN";
 
     /// <summary>
+    /// Enters an array formula, such as <c>=TREND(B1:B5)</c>, into a range of cells (spec §8.6). The top-left cell
+    /// holds the shared formula; the other cells refer to it. Braces around the text are optional.
+    /// </summary>
+    /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
+    public void SetArrayFormula(ExcelRange range, string text, ExcelVersion version = ExcelVersion.Excel100)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (range.FirstRow > range.LastRow || range.FirstColumn > range.LastColumn)
+        {
+            throw new ArgumentException("The range's first row and column must not be after its last.", nameof(range));
+        }
+
+        text = text.Trim();
+        if (text.StartsWith('{') && text.EndsWith('}'))
+        {
+            text = text[1..^1];
+        }
+
+        var (expression, fixups) = ExcelFormulaParser.ParseArrayFormula(text, this, version);
+
+        // Anchor trailer: 0x4000 and 0, a 10-byte header (range, three unused bytes, expression length), the
+        // shared expression and its fix-ups.
+        var anchor = new byte[13 + expression.Length + fixups.Length];
+        anchor[0] = 0x40;
+        BinaryPrimitives.WriteUInt16BigEndian(anchor.AsSpan(3), range.FirstRow);
+        BinaryPrimitives.WriteUInt16BigEndian(anchor.AsSpan(5), range.LastRow);
+        anchor[7] = range.FirstColumn;
+        anchor[8] = range.LastColumn;
+        anchor[12] = (byte)expression.Length;
+        expression.CopyTo(anchor, 13);
+        fixups.CopyTo(anchor, 13 + expression.Length);
+
+        for (int row = range.FirstRow; row <= range.LastRow; row++)
+        {
+            for (int column = range.FirstColumn; column <= range.LastColumn; column++)
+            {
+                byte[] trailer = row == range.FirstRow && column == range.FirstColumn
+                    ? anchor
+                    : [(byte)(range.FirstRow >> 8), (byte)range.FirstRow, range.FirstColumn];
+                var formula = new ExcelFormula([0x01, 0, 0, 0], trailer);
+                formula.SetResult(0);
+                Cells[row, column].SetFormula(formula);
+            }
+        }
+    }
+
+    /// <summary>
     /// Serialises the document.
     /// </summary>
     public byte[] ToArray()
@@ -394,7 +466,7 @@ public sealed class ExcelDocument
 
         var writer = new BigEndianWriter(Math.Max(4096, _sourceLength + 1024));
         writer.WriteUInt16(Magic);
-        writer.WriteUInt16(FormatVersion);
+        writer.WriteUInt16(Version);
         writer.WriteUInt16(Signature);
         writer.WriteBytes(HeaderReserved);
         if (CodeSegments.Count != 2)
@@ -432,17 +504,18 @@ public sealed class ExcelDocument
         sections[0] = writer.Position;
         writer.WriteByte(BuiltInFormatCount);
         writer.WriteByte(checked((byte)NumberFormats.Count));
+        int formatSections = Version >= Excel15FormatVersion ? 4 : 3;
         foreach (var format in NumberFormats)
         {
-            if (format.Descriptor is null || format.Descriptor.Length != 7)
+            if (format.Descriptor is null || format.Descriptor.Length != 2 * formatSections + 1)
             {
-                throw new InvalidOperationException("A number-format descriptor must be exactly 7 bytes.");
+                throw new InvalidOperationException($"A number-format descriptor must be {2 * formatSections + 1} bytes in a version-{Version} file.");
             }
 
             int bodyLength = 0;
-            for (int section = 0; section < 3; section++)
+            for (int section = 0; section < formatSections; section++)
             {
-                bodyLength = Math.Max(bodyLength, format.Descriptor[section] + format.Descriptor[3 + section]);
+                bodyLength = Math.Max(bodyLength, format.Descriptor[section] + format.Descriptor[formatSections + section]);
             }
 
             if (format.Body is null || format.Body.Length != bodyLength)
@@ -503,6 +576,13 @@ public sealed class ExcelDocument
         }
 
         writer.WriteByte(0);
+        foreach (var name in Names)
+        {
+            foreach (var block in name.ArrayConstants)
+            {
+                writer.WriteBytes(block);
+            }
+        }
 
         // Section 5: cell data. Cells that were never accessed are copied byte for byte.
         sections[5] = writer.Position;
@@ -510,8 +590,14 @@ public sealed class ExcelDocument
 
         // Section 6: windows.
         sections[6] = writer.Position;
+        int windowState = Version >= Excel15FormatVersion ? ExcelWindow.Version18StateSize : ExcelWindow.StateSize;
         foreach (var window in Windows)
         {
+            if (window.State.Length != windowState)
+            {
+                throw new InvalidOperationException($"Window state blocks must be {windowState} bytes in a version-{Version} file.");
+            }
+
             window.Write(writer);
         }
 
