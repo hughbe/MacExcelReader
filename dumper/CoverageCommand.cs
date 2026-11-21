@@ -214,7 +214,7 @@ sealed class CoverageCommand : Command<CoverageSettings>
 
         // Every function with its fewest arguments, one more, its most arguments, and its dialog-box form.
         Heading("Every function");
-        for (int number = 0; number <= Math.Min(ExcelFunctions.MaxNumber, 254); number++)
+        for (int number = 0; number <= ExcelFunctions.MaxNumber; number++)
         {
             var function = ExcelFunctions.Get(number, version);
             // Functions 176, 203 and 204 are named "7", "8" and "9" in Excel's list: placeholders that cannot be typed.

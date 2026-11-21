@@ -22,8 +22,9 @@ public static class FormulaTokens
     [
         2, 7, 3, 1, 1, 2, 8, 6, 1, 2, 7, 3, 6, 4, 4, 4, 1, 3, 6, 3, 6, 1, 1, 7, 3, 6, 4, 4, 4, 1, 3,
 
-        // Excel 1.5: 0x38, a function call with an argument count (spec §9.2).
-        2,
+        // Excel 1.5: 0x38, its in-memory form of a call with an argument count; 0x39 and 0x3A, calls to functions
+        // numbered 256 and up, with a fixed argument count and with a count (spec §15.2).
+        2, 1, 2,
     ];
 
     /// <summary>Token: name reference.</summary>
@@ -102,7 +103,9 @@ public static class FormulaTokens
         0x2C => "NameReference",
         0x2D => "NameArea",
         >= 0x30 and <= 0x37 => "Marked" + GetName((byte)(code - (code == 0x37 ? 0x13 : 0x0D))),
-        0x38 => "FunctionVarArgsExtended",
+        0x38 => "FunctionVarArgsInternal",
+        0x39 => "FunctionHigh",
+        0x3A => "FunctionVarArgsHigh",
         _ => $"Token{code:X2}",
     };
 

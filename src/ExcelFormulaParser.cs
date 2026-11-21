@@ -791,12 +791,6 @@ public static class ExcelFormulaParser
             if (number >= 0)
             {
                 var function = ExcelFunctions.Get(number, _version)!;
-                if (number > 255)
-                {
-                    // Excel 1.5 numbers these above 255; how a file stores such a number is not known (spec §9.3).
-                    throw new ExcelFormulaSyntaxException($"{function.Name} (function {number}) cannot be written: the encoding of function numbers above 255 is unknown", name.Position);
-                }
-
                 HighestFunction = Math.Max(HighestFunction, number);
                 if (dialog && !function.HasDialogForm)
                 {
@@ -1070,12 +1064,12 @@ public static class ExcelFormulaParser
             _ => ValueClass,
         });
 
-        // Excel 1.00–1.03 give every function call inside IF or CHOOSE reference class; Excel 1.04 and 1.5 treat them like
+        // Excel 1.00–1.03 give every function call inside IF or CHOOSE reference class; Excel 1.5 treats them like
         // other arguments (spec §9.4).
         private int FunctionClass(Context context, ExcelValueTypes returns) => InArrayFormula(context, context.Kind switch
         {
             ContextKind.Range or ContextKind.MacroTarget or ContextKind.DefinitionTop => ReferenceClass,
-            ContextKind.IfArgument when _version < ExcelVersion.Excel104 => ReferenceClass,
+            ContextKind.IfArgument when _version < ExcelVersion.Excel150 => ReferenceClass,
             ContextKind.Argument or ContextKind.IfArgument when returns == ExcelValueTypes.Array && (context.Accepts & ExcelValueTypes.Array) != 0 => ArrayClass,
             ContextKind.Argument or ContextKind.IfArgument when (context.Accepts & ExcelValueTypes.Reference) != 0 && (returns & ExcelValueTypes.Reference) != 0 => ReferenceClass,
             _ => ValueClass,
@@ -1327,23 +1321,34 @@ public static class ExcelFormulaParser
             }
 
             int tokenClass = FunctionClass(context, definition.ReturnType);
+
+            // Functions numbered 256 and up use 0x39 and 0x3A, holding the number minus 256 (Excel 1.5's Save).
+            int high = function.Number > 255 ? 0x18 : 0;
             if (function.Dialog)
             {
-                Add(WithClass(0x22, tokenClass));
+                Add(WithClass((byte)(0x22 + high), tokenClass));
                 Add((byte)(function.Arguments.Count | 0x80));
             }
-            else if (definition.HasFixedArguments)
+            else if (definition.HasFixedArguments || WritesOldForm(function))
             {
-                Add(WithClass(0x21, tokenClass));
+                Add(WithClass((byte)(0x21 + high), tokenClass));
             }
             else
             {
-                Add(WithClass(0x22, tokenClass));
+                Add(WithClass((byte)(0x22 + high), tokenClass));
                 Add((byte)function.Arguments.Count);
             }
 
             Add((byte)function.Number);
         }
+
+        // Excel 1.5 gave FORMULA, ACTIVATE, CLOSE, VSCROLL, HSCROLL, FORMULA.ARRAY and FORMULA.FILL an optional
+        // argument. Its Save still writes a call with the minimum number of arguments in the fixed-count form, so
+        // that older releases can read it (spec §15.4).
+        private bool WritesOldForm(FunctionNode function)
+            => _version >= ExcelVersion.Excel150
+                && function.Number is 57 or 117 or 118 or 155 or 192 or 195 or 196
+                && function.Arguments.Count == function.Function!.MinArguments;
 
         // IF(condition, true[, false]): condition, a jump over the true branch, the true branch and a skip
         // past the IF token, then the false branch and its skip, then the IF token itself.
