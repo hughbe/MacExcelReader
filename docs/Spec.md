@@ -34,7 +34,8 @@ Where something is not read from code or confirmed in data, it is marked:
 * **(assumed)**: a rule chosen because nothing contradicts it, with no evidence for it;
 * **(unknown)**: not identified.
 
-§18 lists everything that is still open.
+§18 lists everything that is still open. [Excel bugs and quirks](ExcelBugs.md) lists how Excel itself misbehaves,
+for example with a file that breaks a rule given here.
 
 ---
 
@@ -338,7 +339,8 @@ columns `0 … word[0x274] − 1`, so in the last-index form (0x020 = 1) the tab
 * rows can be lost from the end of the sheet;
 * a one-row table hangs it while it draws the window.
 
-A writer using the last-index form must therefore leave one blank row and column after the last value. A new
+A writer using the last-index form must therefore leave one blank row and column after the last value. See
+[Excel bugs and quirks](ExcelBugs.md#files-that-break-the-cell-table-margin-excel-103). A new
 sheet starts with all three words 0, so 0x014 and 0x274 hold the row and column counts. The first time the grid grows, the grid-sizing routine (`22.08`)
 converts them: it sets 0x020 to 1 and subtracts 1 from both, so they hold the last row and column index from
 then on. Most samples are in the second form; `CLOCK.WS`, `CLOCK.MS` (1.00) and `LOAN1` (1.5) are in the
