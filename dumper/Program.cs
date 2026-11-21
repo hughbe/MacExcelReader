@@ -664,7 +664,9 @@ sealed class ChartCommand : Command<FileSettings>
                 {
                     texts.AddRow(text.Kind.ToString(), Program.Escape(text.IsArrow ? "(arrow)" : text.Text ?? "(automatic)"),
                         text.Kind == ChartTextKind.DataLabel ? $"series {text.SeriesNumber}, point {(text.PointNumber == 255 ? "all" : text.PointNumber)}" : string.Empty,
-                        $"{(text.IsVertical ? "vertical" : "horizontal")}, show key {Program.YesNo(text.ShowKey)}, show value {Program.YesNo(text.ShowValue)}");
+                        text.IsArrow
+                            ? $"pattern {text.ArrowPattern}, shaft weight {text.ShaftWeight}, head {(text.HasHead ? (text.OpenHead ? "open" : "filled") : "none")}, width {text.HeadWidth}, length {text.HeadLength}"
+                            : $"{(text.IsVertical ? "vertical" : "horizontal")}, show key {Program.YesNo(text.ShowKey)}, show value {Program.YesNo(text.ShowValue)}");
                 }
 
                 AnsiConsole.Write(texts);

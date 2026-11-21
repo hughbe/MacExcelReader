@@ -92,6 +92,28 @@ public sealed class ChartText
     /// </summary>
     public bool IsArrow { get => Record[15] != 0; set => Record[15] = (byte)(value ? 1 : 0); }
 
+    /// <summary>Gets or sets an arrow's pattern (memory offset 17); 0 means the object is text.</summary>
+    public byte ArrowPattern { get => Record[15]; set => Record[15] = value; }
+
+    /// <summary>Gets or sets an arrow's shaft weight: 0 hairline, 1 medium, 2 thick.</summary>
+    public int ShaftWeight { get => (Word(16) >> 12) & 3; set => SetWord(16, (ushort)((Word(16) & ~0x3000) | ((value & 3) << 12))); }
+
+    /// <summary>Gets or sets an arrow's head width: 0 narrow, 1 medium, 2 wide.</summary>
+    public int HeadWidth { get => (Word(18) >> 12) & 3; set => SetWord(18, (ushort)((Word(18) & ~0x3000) | ((value & 3) << 12))); }
+
+    /// <summary>Gets or sets an arrow's head length: 0 short, 1 medium, 2 long.</summary>
+    public int HeadLength { get => (Word(18) >> 6) & 3; set => SetWord(18, (ushort)((Word(18) & ~0x00C0) | ((value & 3) << 6))); }
+
+    /// <summary>Gets or sets whether an arrow has a head.</summary>
+    public bool HasHead { get => (Word(18) & 0x0100) != 0; set => SetWord(18, (ushort)(value ? Word(18) | 0x0100 : Word(18) & ~0x0100)); }
+
+    /// <summary>Gets or sets whether an arrow's head is open rather than filled.</summary>
+    public bool OpenHead { get => (Word(18) & 0x0200) != 0; set => SetWord(18, (ushort)(value ? Word(18) | 0x0200 : Word(18) & ~0x0200)); }
+
+    private ushort Word(int offset) => System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(Record.AsSpan(offset));
+
+    private void SetWord(int offset, ushort value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(Record.AsSpan(offset), value);
+
     /// <summary>Gets or sets whether the text is generated automatically (no string is stored).</summary>
     public bool IsAutomaticText { get => (Flags & 0x2000) != 0; set => SetFlag(13, value); }
 

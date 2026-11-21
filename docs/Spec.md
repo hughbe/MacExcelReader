@@ -289,7 +289,7 @@ A raw dump of a contiguous run of application globals. Offsets are relative to t
 | Offset | Size | Samples | Meaning |
 |-------:|-----:|---------|---------|
 | 0x000 | word | 100 | Maximum iterations (Calculation dialog; 1…32767) |
-| 0x002 | word | 1 | Calculation mode: 1 = automatic, −1 = automatic except tables, 0 = manual (`CALCULATION(2)` saves −1, `CALCULATION(3)` saves 0). Like 0x006 it is a global setting: every sheet Excel saves gets the current one. |
+| 0x002 | word | 1 | Calculation mode (values below; `CALCULATION(2)` saves −1, `CALCULATION(3)` saves 0). Like 0x006 it is a global setting: every sheet Excel saves gets the current one. |
 | 0x004 | word | 1 | Precision: 1 = full precision, 0 = precision as displayed (results are rounded through the cell format when 0) |
 | 0x006 | word | 1 | Reference style: 1 = A1, 0 = R1C1 (`A1.R1C1(FALSE)` saves 0). It is saved and restored around formula parsing, and is global like 0x002. |
 | 0x008 | word | 0 | Unused: no code in the application reads or writes it |
@@ -330,6 +330,14 @@ A raw dump of a contiguous run of application globals. Offsets are relative to t
 | 0x26C | word | 0 | Cached print-titles value |
 | 0x26E | 6 bytes | 0 | Cached print-titles range (first row word, last row word, first column byte, last column byte) |
 | 0x274 | word | | **Last column** of the grid; see §6.1 |
+
+Calculation mode (`0x002`):
+
+| Value | Meaning |
+|---:|---|
+| 1 | Automatic |
+| −1 | Automatic except tables |
+| 0 | Manual |
 
 Offsets 0x262–0x273 are all derived from the `Print_Area` and `Print_Titles` names by one routine, which is
 re-run whenever a name or a column width changes; a writer can leave them zero.
@@ -505,7 +513,7 @@ A dense, row-major grid: `nRows × nCols` entries of 6 bytes. The entry for (row
 | word 0 | Value or offset, depending on type |
 | word 1, bits 15–12 | Low 4 bits of the data offset (types 2, 3, 5, 6) |
 | word 1, bits 11–9 | **Cell type** |
-| word 1, bits 8–6 | Alignment: 0 General, 1 Left, 2 Center, 3 Right, 4 Fill (from the importer's mapping of alignment letters C, G, L, R, X to 2, 0, 1, 3, 4; all five occur in the samples). |
+| word 1, bits 8–6 | Alignment (values below; from the importer's mapping of alignment letters C, G, L, R, X to 2, 0, 1, 3, 4; all five occur in the samples). |
 | word 1, bits 5–0 | Number format index: 0–18 built in, 19 onwards the user formats of §7 in order |
 | word 2, bit 15 | Hidden (CELL.PROTECTION) |
 | word 2, bit 14 | Locked (CELL.PROTECTION) |
@@ -517,6 +525,16 @@ A dense, row-major grid: `nRows × nCols` entries of 6 bytes. The entry for (row
 | word 2, bit 2 | Left border |
 | word 2, bit 1 | Italic |
 | word 2, bit 0 | Bold |
+
+Alignment:
+
+| Value | Meaning |
+|---:|---|
+| 0 | General |
+| 1 | Left |
+| 2 | Centre |
+| 3 | Right |
+| 4 | Fill |
 
 The importer gives the style and border bits: it maps the letters D, I, L, R, T, B to bits 0, 1, 2, 3, 4, 5
 respectively.
@@ -636,7 +654,19 @@ Pascal string (up to 255 characters).
 |-------:|---------|--------------------|
 | 0 | String | Bytes 4–7 are a pointer left over from memory. The string follows the expression as a Pascal string. |
 | 1 | Boolean | Byte 4: 0 = FALSE, 1 = TRUE |
-| 2 | Error | Byte 4 = error code, the same as the later BIFF codes: 0 #NULL!, 7 #DIV/0!, 15 #VALUE!, 23 #REF!, 29 #NAME?, 36 #NUM!, 42 #N/A (the `Errors` sample has all seven) |
+| 2 | Error | Byte 4 = error code, the same as the later BIFF codes (below; the `Errors` sample has all seven) |
+
+Error codes:
+
+| Code | Error |
+|---:|---|
+| 0 (`0x00`) | #NULL! |
+| 7 (`0x07`) | #DIV/0! |
+| 15 (`0x0F`) | #VALUE! |
+| 23 (`0x17`) | #REF! |
+| 29 (`0x1D`) | #NAME? |
+| 36 (`0x24`) | #NUM! |
+| 42 (`0x2A`) | #N/A |
 
 ### 12.5 Trailing fix-ups
 
@@ -1228,7 +1258,15 @@ codes back.
 |-------:|---------|
 | 0 | Not used |
 | 1 | Pattern; **0 = line not shown** |
-| 2 | Word: bits 15–12: weight (0–2, hairline to thick, in dialog order) |
+| 2 | Word: bits 15–12: weight (below) |
+
+Line weight:
+
+| Value | Meaning |
+|---:|---|
+| 0 | Hairline |
+| 1 | Medium |
+| 2 | Thick |
 
 **Area format** (16 bytes), for the chart area, plot area, legend, text boxes:
 
@@ -1289,7 +1327,7 @@ bit 10 set (one label per point) (§16.8).
 | Offset | Meaning |
 |-------:|---------|
 | 0 | Word of flags: bit 14: 100%; bit 13: stacked; bit 12: bars (horizontal) rather than columns; bit 11: vary colours by category; bit 10 (overlay only): automatic series distribution; bits 9–2 (overlay only): first series in the overlay chart |
-| 2 | Word: **chart type**: 1 column or bar, 2 line, 3 pie, 4 area, 5 scatter |
+| 2 | Word: **chart type** (below) |
 | 4 | Byte: the number of categories, the largest point count of the chart's series, worked out when the chart is drawn (`37.13` in 1.00; 12 for `PROFIT CHART` once Excel has drawn it, 0 in overlays). The drawing code divides it by the categories between tick labels to place them (`37.2b`). |
 | 5 | Byte: 12 in every main chart Excel 1.00 or 1.03 saves, 0 in overlays and in `CLOCK.CH`. No code in Excel 1.00 that handles the chart record reads or writes it on its own **(unknown)**. |
 | 6 | Word: how much narrower the plot became when Excel laid out the axis and tick labels, the width before layout less the width after (`37.03` in 1.00): 266 for `PROFIT CHART`'s column, line, area and scatter forms, 116 for its bar forms, 300 or 405 for its pie forms. |
@@ -1298,6 +1336,16 @@ bit 10 set (one label per point) (§16.8).
 | 12 | Word: angle of the first pie slice, degrees from vertical (0–359) |
 | 14 | Two words: the top and left margins, in twips, of the chart's drawing rectangle, which Excel centres in the window's drawing size (§16.6) when it draws the chart (`37.03` in 1.00). The rectangle's height and width are in the chart area format (bytes 8–15). `PROFIT CHART`: margins 208 and 302 around 4784 by 9075, in a 5200 by 9680 drawing size. |
 
+Chart type:
+
+| Value | Type |
+|---:|---|
+| 1 | Column, or bar with header bit 12 |
+| 2 | Line |
+| 3 | Pie |
+| 4 | Area |
+| 5 | Scatter |
+
 The Gallery's "Main Chart" choices map as Area → 4, Bar → 1 with bit 12 set, Column → 1, Line → 2, Pie → 3,
 Scatter → 5.
 
@@ -1305,7 +1353,7 @@ Scatter → 5.
 
 | Offset | Meaning |
 |-------:|---------|
-| 0 | Word: bits 15–12: major tick marks; bits 11–8: minor tick marks (0 invisible, 1 inside, 2 outside, 3 cross); bits 7–4: tick label position (0 none, 1 next to axis, 2 low, 3 high); bit 3: set on load |
+| 0 | Word: bits 15–12: major tick marks; bits 11–8: minor tick marks; bits 7–4: tick-label position (values below); bit 3: set on load |
 | 2 | Font descriptor for the tick labels |
 | 6 | Word: tick-mark length in twips, worked out when the chart is drawn as the smaller side of the area being laid out divided by 70 (`37.03` in 1.00) |
 | 8 | Word: where the tick labels are drawn, in twips, worked out from the tick-label position when the chart is drawn; 0 when the axis has no tick labels (`37.3e` in 1.00) |
@@ -1313,6 +1361,24 @@ Scatter → 5.
 | 12 | **Axis line** format; 0 pattern = axis hidden. Bits 9–2 of its word at +2 hold the saved Macintosh font number. |
 | 16 | **Major gridlines** format. Bits 9–2 of its word at +2 hold the saved font size. |
 | 20 | **Minor gridlines** format |
+
+Tick marks:
+
+| Value | Meaning |
+|---:|---|
+| 0 | Invisible |
+| 1 | Inside |
+| 2 | Outside |
+| 3 | Cross |
+
+Tick-label position:
+
+| Value | Meaning |
+|---:|---|
+| 0 | None |
+| 1 | Next to axis |
+| 2 | Low |
+| 3 | High |
 
 **Scale record** (44 bytes), for the value axis, and for scatter charts also the X axis:
 
@@ -1336,9 +1402,18 @@ Scatter → 5.
 | 3 | 137 | Byte: not used; nothing in Excel 1.00 reads or writes it |
 | 4 | 138 | Word: non-zero (a memory pointer) when an X-axis scale record follows the chart record |
 | 6 | 140 | **Plot area** format (16 bytes) |
-| 22 | 156 | Word: bits 15–13: **legend position** (0 bottom, 1 corner, 2 top, 3 vertical); bits 8–1: saved legend font number |
+| 22 | 156 | Word: bits 15–13: **legend position** (below); bits 8–1: saved legend font number |
 | 24 | 158 | **Legend** font descriptor |
 | 28 | 162 | **Legend** area format. Its byte at +7 holds the saved legend font size. |
+
+Legend position:
+
+| Value | Meaning |
+|---:|---|
+| 0 | Bottom |
+| 1 | Corner |
+| 2 | Top |
+| 3 | Vertical |
 
 For a scatter chart the category axis is a value axis: its scale is the extra 44-byte record after the chart
 record, and "reverse order" lives in that record's flags instead of bit 5 above.
@@ -1376,16 +1451,63 @@ memory offsets:
 | mem | Meaning |
 |----:|---------|
 | 0 | Word: horizontal position in thousandths of the chart's drawing rectangle; Excel keeps it and the box's twips position at mem 30–33 in step (`33.19` in 1.00). The matching vertical position, mem 6, is not saved; Open works it out again. |
-| 2 | Word: bits 15–14: cleared on load; bits 3–0: **kind** (1 chart title, 2 category-axis title, 3 value-axis title, 4 data label, 6 free text or an arrow, such as the hour labels of `CLOCK.CH` and "Break-even Point" and its arrow in `PROFIT CHART`) |
+| 2 | Word: bits 15–14: cleared on load; bits 3–0: **kind** (below) |
 | 4 | Byte: series number (data labels) |
 | 5 | Byte: point number, 255 = the whole series (data labels) |
 | 8 | Pointer to the string, left over from memory |
-| 10 | Word: bit 13: **automatic text**; bit 12: vertical orientation; bits 11–9: horizontal alignment (0 centre, 1 left, 2 right); bits 8–6: vertical alignment (0 bottom, 1 centre, 2 top); bit 5: show key; bit 4: show value |
+| 10 | Word: bit 13: **automatic text**; bit 12: vertical orientation; bits 11–9: horizontal alignment; bits 8–6: vertical alignment (values below); bit 5: show key; bit 4: show value |
 | 12 | Font descriptor |
-| 20 | Bytes 20 and 21 hold the saved Macintosh font number and size |
+| 16 | An arrow's line format (§16.4). Byte 17 is its pattern: 0 for text, so a non-zero byte 17 is what makes the object an **arrow**. The word at 18 holds the shaft weight in bits 13–12 (line weight values). |
+| 20 | Text: bytes 20 and 21 hold the saved Macintosh font number and size. Arrow: a word, bits 13–12: head width; bit 9: the head is open rather than filled; bit 8: there is a head; bits 7–6: head length (values below). |
 | 22 | Area format of the text box. Bit 14 of its word at +6 is automatic size, and its box (+8) is the text's position and size in twips. |
-| 17 | Byte: 1 for an **arrow**. An arrow is a free object (kind 6) with automatic text and no string; Chart > Add Arrow makes one (`Arrow` sample in Excel 1.00) |
 | 38, 46, 48 | The arrow's other end, held as mem 0 and mem 30–33 hold the first: thousandths at 38 (and 44, not saved), twips at 46 and 48 (`33.19`). The arrowhead is at this end **(inferred from `PROFIT CHART`'s arrow, which points at the break-even point)**. |
+
+An arrow is a free object (kind 6) with automatic text and no string; Chart > Add Arrow makes one, and its
+Format > Patterns dialog sets the fields above (`Arrow` and `Arrow Patterns` samples, Excel 1.00). The values
+come from setting each field in that dialog and saving.
+
+Text kind:
+
+| Value | Meaning |
+|---:|---|
+| 1 | Chart title |
+| 2 | Category-axis title |
+| 3 | Value-axis title |
+| 4 | Data label |
+| 6 | Free text, or an arrow when mem 17 is not 0: the hour labels of `CLOCK.CH`, and "Break-even Point" and its arrow in `PROFIT CHART` |
+
+Horizontal alignment:
+
+| Value | Meaning |
+|---:|---|
+| 0 | Centre |
+| 1 | Left |
+| 2 | Right |
+
+Vertical alignment:
+
+| Value | Meaning |
+|---:|---|
+| 0 | Bottom |
+| 1 | Centre |
+| 2 | Top |
+
+Arrow head width and length (head length values from the first and third choices; the second is
+**(inferred)**):
+
+| Value | Width | Length |
+|---:|---|---|
+| 0 | Narrow | Short |
+| 1 | Medium | Medium |
+| 2 | Wide | Long |
+
+Arrow head style:
+
+| Bits 9–8 | Dialog choice |
+|---:|---|
+| 0 | No head |
+| 1 | Filled head |
+| 3 | Open head |
 
 On load the titles (kinds 1–3) of the main chart are moved out of the list into Excel's three title slots.
 
@@ -1438,7 +1560,7 @@ Microsoft Chart.
 
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
-| 0 † | word | Bits 15–13: series type (0 dates, 1 or 2 numbers, 3 text categories); bit 11: always 1; bit 10: belongs to the first list; bit 7: always 1 |
+| 0 † | word | Bits 15–13: series type (below); bit 11: always 1; bit 10: belongs to the first list; bit 7: always 1 |
 | 2 † | word | Bits 14–13: always 2; bits 12–10: format class of the first array; bits 9–6: its sub-code; bits 5–4: always 1 |
 | 4 † | word | Bits 14–13: always 2; bits 12–10: format class of the second array; bits 9–6: its sub-code |
 | 6 | 2 bytes | 10, 10 |
@@ -1450,6 +1572,14 @@ Microsoft Chart.
 | 60 † | 2 words | Point count, twice |
 | 64 | 4 bytes | 0, 1, 1, 0 (byte 66 † is used for date series) |
 | 68 | 11 words | All 2 |
+
+Series type:
+
+| Value | Meaning |
+|---:|---|
+| 0 | Dates |
+| 1, 2 | Numbers |
+| 3 | Text categories |
 
 Format class: 2 for General, 1 for formats 1–4, 4 for the currency formats 5–6, 5 for the percent formats 7–8;
 other formats go through a separate mapping. For files from Excel (version bit 3 set) Open takes the format
@@ -1902,8 +2032,33 @@ calculation settings. It holds no cell data. Written by `64.00` and read by `64.
 | … | The document windows, front to back, each as below, then a `0x00` byte |
 | word | `n`, then `n` bytes: the **preferred chart format** (Chart > Set Preferred Format, applied by Gallery > Preferred). Set Preferred Format keeps the active chart document's whole in-memory block (`5a.13` in 1.00), and this is that block as it is: its first word is its own length, as for every block on Excel's heap, which the memory manager (`0a.03`) moves like any other. `n` = 0 when none has been set (1,640 bytes for `CLOCK.CH`'s format). From offset 1058 it holds the chart record of §16.5 at its in-memory offsets (the table's second column); the rest of the block's layout is **(unknown)**. |
 | byte | 0 |
-| 3 words | **Printer Setup** (dialog 288, PRINTER.SETUP): printer type (0 Macintosh, 1 TTY), baud rate (0–5 for 300, 600, 1200, 2400, 4800, 9600) and port (0 printer, 1 modem). The sample's `0, 5, 0` is a Macintosh printer; `PRINTER.SETUP(2,2,3)` gives `1, 2, 1`. |
+| 3 words | **Printer Setup** (dialog 288, PRINTER.SETUP): printer type, baud rate and port (values below). The sample's `0, 5, 0` is a Macintosh printer; `PRINTER.SETUP(2,2,3)` gives `1, 2, 1`. |
 | byte | 0 |
+
+Printer type:
+
+| Value | Meaning |
+|---:|---|
+| 0 | Macintosh printer |
+| 1 | TTY (serial) |
+
+Baud rate:
+
+| Value | Rate |
+|---:|---|
+| 0 | 300 |
+| 1 | 600 |
+| 2 | 1200 |
+| 3 | 2400 |
+| 4 | 4800 |
+| 5 | 9600 |
+
+Port:
+
+| Value | Meaning |
+|---:|---|
+| 0 | Printer |
+| 1 | Modem |
 
 Window entry:
 

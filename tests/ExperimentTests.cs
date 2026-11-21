@@ -421,4 +421,19 @@ public class ExperimentTests
         Assert.Equal(new byte[3], record[6..9]);
         Assert.Equal(0xCE, record[14]);
     }
+
+    [Theory]
+    [InlineData("Arrow", 4, 1, 0, 1, 0, true, false)]            // PROFIT CHART's arrow: solid, filled head
+    [InlineData("Arrow Patterns", 5, 2, 1, 0, 2, true, true)]    // set in Format > Patterns in Excel 1.00
+    public void Arrows_PatternWeightAndHead(string name, int index, int pattern, int weight, int width, int length, bool head, bool open)
+    {
+        var arrow = ChartDocument.Load(SamplePath(name)).MainChart.Texts[index];
+        Assert.True(arrow.IsArrow);
+        Assert.Equal(pattern, arrow.ArrowPattern);
+        Assert.Equal(weight, arrow.ShaftWeight);
+        Assert.Equal(width, arrow.HeadWidth);
+        Assert.Equal(length, arrow.HeadLength);
+        Assert.Equal(head, arrow.HasHead);
+        Assert.Equal(open, arrow.OpenHead);
+    }
 }

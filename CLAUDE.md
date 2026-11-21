@@ -16,6 +16,11 @@ specification it is built from. The library is unreleased, so its API can change
   and 1.5 changed. Cite code as `segment.procedure` with the release (`46.06` in 1.00).
 - The spec states facts plainly. Mark only what is not established: **(inferred)**, **(assumed)** or
   **(unknown)**. Never label things "confirmed".
+- List every set of values a field can take (chart types, tick marks, alignments, arrow heads and so on) as a
+  value/meaning table under the record table, not inline in a sentence. Bit fields are written "bit N: …" or
+  "bits N–M: …", highest first; flags given by mask "`0x04`: …".
+- Bytes Excel copies straight from memory are "left over from memory" (defined in the spec's Conventions); do not
+  call them junk, garbage or stale.
 - Write version differences from earlier to later ("1.03 adds…"), not the other way round.
 - Every file Excel saves in an experiment that shows something goes into `tests/Samples/<release>/`, named for
   what it shows, with a test in `tests/ExperimentTests.cs`. The round-trip and recompile tests then cover it.
