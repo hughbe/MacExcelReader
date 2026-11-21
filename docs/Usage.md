@@ -137,7 +137,44 @@ Functions are identified by number; `ExcelFunctions.Get(n)` gives the name and a
 
 ### Writing a formula
 
-The library has no formula parser, so new formulas are built from tokens. The common ones:
+`ExcelFormula.Parse` compiles formula text into the tokens Excel would store:
+
+```csharp
+var formula = ExcelFormula.Parse("=IF(A1>0,SUM($A$1:$A$5)*2,-1)");
+formula.SetResult(0);            // the cached value; Excel recalculates when it opens the file
+document.Cells["B1"].SetFormula(formula);
+```
+
+The leading `=` is optional. It supports:
+
+- numbers, strings (`"say ""hi"""`), `TRUE`/`FALSE` and error values (`#N/A`, `#DIV/0!`, …);
+- A1 references and areas with `$` for absolute parts, up to `IV16384`;
+- the operators `: , % ^ * / + - & = <> < > <= >=`, with Excel's precedence, and parentheses;
+- every Excel 1.x function and macro command, with argument counts checked against Excel's function
+  table, and dialog-box forms of commands such as `RUN?()`;
+- defined names and calls to user-defined function macros (`=MYMACRO(1,2)`);
+- external references (`Budget!A1`, `'My Budget'!A1`) and the active sheet (`!A1`), which need a matching
+  entry in `document.ExternalDocuments`.
+
+Pass the document whenever the formula uses names or external references; otherwise `null` is fine.
+Invalid text raises `ExcelFormulaSyntaxException`, whose `Position` is the zero-based offset of the problem.
+
+Name definitions store their indices inside the tokens, so they have their own entry point:
+
+```csharp
+var name = new ExcelDefinedName("Totals", ExcelFormulaParser.ParseNameDefinition("=$A$1:$A$5", document));
+```
+
+The rules the parser follows (token classes, `IF` jumps, volatile and memory-function tokens) are in
+[spec §9.4](Spec.md#94-how-excel-compiles-formula-text). To see what it produces:
+
+```sh
+dotnet run --project dumper -- parse '=COLUMNS(!ADD)' --file DB.FORM
+```
+
+### Building tokens by hand
+
+You can also build an expression yourself. The common tokens:
 
 | Token | Bytes | Meaning |
 |-------|-------|---------|
@@ -155,12 +192,13 @@ The library has no formula parser, so new formulas are built from tokens. The co
 // =SUM($A$1:$A$5)*2: area rows 0–4 of column 0, SUM with 1 argument, integer 2, multiply.
 var expression = new byte[] { 0x25, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x42, 1, 4, 0x1E, 0, 2, 0x05 };
 var formula = new ExcelFormula(expression);
-formula.SetResult(0);            // Excel recalculates when it opens the file
-document.Cells["B1"].SetFormula(formula);
 ```
 
 A formula that uses a defined name passes the name's 1-based index as a fix-up word:
 `new ExcelFormula(expression, fixups: [0x00, 0x03])`.
+
+`ExcelFunctions.Get(n)` describes each function: its argument counts, the types it accepts and returns
+(`ExcelValueTypes`), and whether it is macro-only, volatile or has a dialog-box form.
 
 ## Names and external references
 
@@ -265,4 +303,5 @@ section table and the eight sections) without parsing them. The `dumper` tool ex
 ```sh
 dotnet run --project dumper -- layout Expenses
 dotnet run --project dumper -- cell REPLACE B27     # every field of one cell, with its tokens
+dotnet run --project dumper -- parse "=SUM(A1:A5)"   # the tokens for some formula text
 ```

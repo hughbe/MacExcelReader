@@ -101,8 +101,11 @@ public static class FormulaDecompiler
 
                 case 0x22:
                 {
+                    // Bit 7 of the argument count marks a command's dialog-box form, such as RUN?().
                     var function = ExcelFunctions.Get(expression[p + 1]);
-                    stack.Push(CallText(stack, function, expression[p + 1], expression[p]));
+                    bool dialog = (expression[p] & 0x80) != 0;
+                    var call = CallText(stack, function, expression[p + 1], expression[p] & 0x7F);
+                    stack.Push(dialog ? call.Insert(call.IndexOf('('), "?") : call);
                     break;
                 }
 
@@ -254,6 +257,19 @@ public static class FormulaDecompiler
         return name;
     }
 
+    private static string QuoteIfNeeded(string name)
+    {
+        foreach (char c in name)
+        {
+            if (!(char.IsLetterOrDigit(c) || c is '.' or '_'))
+            {
+                return "'" + name.Replace("'", "''") + "'";
+            }
+        }
+
+        return name;
+    }
+
     private static string NameText(ExcelDocument? document, ushort index)
     {
         if (document is not null && index >= 1 && index <= document.Names.Count)
@@ -266,10 +282,12 @@ public static class FormulaDecompiler
 
     private static string ExternalDocumentName(ExcelDocument? document, ushort index)
     {
-        if (document is not null && index < document.ExternalDocuments.Count)
+        // External-document indices are 1-based. A document named "\0" (or "") means the active sheet,
+        // written as !A1.
+        if (document is not null && index >= 1 && index <= document.ExternalDocuments.Count)
         {
-            var name = document.ExternalDocuments[index].Name;
-            return name.Length == 0 || name == "\0" ? string.Empty : name;
+            var name = document.ExternalDocuments[index - 1].Name;
+            return name.Length == 0 || name == "\0" ? string.Empty : QuoteIfNeeded(name);
         }
 
         return $"DOC{index}";

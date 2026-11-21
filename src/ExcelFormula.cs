@@ -112,6 +112,14 @@ public sealed class ExcelFormula
         _text = text;
     }
 
+    /// <summary>
+    /// Parses formula text, such as <c>=SUM(A1:A5)*2</c>, into a formula. See <see cref="ExcelFormulaParser"/>.
+    /// </summary>
+    /// <param name="text">The formula text; the leading '=' is optional.</param>
+    /// <param name="document">Resolves defined names and external documents; may be null if there are none.</param>
+    /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
+    public static ExcelFormula Parse(string text, ExcelDocument? document = null) => ExcelFormulaParser.Parse(text, document);
+
     /// <summary>Gets the name indices and external-document indices from the fix-ups, in token order.</summary>
     public IReadOnlyList<ushort> GetFixupWords() => FormulaTokens.ReadFixupWords(Expression, Fixups);
 

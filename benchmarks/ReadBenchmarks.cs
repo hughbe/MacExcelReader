@@ -12,6 +12,8 @@ public class ReadBenchmarks
     private byte[] _expenses = null!;
     private byte[] _dbForm = null!;
     private byte[] _large = null!;
+    private ExcelDocument _dbFormDocument = null!;
+    private string[] _dbFormTexts = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -20,6 +22,26 @@ public class ReadBenchmarks
         _expenses = File.ReadAllBytes(Path.Combine(samples, "Expenses.xls"));
         _dbForm = File.ReadAllBytes(Path.Combine(samples, "DB.FORM.xlm"));
         _large = CreateLargeWorksheet(2000, 20);
+        _dbFormDocument = ExcelDocument.Read(_dbForm);
+        _dbFormTexts = _dbFormDocument.Cells.NonEmptyCells
+            .Where(c => c.Cell.Formula is not null)
+            .Select(c => c.Cell.Formula!.ToText(_dbFormDocument))
+            .ToArray();
+    }
+
+    [Benchmark]
+    public ExcelFormula ParseFormula() => ExcelFormula.Parse("=IF(A1>0,SUM($A$1:$A$5)*2,-1)");
+
+    [Benchmark]
+    public int ParseDbFormFormulas()
+    {
+        int length = 0;
+        foreach (var text in _dbFormTexts)
+        {
+            length += ExcelFormula.Parse(text, _dbFormDocument).Expression.Length;
+        }
+
+        return length;
     }
 
     /// <summary>

@@ -10,7 +10,7 @@ The file format was reverse-engineered from Excel 1.03 and is documented in [doc
 
 - **Exact round-trips.** Every sample document from the Excel 1.03 disk reads and writes back byte for byte. Fields the library does not model are preserved untouched.
 - **Cells.** Integers, numbers, text and formulas with their current values, plus number formats, alignment, bold and italic, borders, and protection flags.
-- **Formulas.** Decompiled to A1-style text (`=IF(NOT(FORMULA.FIND(B19,1,2,1)),RETURN())`), including macro commands and calls to user-defined macros. Allocation-free token walking.
+- **Formulas, both ways.** Decompile tokens to A1-style text (`=IF(NOT(FORMULA.FIND(B19,1,2,1)),RETURN())`) and compile text back to tokens with `ExcelFormula.Parse`. The parser reproduces Excel's own encoding byte for byte for every formula in the samples: token classes, `IF` jumps, volatile and memory-function tokens, macro commands, dialog-box forms (`RUN?()`), names, external references and calls to user-defined macros. Allocation-free token walking.
 - **Display formatting.** All 19 built-in number formats, with dates in the 1904 date system.
 - **Everything else in the file.** Calculation settings, column widths, fonts, protection and the password hash, defined names and command-macro shortcuts, external documents, windows and selections, page breaks and Page Setup.
 - **Writing.** Create new worksheets and macro sheets with Excel 1.03's defaults, or edit existing ones; only the cells you touch are re-encoded.
@@ -62,9 +62,8 @@ sheet.Cells["A1"].SetText("Total");
 sheet.Cells["A2"].SetValue(42);
 sheet.Cells["A2"].Bold = true;
 
-// =A2*2, built from parsed-expression tokens (see the usage guide).
-var formula = new ExcelFormula([0x44, 0xC0, 0x01, 0x00, 0x1E, 0x00, 0x02, 0x05]);
-formula.SetResult(84);
+var formula = ExcelFormula.Parse("=A2*2");
+formula.SetResult(84);   // the cached value; Excel recalculates on open
 sheet.Cells["A3"].SetFormula(formula);
 
 sheet.Save("Totals");   // set Finder type sheet.FinderType ("XLBN") and creator "XCEL"
@@ -106,6 +105,8 @@ Measured with BenchmarkDotNet (`benchmarks/`) on an Apple Silicon Mac with .NET 
 | Read and re-save Expenses unchanged | 11 µs | 54 KB |
 | Read and re-save the large sheet unchanged | 705 µs | 2.4 MB |
 | Read DB.FORM and decompile all 275 formulas | 46 µs | 206 KB |
+| Parse `=IF(A1>0,SUM($A$1:$A$5)*2,-1)` | 0.71 µs | 2.3 KB |
+| Parse all 275 DB.FORM formulas from text | 118 µs | 282 KB |
 
 The 841 KB when reading the large sheet is the copy of the input; pass `copyData: false` to avoid it.
 
@@ -128,6 +129,7 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `info <file>` | A summary: kind, size, cell counts, names, protection |
 | `cells <file> [-r A1:D20] [--all]` | Every non-empty cell with its displayed value, format, style and formula |
 | `cell <file> <address>` | Everything about one cell: value, date, formats, flags, formula, result, raw bytes and a token-by-token breakdown |
+| `parse <formula> [-f file] [--name]` | Compile formula text and show the tokens Excel would store |
 | `names <file>` | Defined names, command shortcuts and definitions |
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |
@@ -138,6 +140,7 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 ```sh
 dotnet run --project dumper -- cell tests/Samples/REPLACE.xlm B27
 dotnet run --project dumper -- export tests/Samples/Expenses.xls -r A10:D20
+dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
 ```
 
 ---
@@ -145,7 +148,8 @@ dotnet run --project dumper -- export tests/Samples/Expenses.xls -r A10:D20
 ## Limitations
 
 - New documents carry no embedded p-code segments. They are only used when a different build of Excel links to the document while it is closed.
-- There is no formula parser; new formulas are built from tokens.
+- The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`; Excel recalculates it when it opens the file.
+- The parser's rules were derived from Excel's function table and checked against every sample formula; Excel's own parser code was not disassembled in full, so formulas unlike any in the samples could encode differently.
 - Array formulas, tables, array constants, user number formats, page breaks, Page Setup and charts are implemented from the spec alone, because none of the sample files contain them.
 
 ---

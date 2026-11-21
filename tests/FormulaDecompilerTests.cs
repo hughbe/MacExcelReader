@@ -124,7 +124,7 @@ public class FormulaDecompilerTests
         var document = ExcelDocument.CreateWorksheet();
         document.ExternalDocuments.Add(new ExcelExternalDocument("Budget"));
         var expression = Concat([0x1A, 0, 0, 0, 0, 0, 0, 0], Reference(0, 0), [0x1B, 0, 0, 0]);
-        Assert.Equal("Budget!A1", Decompile(expression, document, 0));
+        Assert.Equal("Budget!A1", Decompile(expression, document, 1));
     }
 
     [Theory]

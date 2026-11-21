@@ -25,6 +25,10 @@ public sealed class Program
             config.AddCommand<CellCommand>("cell")
                 .WithDescription("Show everything about one cell, including its formula tokens.")
                 .WithExample("cell", "REPLACE", "B27");
+            config.AddCommand<ParseCommand>("parse")
+                .WithDescription("Compile formula text to Excel's tokens, optionally resolving names against a file.")
+                .WithExample("parse", "=IF(A1>0,SUM(A1:A3),-1)")
+                .WithExample("parse", "=COLUMNS(!ADD)", "--file", "DB.FORM");
             config.AddCommand<ExportCommand>("export")
                 .WithDescription("Export the sheet as CSV (or TSV), as displayed values or formulas.")
                 .WithExample("export", "Expenses", "-o", "expenses.csv");
@@ -179,6 +183,58 @@ sealed class CellSettings : FileSettings
     }
 }
 
+sealed class ParseSettings : CommandSettings
+{
+    [CommandArgument(0, "<formula>")]
+    [Description("The formula text, e.g. =SUM(A1:A5)*2. Quote it for the shell.")]
+    public required string Formula { get; init; }
+
+    [CommandOption("-f|--file <FILE>")]
+    [Description("A worksheet or macro sheet whose defined names and external documents the formula uses.")]
+    public string? File { get; init; }
+
+    [CommandOption("--name")]
+    [Description("Compile as a name definition (indices stored inside the tokens).")]
+    public bool Name { get; init; }
+}
+
+sealed class ParseCommand : Command<ParseSettings>
+{
+    public override int Execute(CommandContext context, ParseSettings settings, CancellationToken cancellationToken)
+    {
+        var document = settings.File is null ? null : ExcelDocument.Load(settings.File);
+        try
+        {
+            byte[] expression;
+            var table = new Table().AddColumn("Field").AddColumn("Value");
+            if (settings.Name)
+            {
+                expression = ExcelFormulaParser.ParseNameDefinition(settings.Formula, document);
+                table.AddRow("Decompiled", Program.Escape("=" + FormulaDecompiler.Decompile(expression, [], document, fixupsInPlace: true)));
+            }
+            else
+            {
+                var formula = ExcelFormula.Parse(settings.Formula, document);
+                expression = formula.Expression.ToArray();
+                table.AddRow("Decompiled", Program.Escape(formula.ToText(document)));
+                table.AddRow("Fix-ups", $"{Program.Hex(formula.Fixups)}  words: {string.Join(", ", formula.GetFixupWords())}");
+            }
+
+            table.AddRow("Expression", $"{Program.Hex(expression)} ({expression.Length} bytes)");
+            AnsiConsole.Write(table);
+            AnsiConsole.Write(CellCommand.TokenTable(expression));
+            return 0;
+        }
+        catch (ExcelFormulaSyntaxException exception)
+        {
+            AnsiConsole.MarkupLine($"[red]{Program.Escape(exception.Message)}[/]");
+            AnsiConsole.MarkupLine(Program.Escape(settings.Formula));
+            AnsiConsole.MarkupLine(new string(' ', exception.Position) + "[red]^[/]");
+            return 1;
+        }
+    }
+}
+
 sealed class CellCommand : Command<CellSettings>
 {
     public override int Execute(CommandContext context, CellSettings settings, CancellationToken cancellationToken)
@@ -235,21 +291,25 @@ sealed class CellCommand : Command<CellSettings>
 
         if (cell.Formula is { } f)
         {
-            var tokens = new Table().Title("[bold]Tokens[/]").AddColumn("Offset").AddColumn("Byte").AddColumn("Token").AddColumn("Operands").AddColumn("Meaning");
-            var expression = f.Expression.ToArray();
-            foreach (var token in FormulaTokens.Enumerate(expression))
-            {
-                var operands = expression.AsSpan(token.Offset + 1, token.Length - 1);
-                tokens.AddRow(
-                    token.Offset.ToString(CultureInfo.InvariantCulture),
-                    $"0x{token.RawCode:X2}",
-                    FormulaTokens.GetName(token.Code),
-                    Program.Hex(operands),
-                    Program.Escape(TokenMeaning(token, operands)));
-            }
-
-            AnsiConsole.Write(tokens);
+            AnsiConsole.Write(TokenTable(f.Expression.ToArray()));
         }
+    }
+
+    internal static Table TokenTable(byte[] expression)
+    {
+        var tokens = new Table().Title("[bold]Tokens[/]").AddColumn("Offset").AddColumn("Byte").AddColumn("Token").AddColumn("Operands").AddColumn("Meaning");
+        foreach (var token in FormulaTokens.Enumerate(expression))
+        {
+            var operands = expression.AsSpan(token.Offset + 1, token.Length - 1);
+            tokens.AddRow(
+                token.Offset.ToString(CultureInfo.InvariantCulture),
+                $"0x{token.RawCode:X2}",
+                FormulaTokens.GetName(token.Code),
+                Program.Hex(operands),
+                Program.Escape(TokenMeaning(token, operands)));
+        }
+
+        return tokens;
     }
 
     private static string TokenMeaning(FormulaToken token, ReadOnlySpan<byte> operands)
@@ -259,9 +319,20 @@ sealed class CellCommand : Command<CellSettings>
             case 0x21:
                 return ExcelFunctions.Get(operands[0])?.Name ?? $"function {operands[0]}";
             case 0x22:
+            {
+                int count = operands[0] & 0x7F;
+                string dialog = (operands[0] & 0x80) != 0 ? "?" : string.Empty;
                 return operands[1] == 255
-                    ? $"call user macro, {operands[0] - 1} argument(s)"
-                    : $"{ExcelFunctions.Get(operands[1])?.Name ?? $"function {operands[1]}"}, {operands[0]} argument(s)";
+                    ? $"call user macro, {count - 1} argument(s)"
+                    : $"{ExcelFunctions.Get(operands[1])?.Name ?? $"function {operands[1]}"}{dialog}, {count} argument(s)";
+            }
+
+            case 0x1F:
+                return System.Buffers.Binary.BinaryPrimitives.ReadDoubleBigEndian(operands).ToString("R", CultureInfo.InvariantCulture);
+            case 0x29:
+                return $"function result range, {operands[0]} bytes";
+            case 0x2A or 0x2B:
+                return "#REF! (deleted)";
             case 0x24 or 0x2C or 0x31 or 0x37:
                 return FormulaDecompiler.CellText((ushort)((operands[0] << 8) | operands[1]), operands[2]);
             case 0x25 or 0x2D or 0x32:
@@ -276,7 +347,7 @@ sealed class CellCommand : Command<CellSettings>
             case 0x1C:
                 return ExcelFormulaResult.ErrorText(operands[0]);
             case 0x19:
-                return (operands[0] & 0x02) != 0 ? "IF jump" : (operands[0] & 0x08) != 0 ? "skip" : (operands[0] & 0x04) != 0 ? "CHOOSE" : $"flags 0x{operands[0]:X2}";
+                return operands[0] == 0x01 ? "volatile" : (operands[0] & 0x02) != 0 ? "IF jump" : (operands[0] & 0x08) != 0 ? "skip" : (operands[0] & 0x04) != 0 ? "CHOOSE" : $"flags 0x{operands[0]:X2}";
             default:
                 return string.Empty;
         }

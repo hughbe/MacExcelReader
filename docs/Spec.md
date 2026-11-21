@@ -472,7 +472,7 @@ In memory, some tokens hold pointers. Save writes the expression unchanged
 | Token | Appended | Meaning |
 |-------|----------|---------|
 | `0x23` name | word | 1-based index of the name in section 4 |
-| `0x1A` external sheet | word | Index of the external document (from §6.2) |
+| `0x1A` external sheet | word | 1-based index of the external document in §6.2. An entry named `\0` stands for the active sheet, written `!A1` **(inferred, §6.2)** |
 | `0x20` array constant | array block (below) | **(not observed in samples)** |
 | `0x26` memory area | word `n`, then `n` × 6-byte areas | The cached area list the token points at **(not observed in samples)** |
 
@@ -544,23 +544,23 @@ were verified by walking every formula in the samples.
 | Token | Operand bytes | Meaning |
 |------:|--------------:|---------|
 | 17 | 1 + n | String constant: length byte, characters |
-| 19 | 2 (+ n + 1) | Attribute: flags byte, data byte. If flag `0x04` (CHOOSE) is set, `data + 1` further bytes follow. Flag `0x02` = IF jump, `0x08` = skip. |
-| 1A | 7 | External sheet reference start (last 3 bytes are a stale pointer; see §8.5) |
-| 1B | 3 | External sheet reference end |
+| 19 | 2 (+ n + 1) | Attribute: flags byte, data byte. If flag `0x04` (CHOOSE) is set, `data + 1` further bytes follow. Flag `0x01` = volatile (§9.4; data byte is junk), `0x02` = IF jump, `0x08` = skip. |
+| 1A | 7 | External sheet reference start. Bytes 1–4 are left over from memory; bytes 5–6 are `00 00`; byte 7 is the 1-based external-document index. Cell formulas also carry the index in the fix-ups (§8.5). |
+| 1B | 3 | External sheet reference end. The three bytes are left over from memory (`78 24 06` in the samples). |
 | 1C | 1 | Error constant |
 | 1D | 1 | Boolean constant |
 | 1E | 2 | Integer constant (word) |
 | 1F | 8 | Number constant (double) |
 | 20 | 6 | Array constant (data appended, §8.5) |
 | 21 | 1 | Function, fixed argument count: function number |
-| 22 | 2 | Function, variable argument count: argument count, function number |
-| 23 | 7 | Name (first 3 bytes are a stale pointer; index appended, §8.5) |
+| 22 | 2 | Function, variable argument count: argument count, function number. Bit 7 of the count marks a command's dialog-box form (`RUN?()`, `42 80 91`) |
+| 23 | 7 | Name. In a cell formula all seven bytes are left over from memory (the first three look like a pointer) and the index is in the fix-ups (§8.5). In a name definition the first two bytes are the 1-based name index (§11) and the other five are left over. |
 | 24 | 3 | Cell reference: row word, column byte |
 | 25 | 6 | Area reference: first row word, last row word, first column byte, last column byte |
 | 26 | 4 | Memory area: 3-byte stale pointer to a cached area list, 1 more byte. The list is appended (§8.5). |
 | 27, 28 | 4 | Memory error / no-memory (as BIFF) **(inferred)** |
-| 29 | 1 | Memory function |
-| 2A | 3 | Deleted cell reference |
+| 29 | 1 | Memory function: the length in bytes of the subexpression that follows (§9.4) |
+| 2A | 3 | Deleted cell reference. The bytes look like the former row word and column (`2A 00 84 02`); nothing reads them. |
 | 2B | 6 | Deleted area reference |
 | 2C | 3 | Cell reference inside a name definition |
 | 2D | 6 | Area reference inside a name definition |
@@ -598,6 +598,86 @@ commands simply continue the same numbering past 127: 169 = ACTIVE.CELL,
 185 = INPUT, 188 = GET.FORMULA, 194 = SET.VALUE. Numbers 0–55 agree with later
 BIFF; from 56 on they do not (Excel 1.x inserts COLUMN.WIDTH and FORMULA at
 56–57).
+
+The application's function table (PCOD 0, 10-byte entries from offset
+`0x1512`, one per function number) gives each function's argument rules:
+
+| Byte | Meaning |
+|-----:|---------|
+| 0 | **(unknown)** |
+| 1 | Low nibble: flags. `0x01` = macro sheets only. `0x04` = has a dialog-box form; it is set on exactly the commands that open a dialog, including the four written with `?` in the samples **(inferred)**. `0x08` = volatile; it is set on INDEX, RAND, NOW, AREAS, ROWS and COLUMNS, and formulas that call these start with `19 01` (§9.4). `0x02` is **(unknown)**. High nibble **(unknown)**. |
+| 2 | Low nibble = minimum arguments; high nibble − 1 = maximum arguments |
+| 3 | Return type |
+| 4 | Type the first argument accepts |
+| 5 | Type the other arguments accept |
+| 6–9 | **(unknown)** |
+
+Type bytes are bit masks: `0x01` number, `0x02` text, `0x04` logical, `0x08`
+reference, `0x10` error, `0x20` command, `0x40` array, `0x80` **(unknown)**.
+
+### 9.4 How Excel compiles formula text
+
+Excel's formula parser was not disassembled in full. These rules come from the
+function table (§9.3) and from the samples. They were checked by decompiling
+every cell formula (344) and every non-empty name definition in the samples and
+compiling the text again: the tokens match byte for byte, apart from the bytes
+§9.2 describes as left over from memory. Rules that the samples do not exercise
+are marked.
+
+* **Token classes.** For a reference, area or name operand:
+  * Reference class (`0x2x`): an operand of a range (`:`) or union (`,`)
+    operator, the whole of a name definition, the macro in a user-function
+    call, or a function argument whose accepted type includes reference
+    (`0x08`).
+  * Value class (`0x4x`): anywhere else, including the whole of a cell
+    formula and operands of other operators.
+
+  For a function call:
+  * Reference class: in the same first three places, or as an argument of
+    `IF`.
+  * Array class (`0x6x`): as an argument that accepts arrays, when the
+    function returns an array.
+  * Reference class: as an argument that accepts references, when the function
+    can return a reference.
+  * Value class: everywhere else.
+* **Function tokens.** A function whose minimum and maximum argument counts are
+  equal uses `21 fn`; any other uses `22 argc fn`. `IF` is always `22 argc 01`.
+* **IF.** The condition, then `19 02 n`, then the true branch and `19 08 m`,
+  then (if present) the false branch and another `19 08 m`, then the `IF`
+  token. *n* is the number of bytes from after the `19 02 n` token to the start
+  of the false branch, or to the `IF` token when there is no false branch. Each
+  *m* is the number of bytes from after that `19 08 m` token to the end of the
+  `IF` token, minus 1. `=IF(A1,1,2)` is
+  `44 C0 00 00  19 02 06  1E 00 01  19 08 08  1E 00 02  19 08 02  42 03 01`.
+* **Numbers.** Whole numbers 0–65535 are `1E` words; other numbers are `1F`
+  doubles. The samples contain no constants above 65535, so the upper limit
+  comes from the word's size **(inferred)**. A minus sign directly on a
+  number constant is folded into it: `-1` is `1F BF F0 00 00 00 00 00 00`, not `1E 00 01 13`. A minus sign on
+  anything else is `13`.
+* **TRUE and FALSE** without parentheses are `1D` constants.
+* **Volatile functions.** A formula that calls a function with table flag
+  `0x08` (INDEX, RAND, NOW, AREAS, ROWS, COLUMNS) anywhere starts with
+  `19 01 xx`. The data byte varies and nothing reads it. Formulas that call
+  none of these never have the attribute.
+* **Ranges of function results.** A range whose operands include a function
+  call is preceded by `29 n`, where *n* is the length of the subexpression
+  that follows, up to and including the `11`. For example,
+  `INDEX(A1:C3,1,1):C3` is `29 15` followed by
+  `25… 1E… 1E… 22 03 1D 24… 11` (21 bytes). The samples have two such
+  formulas, both ranges. Treating unions the same way is **(assumed)**.
+* **Dialog-box forms.** A command with table flag `0x04` can be written with a
+  question mark, as in `RUN?()`. It is always encoded as `22`, with bit 7 set
+  in the argument count: `RUN?()` is `42 80 91`.
+* **External references.** `1A`, the operand, then `1B`; see §9.2 for the
+  operand bytes. `Budget!A1` names an entry in §6.2. `!A1` names the entry
+  called `00`, which is the active sheet on a macro sheet **(inferred, §6.2)**.
+* **Names.** `23` and seven bytes (§9.2). A call to a user-defined function is
+  the macro's name token (reference class), then the arguments, then
+  `22 (argc + 1) FF`.
+* **Deleted references.** A name whose definition is `#REF!` stores `2A`, a
+  deleted cell reference, not the error constant `1C 17`. No cell formula in
+  the samples contains `#REF!`. Encoding it there as the error constant is
+  **(assumed)**.
 
 ---
 
