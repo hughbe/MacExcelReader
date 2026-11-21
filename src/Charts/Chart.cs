@@ -328,6 +328,12 @@ public sealed class ChartAxis
     /// <summary>Gets or sets the axis line pattern; 0 hides the axis.</summary>
     public byte AxisLinePattern { get => _data[_offset + 13]; set => _data[_offset + 13] = value; }
 
+    /// <summary>Gets where Excel last drew the tick labels, in twips; 0 when the axis has no tick labels.</summary>
+    public short TickLabelsAt => unchecked((short)BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + 8)));
+
+    /// <summary>Gets where Excel last drew the axis line, in twips, from the crossing settings.</summary>
+    public short LineAt => unchecked((short)BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + 10)));
+
     /// <summary>Gets the tick-mark length in twips, which Excel works out when it draws the chart.</summary>
     public short TickLength => unchecked((short)BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + 6)));
 
@@ -401,6 +407,9 @@ public sealed class ChartPointFormat
 
     /// <summary>Gets or sets whether each data point has a data label, made from built-in text object −1.</summary>
     public bool PointLabels { get => (GetWord(8) & 0x0400) != 0; set => SetBit(8, 10, value); }
+
+    /// <summary>Gets or sets whether the labels show percentages (with <see cref="PointLabels"/>, on a pie).</summary>
+    public bool PercentLabels { get => (GetWord(8) & 0x0200) != 0; set => SetBit(8, 9, value); }
 
     /// <summary>Gets or sets how far a pie slice is pulled out, as a percentage of the radius.</summary>
     public byte Explosion { get => _data[_offset + 11]; set => _data[_offset + 11] = value; }

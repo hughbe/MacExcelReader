@@ -43,7 +43,7 @@ public sealed class ExcelFormulaSyntaxException : FormatException
 /// <para>
 /// Excel's own parser was not disassembled in full. The token classes and <c>IF</c> encoding are derived from
 /// Excel's function table and from every formula in the sample documents, all of which this parser
-/// reproduces byte for byte (apart from stale pointer bytes inside name tokens, which Excel rebuilds when
+/// reproduces byte for byte (apart from bytes left over from memory inside name tokens, which Excel rebuilds when
 /// it opens a file).
 /// </para>
 /// </remarks>
@@ -1175,7 +1175,7 @@ public static class ExcelFormulaParser
                     Add(0x16);
                     break;
                 case ArrayNode array:
-                    // 0x20: column count, row count, three stale bytes. The data goes in the fix-ups of a cell formula,
+                    // 0x20: column count, row count, three bytes left over from memory. The data goes in the fix-ups of a cell formula,
                     // or after the names for a name definition. Array class in a definition and where an argument
                     // accepts arrays; elsewhere the class of a value, so ={1,2} in a cell is 40 (spec §15.4).
                     Add(WithClass(0x20, _definition || (context.Kind is ContextKind.Argument or ContextKind.IfArgument && (context.Accepts & ExcelValueTypes.Array) != 0)
@@ -1229,7 +1229,7 @@ public static class ExcelFormulaParser
 
                     // The outermost union or intersection, or range whose operands are not both plain references, is
                     // wrapped in a memory token giving the length of what follows. Built from cell references alone,
-                    // it is a memory area (0x26: three stale bytes, then the length), and Excel caches the resulting
+                    // it is a memory area (0x26: three bytes left over from memory, then the length), and Excel caches the resulting
                     // areas in the fix-ups; otherwise a memory function (0x29; 0x2E in a definition). Both take
                     // the class of a reference in their place, as Excel 1.03's own compilation shows.
                     int start = -1;
@@ -1403,7 +1403,7 @@ public static class ExcelFormulaParser
                 return;
             }
 
-            // 1A: four bytes Excel leaves stale, 00 00, then the 1-based document index (which cell formulas
+            // 1A: four bytes left over from memory, 00 00, then the 1-based document index (which cell formulas
             // also carry in the fix-ups).
             Add(0x1A);
             for (int i = 0; i < 6; i++)

@@ -158,6 +158,7 @@ Things to know:
 | Nov 2026 | 1.00 | Chart > Axes on an overlay chart, with the chart code decompiled | Overlay axes are their axis line patterns; the overlay option flags share the main chart's scales; data-label bits and the two built-in text objects (spec §16.5, §16.7, §16.8) |
 | Nov 2026 | 1.00 | A sheet linked to `Src`, saved while `Src` was open | External-document entries still start with 6 zero bytes (spec §8) |
 | Nov 2026 | 1.00 | Number and date constants, intersections, array constants, `=#REF!`, `*` fill formats, deleting a table input | Integer limit, 1904 dates, array-constant classes (a parser fix), `#REF!` as `2A`, token `0A`, the table's deleted-input bit (spec §7, §12, §15.4) |
+| Nov 2026 | 1.00 | Chart code decompiled, checked against the gallery samples | Axis words 8 and 10, the text objects' positions, how point formats are keyed, and that overlay flags 11–10 have no effect (spec §16.5–16.8) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

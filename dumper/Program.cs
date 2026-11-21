@@ -691,11 +691,11 @@ sealed class ChartCommand : Command<FileSettings>
 
     private static string PointFormat(ChartPointFormat format)
         => $"series {format.SeriesNumber}; line pattern {format.LinePattern}{(format.AutomaticLine ? " (auto)" : string.Empty)}, weight {format.LineWeight}; area pattern {format.AreaPattern}{(format.AutomaticArea ? " (auto)" : string.Empty)}; marker {format.Marker}{(format.AutomaticMarker ? " (auto)" : string.Empty)}"
-            + (format.SeriesLabel ? "; series label" : string.Empty) + (format.PointLabels ? "; point labels" : string.Empty)
+            + (format.SeriesLabel ? "; series label" : string.Empty) + (format.PointLabels ? "; point labels" : string.Empty) + (format.PercentLabels ? " (percentages)" : string.Empty)
             + (format.Explosion != 0 ? $"; pulled out {format.Explosion}%" : string.Empty);
 
     private static string Axis(ChartAxis axis)
-        => $"ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition}; line {(axis.AxisLinePattern == 0 ? "hidden" : "shown")}; gridlines major {(axis.MajorGridlinePattern == 0 ? "off" : "on")}, minor {(axis.MinorGridlinePattern == 0 ? "off" : "on")}";
+        => $"ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition} (drawn at {axis.TickLabelsAt}); line {(axis.AxisLinePattern == 0 ? "hidden" : $"shown at {axis.LineAt}")}; gridlines major {(axis.MajorGridlinePattern == 0 ? "off" : "on")}, minor {(axis.MinorGridlinePattern == 0 ? "off" : "on")}";
 
     private static string Scale(ChartScale scale)
         => $"min {(scale.AutoMinimum ? "auto" : scale.Minimum)}, max {(scale.AutoMaximum ? "auto" : scale.Maximum)}, major {(scale.AutoMajorUnit ? "auto" : scale.MajorUnit)}, minor {(scale.AutoMinorUnit ? "auto" : scale.MinorUnit)}, crosses {(scale.AutoCrossesAt ? "auto" : scale.CrossesAt)}{(scale.Logarithmic ? ", log" : string.Empty)}{(scale.ReverseOrder ? ", reversed" : string.Empty)}";

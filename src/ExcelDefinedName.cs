@@ -60,7 +60,7 @@ public sealed class ExcelDefinedName
 
     /// <summary>
     /// Gets or sets the macro-kind byte that follows the shortcut key: <see cref="CommandKind"/> or
-    /// <see cref="FunctionKind"/>. Excel's own files have junk in the low nibble, which Open discards.
+    /// <see cref="FunctionKind"/>. Excel's own files have bytes left over from memory in the low nibble, which Open discards.
     /// </summary>
     public byte MacroKind { get; set; }
 

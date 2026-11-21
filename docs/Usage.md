@@ -281,7 +281,7 @@ sheet.Save("Totals");
 New documents use the defaults Excel 1.03 writes for an empty sheet. The grid grows as you assign cells.
 
 Editing a file you read is safe: only the cells you touch are re-encoded, and everything the library does not
-model (unidentified fields, stale pointers, embedded code) is written back exactly as it was read. A
+model (unidentified fields, bytes left over from memory, embedded code) is written back exactly as it was read. A
 document read and saved without changes is byte-for-byte identical to the original.
 
 ## Charts
@@ -310,7 +310,7 @@ if (chart.OverlayChart is { } overlay)
 
 A chart file stores a copy of the plotted data, so the values are available without the worksheet. Numbers
 in chart files use Microsoft's 8-byte decimal format; `MicrosoftDecimal` converts them. `CategoryCount`,
-`DrawingMargins`, `ChartAreaBox`, `PlotAreaBox` and the axes' `TickLength` are the layout Excel worked out the
+`DrawingMargins`, `ChartAreaBox`, `PlotAreaBox` and the axes' `TickLength`, `TickLabelsAt` and `LineAt` are the layout Excel worked out the
 last time it drew the chart; Excel recomputes them, so a writer can leave them as they are. Chart support was
 derived from Excel's code and is checked against Microsoft's three sample charts and the charts Excel saved in
 experiments, which all read and write back byte for byte.

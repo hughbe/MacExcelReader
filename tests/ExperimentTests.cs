@@ -219,7 +219,7 @@ public class ExperimentTests
         var chart = ChartDocument.Load(SamplePath("Pie Percentages")).MainChart;
         Assert.True(chart.DefaultSeriesFormat.PointLabels);
         Assert.False(chart.DefaultSeriesFormat.SeriesLabel);
-        Assert.Equal(0x02, chart.Record[366 + 8] & 0x02);
+        Assert.True(chart.DefaultSeriesFormat.PercentLabels);
     }
 
     [Fact]
@@ -357,5 +357,21 @@ public class ExperimentTests
         var (top, left) = chart.DrawingMargins;
         Assert.InRange(document.ChartHeight - (2 * top + chart.ChartAreaBox.Height), -1, 1);
         Assert.InRange(document.ChartWidth - (2 * left + chart.ChartAreaBox.Width), -1, 1);
+    }
+
+    [Fact]
+    public void ChartLayout_ValueAxisLineIsAtThePlotAreasLeftEdge()
+    {
+        // PROFIT CHART's value axis crosses before the first category (spec §16.5).
+        var chart = ChartDocument.Load(SamplePath("PROFIT CHART")).MainChart;
+        Assert.Equal(chart.PlotAreaBox.Left, chart.ValueAxis.LineAt);
+    }
+
+    [Fact]
+    public void PointFormats_SingleSeriesChartsKeyThemByPoint()
+    {
+        // Pie format 3 pulls out the first slice: the override's series byte holds point 0 (spec §16.8).
+        var chart = ChartDocument.Load(SamplePath("Pie Exploded")).MainChart;
+        Assert.Equal(0, chart.GetPointFormat(0).SeriesNumber);
     }
 }
