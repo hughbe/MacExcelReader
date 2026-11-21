@@ -2,8 +2,8 @@
 
 Behaviour of Excel itself found while writing and testing files: crashes, silent data loss and output that
 looks wrong but isn't. Each entry says how it was found and how sure it is. The format is in the
-[specification](Spec.md); the [testing tools](../tools/minivmac/README.md) describe how files are checked in
-a real Excel under Mini vMac.
+[specification](Spec.md); [Testing in a real Excel](Testing.md) describes how files are
+checked in a real Excel under Mini vMac.
 
 Labels: **Confirmed** means reproduced in a real Excel. **Inferred** means read from the code or from one
 observation, not reproduced.
@@ -32,10 +32,15 @@ broke the margin, but it was not retested after the fix.
 
 ## Opening a large macro sheet runs out of memory (Excel 1.03)
 
-**Confirmed** in Excel 1.03 under Mini vMac. A macro sheet with all 578 coverage formulas stopped at 92% of
+**Confirmed** in Excel 1.03 under Mini vMac. A macro sheet with all 578 formulas of `tests/Data/formulas-1.0.txt` stopped at 92% of
 Open with "Out of memory". Sheets of about 100 formulas (around 13 KB) open fine. The limit depends on the
-memory given to Excel, so this is a practical limit rather than a format rule. `coverage --split` exists for
-it.
+memory given to Excel, so this is a practical limit rather than a format rule. `sheet --split` exists for it.
+
+## OPEN stops a macro to ask about links (Excel 1.03)
+
+**Confirmed.** A macro that opens a file linked to other documents, such as `CLOCK.CH`, stops at "Update
+references to non-resident sheets?" until someone answers. While the dialog is up, the macro's next commands
+can act on the wrong window. Pass 0 as OPEN's second argument (`=OPEN("Disk:File",0)`) to skip the question.
 
 ## Display quirks of GET.FORMULA (Excel 1.03)
 

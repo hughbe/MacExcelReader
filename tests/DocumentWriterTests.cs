@@ -89,7 +89,7 @@ public class DocumentWriterTests
     public void Names_CommandMacrosAndDefinitionsRoundTrip()
     {
         var document = ExcelDocument.CreateMacroSheet();
-        document.Names.Add(new ExcelDefinedName("Go", [0x2C, 0x00, 0x04, 0x01], ExcelDefinedName.CommandFlag | ExcelDefinedName.MacroFlag)
+        document.Names.Add(new ExcelDefinedName("Go", [0x2C, 0x00, 0x04, 0x01], ExcelDefinedName.CommandFlag | ExcelDefinedName.ReferenceFlag)
         {
             ShortcutKey = (byte)'g',
         });
