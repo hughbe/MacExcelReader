@@ -16,7 +16,7 @@ available.
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 25 files Excel saved in experiments, all of which a reader built from this spec reads, and a writer rebuilds byte for byte:
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 27 files Excel saved in experiments, all of which a reader built from this spec reads, and a writer rebuilds byte for byte:
 
 | Source | Files |
 |--------|-------|
@@ -24,7 +24,7 @@ Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 | Excel 1.00 program disk | `Resume Excel`, a workspace file (Appendix B) |
 | Excel 1.03 disk | `Worksheet1` (empty worksheet). The disk's other samples are byte-identical to the 1.00 disk's. |
 | Excel 1.5 sampler | 26 worksheets and macro sheets, including one version-18 file (`SIMUL EQUATIONS`), and 2 charts (`BREAK CHART`, `PROFIT CHART`) |
-| Experiments, saved by Excel itself in the test harness (docs/Testing.md) | Excel 1.03: `Recompiled`, `Intersections`, `Table`, `Table Row Input`, `Table One Argument`, `Errors`, `Memory Error`, `Recalculated`, `Column Widths`, `Calculation Manual`, `Calculation No Tables`, `Page Breaks`, `Macro Names`, `Links` (sheets); `Area Drop Lines`, `Bar Stacked`, `Combination`, `Line Log Scale`, `Pie Exploded`, `Pie Exploded All`, `Scatter` (charts). Excel 1.5: `Colour Formats`, `Gridline Colour`, `Frozen Panes`. Excel 1.00: `Resume Excel 2` (workspace). |
+| Experiments, saved by Excel itself in the test harness (docs/Testing.md) | Excel 1.03: `Recompiled`, `Intersections`, `Table`, `Table Row Input`, `Table One Argument`, `Errors`, `Memory Error`, `Recalculated`, `Column Widths`, `Calculation Manual`, `Calculation No Tables`, `Page Breaks`, `Macro Names`, `Links` (sheets); `Area Drop Lines`, `Area Labels`, `Bar Stacked`, `Combination`, `Line Log Scale`, `Pie Exploded`, `Pie Exploded All`, `Pie Percentages`, `Scatter` (charts). Excel 1.5: `Colour Formats`, `Gridline Colour`, `Frozen Panes`. Excel 1.00: `Resume Excel 2` (workspace). |
 
 Together they hold 1,282 formulas and 206 name definitions. §2.3 explains how to tell which build saved each
 file.
@@ -696,7 +696,7 @@ shared record. Array formulas occur in `MATRIX`, `SIMUL EQUATIONS` and `ACCOUNTS
 | … | Its fix-ups, as in §12.5 |
 
 *Anchor cell* of a table: the marker word and byte, then the table's 18-byte in-memory record, which Open reads
-as it is (`46.06` in 1.00) and the TABLE command builds (`4a.06` in 1.03):
+as it is (`46.06` in 1.00) and the TABLE command builds (`4b.06` in 1.00):
 
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
@@ -704,14 +704,13 @@ as it is (`46.06` in 1.00) and the TABLE command builds (`4a.06` in 1.03):
 | 2 | word | Last row |
 | 4 | byte | First column |
 | 5 | byte | Last column |
-| 6 | word | Set to 0 when the table is made; Excel acts on it when it is not 0 **(unknown)** |
-| 8 | byte | Left over from memory |
+| 6 | 3 bytes | Memory pointer linking the record into one of two lists whose heads are globals (`g28ea`, `g28ee` in 1.00), or 0 when it is in neither. The TABLE command (`4b.06` in 1.00) sets it to 0, and `1d.06` unlinks the record and clears it. What the lists are for is **(unknown)**. Junk on disk; write 0. |
 | 9 | byte | Column of the first input cell |
-| 10 | word | Bits 15–2: row of the first input cell. Bits 1–0: flags **(unknown)** |
+| 10 | word | Bits 15–2: row of the first input cell. Bits 1–0: flags, which the TABLE command clears **(unknown)** |
 | 12 | word | Left over from memory (`FF FF` in every table seen) |
 | 14 | byte | Bit 6: the first input is the row input. Bit 7: there is a second input, the column input. Without bit 6 the first input is the column input. |
 | 15 | byte | Column of the second input cell |
-| 16 | word | Bits 15–2: row of the second input cell. Bit 1: a flag **(unknown)** |
+| 16 | word | Bits 15–2: row of the second input cell. Bit 1: a flag, which the TABLE command clears **(unknown)** |
 
 `TABLE(Y7,X5)` on B2:C3 is `00 01 00 02 01 02 00 00 00 18 00 18 FF FF C0 17 00 10`. `TABLE(,X1)` on B2:B3 has X1
 as its first input with byte 14 = 0, and `TABLE(Y7,)` has Y7 as its first input with byte 14 = `40`; bytes 15–17
@@ -1293,7 +1292,7 @@ Offsets are within the on-disk record; "mem" is the offset in Excel's
 | Offset | mem | Size | Meaning |
 |-------:|----:|-----:|---------|
 | 0 | 0 | 18 | Chart header (below) |
-| 18 | — | 6 | Built for the file: two words — (0, 0) for a lone chart, (1, 0) for the overlay, (0, 2) for a main chart that has an overlay (ignored on load) — then a word whose bits 11–8 are four chart option flags (mem 18, bits 15–12). All four are set in every overlay chart (`CLOCK.CH`, and Excel 1.03's COMBINATION charts) and clear in every main chart; what they control is **(unknown)**. Its low byte is 0 from Excel 1.03 and `0x0F` in the 1.5 samples. |
+| 18 | — | 6 | Built for the file: two words — (0, 0) for a lone chart, (1, 0) for the overlay, (0, 2) for a main chart that has an overlay (ignored on load) — then a word whose bits 11–8 are four chart option flags (mem 18, bits 15–12). Excel sets all four when it makes an overlay chart, and hides the overlay's axes (axis line pattern 0) at the same time (`0f.04` in 1.00); they are clear in every main chart. Bit 9 (mem bit 13): the overlay's value axis is scaled over the data of both charts, so the overlay plots against the main chart's value axis (`37.0a`, which then works out one minimum and maximum over both charts); bit 8 (mem bit 12): the same for the X axis of a scatter overlay. Nothing in Excel 1.00 reads bits 11–10 (mem bits 15–14) **(unknown)**. Showing the overlay's axes with Chart > Axes changes their axis line patterns, not these bits. Its low byte is 0 from Excel 1.03 and `0x0F` in the 1.5 samples. |
 | 24 | 20 | 16 | **Chart area** format |
 | 40 | 36 | 24 | **Category axis** (axis record, below) |
 | 64 | 62 | 24 | **Value axis** (axis record) |
@@ -1314,7 +1313,11 @@ Offsets are within the on-disk record; "mem" is the offset in Excel's
 
 The two built-in text objects are addressed as indices −2 and −1 of the
 chart's text list and are formatted together with the axis labels by "apply
-to all"; what they display was not established.
+to all". They are the templates for data labels: a new chart makes both with
+kind 4, data label (`0f.05` in 1.00), and the label code (`33.10`) copies
+object −2 for each series whose point format has bit 11 set (one label per
+series) and object −1 for each data point of a series with bit 10 set (one
+label per point) (§16.8).
 
 **Chart header** (18 bytes):
 
@@ -1322,7 +1325,9 @@ to all"; what they display was not established.
 |-------:|---------|
 | 0 | Word of flags: bit 14 = 100%; bit 13 = stacked; bit 12 = bars (horizontal) rather than columns; bit 11 = vary colours by category; overlay chart only: bit 10 = automatic series distribution, bits 9–2 = first series in the overlay chart |
 | 2 | Word: **chart type** — 1 column or bar, 2 line, 3 pie, 4 area, 5 scatter |
-| 4 | 4 bytes: byte 4 is `0x0C` in every main chart Excel 1.00 or 1.03 saves, and 0 in overlays; bytes 6–7 are a word that follows the chart type when Excel saves: 266 for column, line, area and scatter charts, 116 for bar charts, 300 or 405 for pie charts. Their meaning is **(unknown)**. |
+| 4 | Byte: the number of categories, worked out when the chart is drawn (12 for `PROFIT CHART` once Excel has drawn it, 0 in overlays); the drawing code divides it by the categories between tick labels to place them (`37.2b` in 1.00). |
+| 5 | Byte: 12 in every main chart Excel 1.00 or 1.03 saves, 0 in overlays **(unknown)** |
+| 6 | Word that follows the chart type when Excel saves: 266 for column, line, area and scatter charts, 116 for bar charts, 300 or 405 for pie charts **(unknown)** |
 | 8 | Word: % overlap (column/bar). Negative means the "Overlapped" option is on; the magnitude is the percentage. |
 | 10 | Word: % cluster spacing (column/bar) |
 | 12 | Word: angle of the first pie slice, degrees from vertical (0–359) |
@@ -1436,7 +1441,7 @@ format at mem 318:
 | 4 | Area pattern |
 | 6 | Series number |
 | 7 | Marker |
-| 8 | Word: bit 15 = automatic marker; bit 13 set in every record seen **(unknown)**; bit 12 = automatic area; bit 11 = data labels (set by the Area and Pie gallery format 5) **(inferred)**; bits 10–9 = percentage labels (set by Pie format 6) **(inferred)** |
+| 8 | Word: bit 15 = automatic marker; bit 13 set in every record seen **(unknown)**; bit 12 = automatic area; bit 11 = a data label for the series, made from built-in text object −2; bit 10 = a data label on each data point, made from built-in text object −1 (`33.10` in 1.00; §16.5); bit 9 = labels show percentages, set with bit 10 by Pie format 6 **(inferred)** |
 | 11 | Byte: how far a pie slice is pulled out, as a percentage of the radius: 25 for the first slice of Pie format 3 (a point record), 20 for every slice of Pie format 4 (the default series format) |
 | 0, 5, 9–10 | Not identified (the point number is among them) |
 
@@ -1493,8 +1498,8 @@ derives them from the class and sub-code.
 
 What each Gallery format sets in Excel 1.03, from the line chart `PROFIT CHART` put through every format by the
 macro commands GALLERY.AREA, GALLERY.BAR, GALLERY.COLUMN, GALLERY.LINE, GALLERY.PIE, GALLERY.SCATTER and
-COMBINATION and saved (samples `Area Drop Lines`, `Bar Stacked`, `Combination`, `Line Log Scale`, `Pie Exploded`,
-`Pie Exploded All` and `Scatter`). Each also resets the axes' tick labels to "next to axis" and the scale to
+COMBINATION and saved (samples `Area Drop Lines`, `Area Labels`, `Bar Stacked`, `Combination`, `Line Log Scale`, `Pie Exploded`,
+`Pie Exploded All`, `Pie Percentages` and `Scatter`). Each also resets the axes' tick labels to "next to axis" and the scale to
 automatic.
 
 | Format | 1 | 2 | 3 | 4 | 5 | 6 |
@@ -1586,24 +1591,20 @@ None of these affects reading the samples or writing valid files.
 **Worksheets and macro sheets**
 
 * What the six bytes at the start of an external-document entry hold in memory; Excel writes zeros (§8).
-* A table record's word at offset 6 and its flag bits, and what Excel does with the P1 input a one-argument
-  TABLE stores (§12.6).
+* A table record's flag bits, what the lists its link at offset 6 joins are for, and what Excel does with the
+  P1 input a one-argument TABLE stores (§12.6).
 * Most of the 88 extra window-state bytes of version 18 (§13).
 * Which state memory token `2F` marks (§15.2).
 * What Excel 1.04 changed besides adding CHANGE.LINK; no 1.04 code or sample is available (§2.1).
 
-**Checked in Excel rather than samples**
+**Checked in Excel but not kept as samples**
 
-No sample has these; Excel itself made or compiled the examples the spec gives (docs/Testing.md):
-page breaks (§14); unions, intersections and array constants in cell formulas (§15.4); functions numbered 256
-and up; Excel 1.5's `@` and colour number formats, frozen panes and gridline colours, and the version-18 rule
-(§2.1, §7, §13).
+Functions numbered 256 and up, compiled by Excel 1.5 from `tests/Data/formulas-1.5.txt` (§15.4).
 
 **Charts** (§16)
 
-* What the four option flags in the chart record control; they are set in overlays only (§16.5).
-* The chart header's bytes 4–7 and 14–17 (§16.5).
-* What the two built-in text objects display.
+* Option flags 11–10 of the chart record, which overlays set and nothing reads (§16.5).
+* The chart header's bytes 5–7 and 14–17 (§16.5).
 * The 12-byte record trailer words.
 * The per-series word list.
 

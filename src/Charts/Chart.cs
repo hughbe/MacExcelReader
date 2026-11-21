@@ -126,6 +126,22 @@ public sealed class Chart
     /// <summary>Gets the 12-byte data-point format records.</summary>
     public List<byte[]> PointFormats { get; } = [];
 
+    /// <summary>
+    /// Gets the number of categories, which Excel works out when it draws the chart (header byte 4; 0 in overlays).
+    /// </summary>
+    public byte CategoryCount => Record[4];
+
+    /// <summary>
+    /// Gets or sets whether an overlay chart's value axis is scaled over the data of both charts, so the overlay plots
+    /// against the main chart's value axis (record offset 22, bit 9). Excel sets it when it makes an overlay.
+    /// </summary>
+    public bool SharesValueAxisScale { get => (Record[22] & 0x02) != 0; set => Record[22] = (byte)(value ? Record[22] | 0x02 : Record[22] & ~0x02); }
+
+    /// <summary>
+    /// Gets or sets the same for the X axis of a scatter overlay (record offset 22, bit 8).
+    /// </summary>
+    public bool SharesXAxisScale { get => (Record[22] & 0x01) != 0; set => Record[22] = (byte)(value ? Record[22] | 0x01 : Record[22] & ~0x01); }
+
     /// <summary>Gets the chart's default series format (the point-format record at offset 366).</summary>
     public ChartPointFormat DefaultSeriesFormat => new(Record, 366);
 
@@ -356,6 +372,12 @@ public sealed class ChartPointFormat
 
     /// <summary>Gets or sets whether the area is automatic.</summary>
     public bool AutomaticArea { get => (GetWord(8) & 0x1000) != 0; set => SetBit(8, 12, value); }
+
+    /// <summary>Gets or sets whether the series has a data label, made from built-in text object −2.</summary>
+    public bool SeriesLabel { get => (GetWord(8) & 0x0800) != 0; set => SetBit(8, 11, value); }
+
+    /// <summary>Gets or sets whether each data point has a data label, made from built-in text object −1.</summary>
+    public bool PointLabels { get => (GetWord(8) & 0x0400) != 0; set => SetBit(8, 10, value); }
 
     /// <summary>Gets or sets how far a pie slice is pulled out, as a percentage of the radius.</summary>
     public byte Explosion { get => _data[_offset + 11]; set => _data[_offset + 11] = value; }

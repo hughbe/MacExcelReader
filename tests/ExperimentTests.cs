@@ -193,6 +193,36 @@ public class ExperimentTests
     }
 
     [Fact]
+    public void Combination_OverlaySharesTheMainChartsScale()
+    {
+        var document = ChartDocument.Load(SamplePath("Combination"));
+        Assert.True(document.OverlayChart!.SharesValueAxisScale);
+        Assert.True(document.OverlayChart.SharesXAxisScale);
+        Assert.False(document.MainChart.SharesValueAxisScale);
+        Assert.Equal(0, document.OverlayChart.CategoryCount);
+        Assert.Equal(12, document.MainChart.CategoryCount);   // PROFIT CHART's 12 revenue figures
+    }
+
+    [Fact]
+    public void AreaLabels_LabelEachSeries()
+    {
+        // GALLERY.AREA(5): one data label per series, from built-in text object -2 (spec §16.8).
+        var format = ChartDocument.Load(SamplePath("Area Labels")).MainChart.DefaultSeriesFormat;
+        Assert.True(format.SeriesLabel);
+        Assert.False(format.PointLabels);
+    }
+
+    [Fact]
+    public void PiePercentages_LabelEachPoint()
+    {
+        // GALLERY.PIE(6): a label on every slice, from built-in text object -1, with bit 9 (percentages) too.
+        var chart = ChartDocument.Load(SamplePath("Pie Percentages")).MainChart;
+        Assert.True(chart.DefaultSeriesFormat.PointLabels);
+        Assert.False(chart.DefaultSeriesFormat.SeriesLabel);
+        Assert.Equal(0x02, chart.Record[366 + 8] & 0x02);
+    }
+
+    [Fact]
     public void LineLogScale_SetsTheLogarithmicFlag()
     {
         // GALLERY.LINE(6).
