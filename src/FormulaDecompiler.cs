@@ -16,38 +16,11 @@ public static class FormulaDecompiler
     /// <param name="fixupWords">Name and external-document indices in token order (cell formulas).</param>
     /// <param name="document">The document used to resolve names and external documents; may be null.</param>
     /// <param name="fixupsInPlace">True for name definitions, whose indices are stored inside the tokens.</param>
-    public static string Decompile(byte[] expression, IReadOnlyList<ushort> fixupWords, ExcelDocument? document, bool fixupsInPlace)
+    public static string Decompile(ReadOnlySpan<byte> expression, IReadOnlyList<ushort> fixupWords, ExcelDocument? document, bool fixupsInPlace)
     {
-        ArgumentNullException.ThrowIfNull(expression);
         var stack = new Stack<string>();
         int fixupIndex = 0;
         string? externalPrefix = null;
-
-        ushort NextFixup(byte[] e, FormulaToken t)
-        {
-            if (fixupsInPlace)
-            {
-                return t.Code == FormulaTokens.ExternalSheet
-                    ? e[t.Offset + 7]
-                    : BinaryPrimitives.ReadUInt16BigEndian(e.AsSpan(t.Offset + 1));
-            }
-
-            return fixupIndex < fixupWords.Count ? fixupWords[fixupIndex++] : (ushort)0;
-        }
-
-        string Pop() => stack.Count > 0 ? stack.Pop() : "?";
-
-        string WithPrefix(string operand)
-        {
-            if (externalPrefix is null)
-            {
-                return operand;
-            }
-
-            var result = externalPrefix + operand;
-            externalPrefix = null;
-            return result;
-        }
 
         foreach (var token in FormulaTokens.Enumerate(expression))
         {
@@ -60,31 +33,30 @@ public static class FormulaDecompiler
                     break;
                 case >= 0x03 and <= 0x11:
                 {
-                    string right = Pop();
-                    string left = Pop();
-                    stack.Push(left + BinaryOperator(token.Code) + right);
+                    string right = Pop(stack);
+                    string left = Pop(stack);
+                    stack.Push(string.Concat(left, BinaryOperator(token.Code), right));
                     break;
                 }
 
                 case 0x12:
-                    stack.Push("+" + Pop());
+                    stack.Push("+" + Pop(stack));
                     break;
                 case 0x13:
-                    stack.Push("-" + Pop());
+                    stack.Push("-" + Pop(stack));
                     break;
                 case 0x14:
-                    stack.Push(Pop() + "%");
+                    stack.Push(Pop(stack) + "%");
                     break;
                 case 0x15:
-                    stack.Push("(" + Pop() + ")");
+                    stack.Push("(" + Pop(stack) + ")");
                     break;
                 case 0x16:
                     stack.Push(string.Empty);
                     break;
                 case 0x17:
                 {
-                    int length = expression[p];
-                    var text = MacRoman.GetString(expression.AsSpan(p + 1, length));
+                    var text = MacRoman.GetString(expression.Slice(p + 1, expression[p]));
                     stack.Push("\"" + text.Replace("\"", "\"\"") + "\"");
                     break;
                 }
@@ -92,13 +64,13 @@ public static class FormulaDecompiler
                 case 0x19:
                     if ((expression[p] & 0x10) != 0)
                     {
-                        stack.Push("SUM(" + Pop() + ")");
+                        stack.Push("SUM(" + Pop(stack) + ")");
                     }
 
                     break;
                 case 0x1A:
                 {
-                    ushort index = NextFixup(expression, token);
+                    ushort index = NextFixup(expression, token, fixupWords, fixupsInPlace, ref fixupIndex);
                     externalPrefix = ExternalDocumentName(document, index) + "!";
                     break;
                 }
@@ -112,10 +84,10 @@ public static class FormulaDecompiler
                     stack.Push(expression[p] != 0 ? "TRUE" : "FALSE");
                     break;
                 case 0x1E:
-                    stack.Push(BinaryPrimitives.ReadUInt16BigEndian(expression.AsSpan(p)).ToString(CultureInfo.InvariantCulture));
+                    stack.Push(BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p)).ToString(CultureInfo.InvariantCulture));
                     break;
                 case 0x1F:
-                    stack.Push(BinaryPrimitives.ReadDoubleBigEndian(expression.AsSpan(p)).ToString("R", CultureInfo.InvariantCulture));
+                    stack.Push(BinaryPrimitives.ReadDoubleBigEndian(expression.Slice(p)).ToString("R", CultureInfo.InvariantCulture));
                     break;
                 case 0x20:
                     stack.Push("{array}");
@@ -137,8 +109,8 @@ public static class FormulaDecompiler
                 case 0x23:
                 case 0x30:
                 {
-                    ushort index = NextFixup(expression, token);
-                    stack.Push(WithPrefix(NameText(document, index)));
+                    ushort index = NextFixup(expression, token, fixupWords, fixupsInPlace, ref fixupIndex);
+                    stack.Push(WithPrefix(ref externalPrefix, NameText(document, index)));
                     break;
                 }
 
@@ -146,21 +118,21 @@ public static class FormulaDecompiler
                 case 0x2C:
                 case 0x31:
                 case 0x37:
-                    stack.Push(WithPrefix(CellText(BinaryPrimitives.ReadUInt16BigEndian(expression.AsSpan(p)), expression[p + 2])));
+                    stack.Push(WithPrefix(ref externalPrefix, CellText(BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p)), expression[p + 2])));
                     break;
                 case 0x25:
                 case 0x2D:
                 case 0x32:
                 {
-                    ushort row1 = BinaryPrimitives.ReadUInt16BigEndian(expression.AsSpan(p));
-                    ushort row2 = BinaryPrimitives.ReadUInt16BigEndian(expression.AsSpan(p + 2));
-                    stack.Push(WithPrefix(CellText(row1, expression[p + 4]) + ":" + CellText(row2, expression[p + 5])));
+                    ushort row1 = BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p));
+                    ushort row2 = BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p + 2));
+                    stack.Push(WithPrefix(ref externalPrefix, CellText(row1, expression[p + 4]) + ":" + CellText(row2, expression[p + 5])));
                     break;
                 }
 
                 case 0x2A:
                 case 0x2B:
-                    stack.Push(WithPrefix("#REF!"));
+                    stack.Push(WithPrefix(ref externalPrefix, "#REF!"));
                     break;
                 default:
                     // Memory tokens (0x26–0x29, 0x2E, 0x2F, 0x33–0x36) carry no text of their own.
@@ -174,6 +146,32 @@ public static class FormulaDecompiler
             1 => stack.Pop(),
             _ => string.Join(" ", stack.Reverse()),
         };
+    }
+
+    private static string Pop(Stack<string> stack) => stack.Count > 0 ? stack.Pop() : "?";
+
+    private static string WithPrefix(ref string? externalPrefix, string operand)
+    {
+        if (externalPrefix is null)
+        {
+            return operand;
+        }
+
+        var result = externalPrefix + operand;
+        externalPrefix = null;
+        return result;
+    }
+
+    private static ushort NextFixup(ReadOnlySpan<byte> expression, FormulaToken token, IReadOnlyList<ushort> fixupWords, bool fixupsInPlace, ref int fixupIndex)
+    {
+        if (fixupsInPlace)
+        {
+            return token.Code == FormulaTokens.ExternalSheet
+                ? expression[token.Offset + 7]
+                : BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(token.Offset + 1));
+        }
+
+        return fixupIndex < fixupWords.Count ? fixupWords[fixupIndex++] : (ushort)0;
     }
 
     private static string CallText(Stack<string> stack, ExcelFunction? function, int number, int argumentCount)

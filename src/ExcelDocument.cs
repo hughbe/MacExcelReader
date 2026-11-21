@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using MacExcelReader.Internal;
 
 namespace MacExcelReader;
@@ -22,6 +23,8 @@ public sealed class ExcelDocument
 
     /// <summary>The code signature of Excel 1.03.</summary>
     public const ushort Excel103Signature = 0xAB27;
+
+    private int _sourceLength;
 
     private ExcelDocument(ExcelSheetState state)
     {
@@ -121,7 +124,7 @@ public sealed class ExcelDocument
     /// <summary>
     /// Reads a document from a file.
     /// </summary>
-    public static ExcelDocument Load(string path) => Read(File.ReadAllBytes(path));
+    public static ExcelDocument Load(string path) => ReadOwned(File.ReadAllBytes(path));
 
     /// <summary>
     /// Reads a document from a stream.
@@ -129,17 +132,56 @@ public sealed class ExcelDocument
     public static ExcelDocument Read(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        using var buffer = new MemoryStream();
-        stream.CopyTo(buffer);
-        return Read(buffer.ToArray());
+        if (stream.CanSeek)
+        {
+            var buffer = new byte[stream.Length - stream.Position];
+            stream.ReadExactly(buffer);
+            return ReadOwned(buffer);
+        }
+
+        using var copy = new MemoryStream();
+        stream.CopyTo(copy);
+        return ReadOwned(copy.ToArray());
     }
 
     /// <summary>
-    /// Reads a document from its bytes (the data fork of the Macintosh file).
+    /// Reads a document from its bytes (the data fork of the Macintosh file). The bytes are copied, so
+    /// the caller may reuse the array.
     /// </summary>
-    public static ExcelDocument Read(byte[] data)
+    /// <remarks>
+    /// Text and formula cells are decoded on first access, so a malformed record surfaces as an
+    /// <see cref="ExcelFormatException"/> from the cell rather than from this method.
+    /// </remarks>
+    public static ExcelDocument Read(byte[] data) => Read(data, copyData: true);
+
+    /// <summary>
+    /// Reads a document from its bytes, optionally without copying them.
+    /// </summary>
+    /// <param name="data">The file's data fork.</param>
+    /// <param name="copyData">
+    /// True to copy the bytes first. Pass false to avoid the copy when the caller hands the array over:
+    /// the document reads cells from it lazily, so it must not be modified afterwards.
+    /// </param>
+    public static ExcelDocument Read(byte[] data, bool copyData)
     {
         ArgumentNullException.ThrowIfNull(data);
+        return ReadOwned(copyData ? data.AsSpan().ToArray() : data);
+    }
+
+    /// <summary>
+    /// Reads a document from bytes. The bytes are copied.
+    /// </summary>
+    public static ExcelDocument Read(ReadOnlySpan<byte> data) => ReadOwned(data.ToArray());
+
+    private static ExcelDocument ReadOwned(byte[] data)
+    {
+        var document = ReadHeader(data);
+        document._sourceLength = data.Length;
+        return document;
+    }
+
+    private static ExcelDocument ReadHeader(byte[] data)
+    {
         var reader = new BigEndianReader(data);
         if (data.Length < 24 || reader.ReadUInt16() != Magic)
         {
@@ -199,7 +241,7 @@ public sealed class ExcelDocument
 
         document.ReadNumberFormats(new BigEndianReader(data, sections[0]));
         document.ReadExternalDocuments(new BigEndianReader(data, sections[1]), rows);
-        document.ReadCells(data, sections[2], sections[5], rows, columns);
+        document.Cells.AttachSource(data, sections[2], sections[5], rows, columns);
         if (sections[3] < sections[4])
         {
             var namesReader = new BigEndianReader(data, sections[3]);
@@ -250,39 +292,6 @@ public sealed class ExcelDocument
         {
             RowIndex.Add(reader.ReadUInt16());
         }
-    }
-
-    private void ReadCells(byte[] data, int tableStart, int cellDataStart, int rows, int columns)
-    {
-        var table = new BigEndianReader(data, tableStart);
-        Cells.Load(rows, columns, (row, column) =>
-        {
-            var cell = new ExcelCell(table.ReadUInt16(), table.ReadUInt16(), table.ReadUInt16());
-            int offset = (cell.Word0 << 4) + (cell.Word1 >> 12);
-            switch (cell.Type)
-            {
-                case ExcelCellType.Number:
-                    cell.LoadNumber(new BigEndianReader(data, cellDataStart + offset).ReadDouble());
-                    break;
-                case ExcelCellType.Text:
-                    cell.LoadText(new BigEndianReader(data, cellDataStart + offset).ReadPascalString());
-                    break;
-                case ExcelCellType.NumericFormula:
-                case ExcelCellType.Formula:
-                    try
-                    {
-                        cell.LoadFormula(ExcelFormula.Read(new BigEndianReader(data, cellDataStart + offset)));
-                    }
-                    catch (ExcelFormatException ex)
-                    {
-                        throw new ExcelFormatException($"Invalid formula in row {row + 1}, column {column + 1}: {ex.Message}", ex);
-                    }
-
-                    break;
-            }
-
-            return cell;
-        });
     }
 
     private void ReadNames(BigEndianReader reader)
@@ -374,7 +383,7 @@ public sealed class ExcelDocument
             RowIndex.Add(0);
         }
 
-        var writer = new BigEndianWriter();
+        var writer = new BigEndianWriter(Math.Max(4096, _sourceLength + 1024));
         writer.WriteUInt16(Magic);
         writer.WriteUInt16(FormatVersion);
         writer.WriteUInt16(Signature);
@@ -402,31 +411,6 @@ public sealed class ExcelDocument
         writer.WriteZeros(32);
         writer.WriteUInt16((ushort)ExtraHeader.Length);
         writer.WriteBytes(ExtraHeader);
-
-        // Cell data is built first so the cell table can point into it.
-        var cellData = new BigEndianWriter();
-        var offsets = new int[rows * columns];
-        for (int r = 0, k = 0; r < rows; r++)
-        {
-            for (int c = 0; c < columns; c++, k++)
-            {
-                var cell = Cells.TryGet(r, c)!;
-                offsets[k] = cellData.Position;
-                switch (cell.Type)
-                {
-                    case ExcelCellType.Number:
-                        cellData.WriteDouble(cell.NumberValue);
-                        break;
-                    case ExcelCellType.Text:
-                        cellData.WritePascalString(cell.TextValue);
-                        break;
-                    case ExcelCellType.NumericFormula:
-                    case ExcelCellType.Formula:
-                        cell.Formula!.Write(cellData, r, c);
-                        break;
-                }
-            }
-        }
 
         var sections = new int[8];
 
@@ -463,28 +447,11 @@ public sealed class ExcelDocument
             writer.WriteUInt16(RowIndex[r]);
         }
 
-        // Section 2: cell table.
+        // Section 2: cell table. It is reserved here and filled in as the cell data is written.
         sections[2] = writer.Position;
-        for (int r = 0, k = 0; r < rows; r++)
-        {
-            for (int c = 0; c < columns; c++, k++)
-            {
-                var cell = Cells.TryGet(r, c)!;
-                ushort word0 = cell.Word0;
-                ushort word1 = cell.Word1;
-                if (cell.Type is ExcelCellType.Number or ExcelCellType.Text or ExcelCellType.NumericFormula or ExcelCellType.Formula)
-                {
-                    word0 = checked((ushort)(offsets[k] >> 4));
-                    word1 = (ushort)((word1 & 0x0FFF) | ((offsets[k] & 0xF) << 12));
-                }
+        int tableStart = writer.Position;
+        writer.WriteZeros(rows * columns * 6);
 
-                writer.WriteUInt16(word0);
-                writer.WriteUInt16(word1);
-                writer.WriteUInt16(cell.Word2);
-            }
-        }
-
-        // Section 3: external names.
         // Excel writes the list (with its terminator) only when there are external documents; a table
         // with no entries has an empty section 3.
         sections[3] = writer.Position;
@@ -507,9 +474,9 @@ public sealed class ExcelDocument
 
         writer.WriteByte(0);
 
-        // Section 5: cell data.
+        // Section 5: cell data. Cells that were never accessed are copied byte for byte.
         sections[5] = writer.Position;
-        writer.WriteBytes(cellData.ToArray());
+        WriteCells(writer, tableStart, rows, columns);
 
         // Section 6: windows.
         sections[6] = writer.Position;
@@ -543,6 +510,58 @@ public sealed class ExcelDocument
         }
 
         return writer.ToArray();
+    }
+
+    private void WriteCells(BigEndianWriter writer, int tableStart, int rows, int columns)
+    {
+        int dataStart = writer.Position;
+        int entry = tableStart;
+        for (int r = 0; r < rows; r++)
+        {
+            for (int c = 0; c < columns; c++, entry += 6)
+            {
+                int offset = writer.Position - dataStart;
+                if (!Cells.TryGetRawCell(r, c, out ushort word0, out ushort word1, out ushort word2, out var raw))
+                {
+                    var cell = Cells.TryGet(r, c)!;
+                    word0 = cell.Word0;
+                    word1 = cell.Word1;
+                    word2 = cell.Word2;
+                    switch (cell.Type)
+                    {
+                        case ExcelCellType.Number:
+                            writer.WriteDouble(cell.NumberValue);
+                            break;
+                        case ExcelCellType.Text:
+                            writer.WritePascalString(cell.TextValue);
+                            break;
+                        case ExcelCellType.NumericFormula:
+                        case ExcelCellType.Formula:
+                            cell.Formula!.Write(writer, r, c);
+                            break;
+                    }
+                }
+                else
+                {
+                    writer.WriteBytes(raw);
+                }
+
+                if (ExcelCellGrid.HasCellData((ExcelCellType)((word1 >> 9) & 7)))
+                {
+                    if (offset > 0xFFFFF)
+                    {
+                        throw new InvalidOperationException("The cell data is larger than the 1 MB the cell table can address.");
+                    }
+
+                    word0 = (ushort)(offset >> 4);
+                    word1 = (ushort)((word1 & 0x0FFF) | ((offset & 0xF) << 12));
+                }
+
+                writer.PatchUInt16(entry, word0);
+                writer.PatchUInt16(entry + 2, word1);
+                writer.PatchUInt16(entry + 4, word2);
+            }
+        }
     }
 
     private static void WriteChunks<T>(BigEndianWriter writer, List<T> values, Action<BigEndianWriter, T> write)

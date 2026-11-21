@@ -1,24 +1,31 @@
 # MacExcelReader
 
-MacExcelReader is a .NET library for reading and writing Microsoft Excel 1.x for Macintosh documents: worksheets (Finder type `XLBN`), macro sheets (`XLPG`) and charts (`MCBN`). The format is documented in [docs/Spec.md](docs/Spec.md), which was reverse-engineered from Excel 1.03.
+MacExcelReader is a fast, allocation-conscious .NET library for reading and writing Microsoft Excel 1.x for Macintosh documents: worksheets (Finder type `XLBN`), macro sheets (`XLPG`) and charts (`MCBN`).
+
+The file format was reverse-engineered from Excel 1.03 and is documented in [docs/Spec.md](docs/Spec.md). The full API is described in the [usage guide](docs/Usage.md).
 
 ---
 
 ## Features
 
-- Read and write worksheets and macro sheets, byte-for-byte: every sample document from the Excel 1.03 disk round-trips unchanged.
-- Cell values (integers, numbers, text), formulas with their current values, number formats, alignment, bold/italic, borders and protection flags.
-- Decompile formulas and name definitions to A1-style text (`=IF(NOT(B19),RETURN())`), including macro commands and calls to user-defined macros.
-- Calculation settings, column widths, standard font, document protection and the protection password hash.
-- Defined names (including command-macro shortcut keys), external documents and names, windows and selections, page breaks and Page Setup.
-- Create new worksheets and macro sheets with the defaults Excel 1.03 writes.
-- Read and write chart files: chart type and options, axis scales, legend, text objects, and the series data (including Microsoft's 8-byte decimal number format).
+- **Exact round-trips.** Every sample document from the Excel 1.03 disk reads and writes back byte for byte. Fields the library does not model are preserved untouched.
+- **Cells.** Integers, numbers, text and formulas with their current values, plus number formats, alignment, bold and italic, borders, and protection flags.
+- **Formulas.** Decompiled to A1-style text (`=IF(NOT(FORMULA.FIND(B19,1,2,1)),RETURN())`), including macro commands and calls to user-defined macros. Allocation-free token walking.
+- **Display formatting.** All 19 built-in number formats, with dates in the 1904 date system.
+- **Everything else in the file.** Calculation settings, column widths, fonts, protection and the password hash, defined names and command-macro shortcuts, external documents, windows and selections, page breaks and Page Setup.
+- **Writing.** Create new worksheets and macro sheets with Excel 1.03's defaults, or edit existing ones; only the cells you touch are re-encoded.
+- **Charts.** Chart type and options, axes and scales, legend, titles and data labels, and the series data. Numbers use Microsoft's 8-byte decimal format.
+- **Robust.** Malformed input only ever raises `ExcelFormatException`. This is checked by fuzzing the samples with hundreds of thousands of random corruptions.
 
 ---
 
-## Usage
+## Quick start
 
-### Reading a worksheet
+```sh
+dotnet add reference path/to/MacExcelReader/src/MacExcelReader.csproj
+```
+
+### Read
 
 ```csharp
 using MacExcelReader;
@@ -27,36 +34,41 @@ var document = ExcelDocument.Load("Expenses");   // the file's data fork
 
 foreach (var (row, column, cell) in document.Cells.NonEmptyCells)
 {
-    string address = FormulaDecompiler.ColumnName(column) + (row + 1);
-    Console.WriteLine($"{address}: {cell.Value}  {cell.Formula?.ToText(document)}");
+    var address = new ExcelCellAddress(row, column);
+    Console.WriteLine($"{address}: {ExcelValueFormatter.FormatCell(cell)}  {cell.Formula?.ToText(document)}");
 }
 
-foreach (var name in document.Names)
-{
-    Console.WriteLine($"{name.Name} = {name.GetDefinitionText(document)}");
-}
+Console.WriteLine(document.Cells["C11"].Value);   // 1000
 ```
 
-### Writing a worksheet
+### Scan a large sheet without allocating
 
 ```csharp
-var document = ExcelDocument.CreateWorksheet();
-document.Cells[0, 0].SetText("Total");
-document.Cells[1, 0].SetValue(42);
-document.Cells[2, 0].SetValue(3.25);
-document.Cells[2, 0].Bold = true;
-
-// =A2*2, as parsed-expression tokens (spec §9): reference A2 (relative), integer 2, multiply.
-var formula = new ExcelFormula([0x44, 0xC0, 0x01, 0x00, 0x1E, 0x00, 0x02, 0x05]);
-formula.SetResult(84);
-document.Cells[3, 0].SetFormula(formula);
-
-document.Save("Worksheet");
+double total = 0;
+foreach (var cell in document.Cells.EnumerateNonEmpty())
+{
+    if (cell.TryGetNumber(out double value))
+    {
+        total += value;
+    }
+}
 ```
 
-The library writes only the data fork. To open the file in Excel, give it Finder type `XLBN` (or `XLPG` for a macro sheet, see `ExcelDocument.FinderType`) and creator `XCEL`.
+### Write
 
-Formulas are written as parsed expressions; the library does not include a formula parser. Excel recalculates on open, so stored results only matter for display before recalculation.
+```csharp
+var sheet = ExcelDocument.CreateWorksheet();
+sheet.Cells["A1"].SetText("Total");
+sheet.Cells["A2"].SetValue(42);
+sheet.Cells["A2"].Bold = true;
+
+// =A2*2, built from parsed-expression tokens (see the usage guide).
+var formula = new ExcelFormula([0x44, 0xC0, 0x01, 0x00, 0x1E, 0x00, 0x02, 0x05]);
+formula.SetResult(84);
+sheet.Cells["A3"].SetFormula(formula);
+
+sheet.Save("Totals");   // set Finder type sheet.FinderType ("XLBN") and creator "XCEL"
+```
 
 ### Charts
 
@@ -64,34 +76,77 @@ Formulas are written as parsed expressions; the library does not include a formu
 using MacExcelReader.Charts;
 
 var chart = ChartDocument.Load("Chart1");
-Console.WriteLine(chart.MainChart.Type);
+Console.WriteLine($"{chart.MainChart.Type}, legend {chart.MainChart.LegendPosition}");
 foreach (var series in chart.Series)
 {
     Console.WriteLine($"{series.Name}: {string.Join(", ", series.SecondValues)}");
 }
 ```
 
-Chart support is derived from Excel's chart reader and writer code; no real chart file was available to test against.
+---
+
+## Performance
+
+Reading is lazy:
+- `Read` builds no cell objects; the grid is attached to the file's cell table.
+- A cell is created when first accessed, and its text or formula is decoded when first read.
+- Saving copies untouched cells byte for byte.
+
+Measured with BenchmarkDotNet (`benchmarks/`) on an Apple Silicon Mac with .NET 9. "Large" is a generated 2,000 × 20 sheet: 40,000 cells mixing integers, numbers, text and formulas.
+
+| Operation | Time | Allocated |
+|-----------|-----:|----------:|
+| Read Expenses (15 KB, 988 cells) | 3.1 µs | 23 KB |
+| Read DB.FORM (24 KB, 433 cells, 275 formulas) | 3.9 µs | 35 KB |
+| Read large sheet | 77 µs | 841 KB |
+| Read large sheet, `copyData: false` | 10 µs | 26 KB |
+| Read large sheet and sum every number with `EnumerateNonEmpty` | 145 µs | 26 KB |
+| Read large sheet and sum every number via `NonEmptyCells` | 759 µs | 2.7 MB |
+| Read large sheet and box every value via `Value` | 2.8 ms | 4.9 MB |
+| Read and re-save Expenses unchanged | 11 µs | 54 KB |
+| Read and re-save the large sheet unchanged | 705 µs | 2.4 MB |
+| Read DB.FORM and decompile all 275 formulas | 46 µs | 206 KB |
+
+The 841 KB when reading the large sheet is the copy of the input; pass `copyData: false` to avoid it.
+
+Before the lazy design, reading Expenses took 36 µs (192 KB) and the large sheet 3.4 ms (7.6 MB).
+
+Run them yourself:
+
+```sh
+dotnet run -c Release --project benchmarks -- --filter '*'
+```
 
 ---
 
 ## Dumper
 
-The `dumper` project is a command-line tool for inspecting files:
+`dumper` is a command-line tool for inspecting files. It accepts worksheets, macro sheets and charts.
+
+| Command | What it shows |
+|---------|---------------|
+| `info <file>` | A summary: kind, size, cell counts, names, protection |
+| `cells <file> [-r A1:D20] [--all]` | Every non-empty cell with its displayed value, format, style and formula |
+| `cell <file> <address>` | Everything about one cell: value, date, formats, flags, formula, result, raw bytes and a token-by-token breakdown |
+| `names <file>` | Defined names, command shortcuts and definitions |
+| `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
+| `json <file> [-o out.json] [--empty]` | The whole document as JSON |
+| `dump <file>` | Everything: header, settings, column widths, external references, names, windows, page breaks, print setup and cells |
+| `layout <file>` | Where each part of the file lies: header, code segments, state block and all eight sections |
+| `chart <file>` | A chart file: charts, axes, scales, text objects and series data |
 
 ```sh
-dotnet run --project dumper -- info tests/Samples/REPLACE.xlm
-dotnet run --project dumper -- cells tests/Samples/Expenses.xls
-dotnet run --project dumper -- chart Chart1
+dotnet run --project dumper -- cell tests/Samples/REPLACE.xlm B27
+dotnet run --project dumper -- export tests/Samples/Expenses.xls -r A10:D20
 ```
 
 ---
 
 ## Limitations
 
-- New documents carry no embedded p-code segments. Those are only used when a different build of Excel links to the document while it is closed.
-- Fields the spec marks as not identified are preserved as raw bytes rather than exposed.
-- Array formulas, tables, array constants, user number formats, page breaks, Page Setup and charts are implemented from the spec alone; none of the sample files contain them.
+- New documents carry no embedded p-code segments. They are only used when a different build of Excel links to the document while it is closed.
+- There is no formula parser; new formulas are built from tokens.
+- Array formulas, tables, array constants, user number formats, page breaks, Page Setup and charts are implemented from the spec alone, because none of the sample files contain them.
 
 ---
 

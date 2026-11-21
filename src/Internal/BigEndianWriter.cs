@@ -7,7 +7,12 @@ namespace MacExcelReader.Internal;
 /// </summary>
 internal sealed class BigEndianWriter
 {
-    private byte[] _buffer = new byte[4096];
+    private byte[] _buffer;
+
+    public BigEndianWriter(int capacity = 4096)
+    {
+        _buffer = new byte[Math.Max(16, capacity)];
+    }
 
     public int Position { get; private set; }
 

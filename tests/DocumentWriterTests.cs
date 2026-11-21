@@ -1,0 +1,241 @@
+using static MacExcelReader.Tests.TestData;
+
+namespace MacExcelReader.Tests;
+
+public class DocumentWriterTests
+{
+    [Fact]
+    public void CreateWorksheet_HasExcelDefaults()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        Assert.Equal(ExcelDocumentKind.Worksheet, document.Kind);
+        Assert.Equal("XLBN", document.FinderType);
+        Assert.Equal(208, document.FunctionCount);
+        Assert.Equal(19, document.BuiltInFormatCount);
+        Assert.Equal(5, document.Names.Count);
+        Assert.Single(document.Windows);
+        Assert.False(document.Windows[0].DisplayFormulas);
+        Assert.Equal(2, document.CodeSegments.Count);
+
+        var reread = RoundTrip(document);
+        Assert.Equal(0, reread.Cells.RowCount);
+        Assert.Equal(document.ToArray(), reread.ToArray());
+    }
+
+    [Fact]
+    public void CreateMacroSheet_DisplaysFormulas()
+    {
+        var document = ExcelDocument.CreateMacroSheet();
+        Assert.Equal("XLPG", document.FinderType);
+        Assert.True(RoundTrip(document).Windows[0].DisplayFormulas);
+    }
+
+    [Fact]
+    public void Cells_AllTypesAndAttributesRoundTrip()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.Cells["A1"].SetInteger(-5);
+        document.Cells["B1"].SetNumber(Math.PI);
+        document.Cells["C1"].SetText("Café ™");
+        var cell = document.Cells["D1"];
+        cell.SetNumber(29220);
+        cell.NumberFormat = 10;
+        cell.Alignment = ExcelAlignment.Center;
+        cell.Italic = true;
+        cell.TopBorder = true;
+        cell.IsHidden = true;
+        document.Cells["E2"].Bold = true;
+
+        var reread = RoundTrip(document);
+
+        Assert.Equal(-5, reread.Cells["A1"].IntegerValue);
+        Assert.Equal(Math.PI, reread.Cells["B1"].NumberValue);
+        Assert.Equal("Café ™", reread.Cells["C1"].TextValue);
+        var d1 = reread.Cells["D1"];
+        Assert.Equal(10, d1.NumberFormat);
+        Assert.Equal(ExcelAlignment.Center, d1.Alignment);
+        Assert.True(d1.Italic && d1.TopBorder && d1.IsHidden);
+        Assert.False(reread.Cells["E2"].HasValue);
+        Assert.True(reread.Cells["E2"].Bold);
+        Assert.Equal(2, reread.Cells.RowCount);
+        Assert.Equal(5, reread.Cells.ColumnCount);
+    }
+
+    [Fact]
+    public void Formulas_AllResultKindsRoundTrip()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        var text = new ExcelFormula([0x17, 2, (byte)'h', (byte)'i']);
+        text.SetResult("hi");
+        document.Cells["A1"].SetFormula(text);
+        var logical = new ExcelFormula([0x1D, 1]);
+        logical.SetResult(true);
+        document.Cells["A2"].SetFormula(logical);
+        var error = new ExcelFormula([0x1C, 42]);
+        error.SetErrorResult(42);
+        document.Cells["A3"].SetFormula(error);
+
+        var reread = RoundTrip(document);
+
+        Assert.Equal("hi", reread.Cells["A1"].Value);
+        Assert.Equal("=\"hi\"", reread.Cells["A1"].Formula!.ToText());
+        Assert.Equal(true, reread.Cells["A2"].Value);
+        Assert.Equal("#N/A", reread.Cells["A3"].Value);
+        Assert.Equal(0, reread.Cells["A3"].Formula!.StoredColumn);
+        Assert.Equal(2, reread.Cells["A3"].Formula!.StoredRowWord & 0x3FFF);
+    }
+
+    [Fact]
+    public void Names_CommandMacrosAndDefinitionsRoundTrip()
+    {
+        var document = ExcelDocument.CreateMacroSheet();
+        document.Names.Add(new ExcelDefinedName("Go", [0x2C, 0x00, 0x04, 0x01], ExcelDefinedName.CommandFlag | ExcelDefinedName.MacroFlag)
+        {
+            ShortcutKey = (byte)'g',
+        });
+
+        var reread = RoundTrip(document);
+        var name = reread.Names.Single(n => n.Name == "Go");
+        Assert.True(name.IsCommand);
+        Assert.Equal((byte)'g', name.ShortcutKey);
+        Assert.Equal("$B$5", name.GetDefinitionText(reread));
+    }
+
+    [Fact]
+    public void ExternalDocuments_RoundTrip()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.ExternalDocuments.Add(new ExcelExternalDocument("Budget"));
+        document.ExternalNames.Add("Total");
+
+        var reread = RoundTrip(document);
+        Assert.True(reread.HasExternalDocumentTable);
+        Assert.Equal("Budget", Assert.Single(reread.ExternalDocuments).Name);
+        Assert.Equal(["Total"], reread.ExternalNames);
+    }
+
+    [Fact]
+    public void PageBreaksAndPrintSetup_RoundTrip()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.RowPageBreaks.AddRange([10, 20, 30, 40, 50, 60, 70]);
+        document.ColumnPageBreaks.AddRange([3, 6]);
+        var print = new ExcelPrintSetup(new byte[ExcelPrintSetup.RecordSize])
+        {
+            Header = "&f",
+            Footer = "Page &p",
+            PrintHeadings = true,
+            PrintGridlines = true,
+            TtyPrintWidth = 80,
+        };
+        print.SetMargin(0, 0.75);
+        print.SetMargin(3, 1.25);
+        document.PrintSetup = print;
+
+        var bytes = document.ToArray();
+        var reread = ExcelDocument.Read(bytes);
+
+        Assert.Equal([10, 20, 30, 40, 50, 60, 70], reread.RowPageBreaks);
+        Assert.Equal([3, 6], reread.ColumnPageBreaks);
+        var setup = reread.PrintSetup!;
+        Assert.Equal("&f", setup.Header);
+        Assert.Equal("Page &p", setup.Footer);
+        Assert.Null(setup.PrinterMessage);
+        Assert.True(setup.PrintHeadings && setup.PrintGridlines);
+        Assert.Equal(80, setup.TtyPrintWidth);
+        Assert.Equal(0.75, setup.GetMargin(0));
+        Assert.Equal(1.25, setup.GetMargin(3));
+        Assert.Equal(bytes, reread.ToArray());
+    }
+
+    [Fact]
+    public void SheetSettings_RoundTrip()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        var state = document.State;
+        state.MaxIterations = 7;
+        state.CalculationMode = -1;
+        state.FullPrecision = false;
+        state.Iteration = true;
+        state.MaxChange = 0.5;
+        state.IsProtected = true;
+        state.PasswordHash = ExcelPassword.Hash("pw");
+        state.SetColumnWidth(3, 120);
+        state.StandardFontSize = 12;
+
+        var reread = RoundTrip(document).State;
+        Assert.Equal(7, reread.MaxIterations);
+        Assert.Equal(-1, reread.CalculationMode);
+        Assert.False(reread.FullPrecision);
+        Assert.True(reread.Iteration);
+        Assert.Equal(0.5, reread.MaxChange);
+        Assert.True(reread.IsProtected);
+        Assert.Equal(ExcelPassword.Hash("pw"), reread.PasswordHash);
+        Assert.Equal(120, reread.GetColumnWidth(3));
+        Assert.Equal(12, reread.StandardFontSize);
+        Assert.Throws<ArgumentOutOfRangeException>(() => reread.GetColumnWidth(256));
+    }
+
+    [Fact]
+    public void Windows_RoundTrip()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        var window = document.Windows[0];
+        window.ActiveRow = 9;
+        window.ActiveColumn = 3;
+        window.DisplayGridlines = false;
+        window.HorizontalSplit = 100;
+        window.Selection.Clear();
+        window.Selection.Add(new ExcelRange(9, 12, 3, 4));
+
+        var reread = RoundTrip(document).Windows[0];
+        Assert.Equal(9, reread.ActiveRow);
+        Assert.Equal(3, reread.ActiveColumn);
+        Assert.False(reread.DisplayGridlines);
+        Assert.Equal(100, reread.HorizontalSplit);
+        Assert.Equal(new ExcelRange(9, 12, 3, 4), Assert.Single(reread.Selection));
+    }
+
+    [Fact]
+    public void EditingASample_KeepsEverythingElse()
+    {
+        var original = Load("REPLACE.xlm");
+        var document = Load("REPLACE.xlm");
+        document.Cells["A1"].SetText("Edited");
+        document.Cells["B23"].Formula!.SetResult(99);
+
+        var reread = RoundTrip(document);
+
+        Assert.Equal("Edited", reread.Cells["A1"].TextValue);
+        Assert.Equal(99.0, reread.Cells["B23"].Value);
+        foreach (var (row, column, cell) in original.Cells.NonEmptyCells)
+        {
+            if (row == 22 && column == 1)
+            {
+                continue;
+            }
+
+            var other = reread.Cells.TryGet(row, column)!;
+            Assert.Equal(cell.Type, other.Type);
+            Assert.Equal(cell.Formula?.ToText(original), other.Formula?.ToText(reread));
+            if (cell.Type == ExcelCellType.Text)
+            {
+                Assert.Equal(cell.TextValue, other.TextValue);
+            }
+        }
+    }
+
+    [Fact]
+    public void GrowingASample_WritesTheLargerGrid()
+    {
+        var document = Load("Expenses.xls");
+        document.Cells[300, 7].SetText("new corner");
+
+        var reread = RoundTrip(document);
+        Assert.Equal(301, reread.Cells.RowCount);
+        Assert.Equal(8, reread.Cells.ColumnCount);
+        Assert.Equal("new corner", reread.Cells[300, 7].TextValue);
+        Assert.Equal("Date", reread.Cells["A10"].TextValue);
+        Assert.Equal(29220, reread.Cells["A11"].IntegerValue);
+    }
+}

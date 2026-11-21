@@ -32,13 +32,25 @@ public static class MacRoman
     /// </summary>
     public static string GetString(ReadOnlySpan<byte> bytes)
     {
-        var builder = new StringBuilder(bytes.Length);
-        foreach (var b in bytes)
+        if (bytes.IsEmpty)
         {
-            builder.Append(b < 0x80 ? (char)b : HighHalf[b - 0x80]);
+            return string.Empty;
         }
 
-        return builder.ToString();
+        // Most text is plain ASCII, which decodes with a vectorised fast path.
+        if (Ascii.IsValid(bytes))
+        {
+            return Encoding.ASCII.GetString(bytes);
+        }
+
+        Span<char> chars = bytes.Length <= 256 ? stackalloc char[bytes.Length] : new char[bytes.Length];
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            byte b = bytes[i];
+            chars[i] = b < 0x80 ? (char)b : HighHalf[b - 0x80];
+        }
+
+        return new string(chars);
     }
 
     /// <summary>

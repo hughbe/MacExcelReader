@@ -11,9 +11,11 @@ public sealed class ExcelCell
     internal ushort Word1;
     internal ushort Word2 = 0x4000;
 
-    private double _number;
-    private string _text = string.Empty;
-    private ExcelFormula? _formula;
+    // The value: a boxed double, a string or an ExcelFormula; or, until first access, the file buffer
+    // the number, text or formula record is read from at _dataOffset. Numbers are never cached, so
+    // reading them does not allocate.
+    private object? _payload;
+    private int _dataOffset;
 
     /// <summary>
     /// Creates an empty, locked cell.
@@ -54,20 +56,83 @@ public sealed class ExcelCell
     /// Gets the value of a <see cref="ExcelCellType.Number"/> cell.
     /// </summary>
     public double NumberValue => Type == ExcelCellType.Number
-        ? _number
+        ? ReadNumber()
         : throw new InvalidOperationException("The cell is not a number cell.");
+
+    private double ReadNumber() => _payload switch
+    {
+        byte[] source => System.Buffers.Binary.BinaryPrimitives.ReadDoubleBigEndian(source.AsSpan(_dataOffset)),
+        double value => value,
+        _ => 0,
+    };
+
+    /// <summary>
+    /// Gets the numeric value of an integer, number or numeric-formula cell without allocating.
+    /// </summary>
+    /// <returns>True if the cell has a numeric value.</returns>
+    public bool TryGetNumber(out double value)
+    {
+        switch (Type)
+        {
+            case ExcelCellType.Integer:
+                value = unchecked((short)Word0);
+                return true;
+            case ExcelCellType.Number:
+                value = ReadNumber();
+                return true;
+            case ExcelCellType.NumericFormula:
+                // The formula's value is the first 8 bytes of its record.
+                value = _payload is byte[] source
+                    ? System.Buffers.Binary.BinaryPrimitives.ReadDoubleBigEndian(source.AsSpan(_dataOffset))
+                    : DecodeFormula().Result.Number;
+                return true;
+            default:
+                value = 0;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Gets whether a text or formula value is still undecoded (it is decoded on first access).
+    /// </summary>
+    internal bool IsLazy => _payload is byte[];
 
     /// <summary>
     /// Gets the value of a <see cref="ExcelCellType.Text"/> cell.
     /// </summary>
     public string TextValue => Type == ExcelCellType.Text
-        ? _text
+        ? DecodeText()
         : throw new InvalidOperationException("The cell is not a text cell.");
+
+    private string DecodeText()
+    {
+        if (_payload is byte[] source)
+        {
+            if (_dataOffset >= source.Length || _dataOffset + 1 + source[_dataOffset] > source.Length)
+            {
+                throw new ExcelFormatException($"A text cell's data at file offset {_dataOffset} runs past the end of the file.");
+            }
+
+            _payload = MacRoman.GetString(source.AsSpan(_dataOffset + 1, source[_dataOffset]));
+        }
+
+        return (string?)_payload ?? string.Empty;
+    }
+
+    private ExcelFormula DecodeFormula()
+    {
+        if (_payload is byte[] source)
+        {
+            _payload = ExcelFormula.Read(source, _dataOffset);
+        }
+
+        return (ExcelFormula)_payload!;
+    }
 
     /// <summary>
     /// Gets the formula of a formula cell, or null.
     /// </summary>
-    public ExcelFormula? Formula => Type is ExcelCellType.Formula or ExcelCellType.NumericFormula ? _formula : null;
+    public ExcelFormula? Formula => Type is ExcelCellType.Formula or ExcelCellType.NumericFormula ? DecodeFormula() : null;
 
     /// <summary>
     /// Gets the cell's value: a <see cref="short"/>, <see cref="double"/>, <see cref="string"/>, the
@@ -76,9 +141,9 @@ public sealed class ExcelCell
     public object? Value => Type switch
     {
         ExcelCellType.Integer => IntegerValue,
-        ExcelCellType.Number => _number,
-        ExcelCellType.Text => _text,
-        ExcelCellType.NumericFormula or ExcelCellType.Formula => _formula!.Result.Value,
+        ExcelCellType.Number => ReadNumber(),
+        ExcelCellType.Text => DecodeText(),
+        ExcelCellType.NumericFormula or ExcelCellType.Formula => DecodeFormula().Result.Value,
         _ => null,
     };
 
@@ -99,7 +164,7 @@ public sealed class ExcelCell
     {
         ClearValue();
         Type = ExcelCellType.Number;
-        _number = value;
+        _payload = value;
     }
 
     /// <summary>
@@ -130,7 +195,7 @@ public sealed class ExcelCell
 
         ClearValue();
         Type = ExcelCellType.Text;
-        _text = value;
+        _payload = value;
     }
 
     /// <summary>
@@ -140,7 +205,7 @@ public sealed class ExcelCell
     {
         ArgumentNullException.ThrowIfNull(formula);
         ClearValue();
-        _formula = formula;
+        _payload = formula;
         Type = formula.Result.Kind == ExcelFormulaResultKind.Number ? ExcelCellType.NumericFormula : ExcelCellType.Formula;
     }
 
@@ -156,19 +221,20 @@ public sealed class ExcelCell
 
     private void ClearValue()
     {
-        _formula = null;
-        _text = string.Empty;
-        _number = 0;
+        _payload = null;
         Type = ExcelCellType.Empty;
         Word0 = 0;
         Word1 &= 0x0FFF;
     }
 
-    internal void LoadNumber(double value) => _number = value;
-
-    internal void LoadText(string value) => _text = value;
-
-    internal void LoadFormula(ExcelFormula formula) => _formula = formula;
+    /// <summary>
+    /// Points a number, text or formula cell at its data in the file buffer; it is decoded on first access.
+    /// </summary>
+    internal void LoadLazy(byte[] source, int dataOffset)
+    {
+        _payload = source;
+        _dataOffset = dataOffset;
+    }
 
     /// <summary>
     /// Gets or sets the number format index (0 = General; 0–63).

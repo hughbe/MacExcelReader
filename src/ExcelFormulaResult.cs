@@ -102,9 +102,9 @@ public readonly struct ExcelFormulaResult
     /// <summary>
     /// Encodes a result as the 8 value bytes of a formula record.
     /// </summary>
-    internal static byte[] Encode(ExcelFormulaResultKind kind, double number, bool boolean, byte errorCode)
+    internal static void Encode(ExcelFormulaResultKind kind, double number, bool boolean, byte errorCode, Span<byte> bytes)
     {
-        var bytes = new byte[8];
+        bytes.Slice(0, 8).Clear();
         switch (kind)
         {
             case ExcelFormulaResultKind.Number:
@@ -126,7 +126,5 @@ public readonly struct ExcelFormulaResult
             default:
                 throw new ArgumentOutOfRangeException(nameof(kind));
         }
-
-        return bytes;
     }
 }

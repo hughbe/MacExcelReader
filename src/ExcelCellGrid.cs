@@ -1,9 +1,23 @@
+using System.Buffers.Binary;
+
 namespace MacExcelReader;
 
 /// <summary>
-/// The dense cell table of a sheet (spec §7). Every cell inside the grid exists; empty cells may still
-/// carry formatting.
+/// The dense cell table of a sheet (spec §7). Every position inside the grid is a cell; empty cells may
+/// still carry formatting.
 /// </summary>
+/// <remarks>
+/// <para>
+/// A grid read from a file is lazy: rows and cells are created from the file's cell table the first time
+/// they are accessed, and a cell's text or formula is decoded the first time its value is read.
+/// Reading a document therefore costs almost nothing beyond reading the file, and iterating
+/// <see cref="NonEmptyCells"/> only creates objects for cells that have values.
+/// </para>
+/// <para>
+/// Cells that are never accessed are written back by copying their bytes, so loading and saving an
+/// unchanged document does not decode its cells at all.
+/// </para>
+/// </remarks>
 public sealed class ExcelCellGrid
 {
     /// <summary>The maximum number of rows.</summary>
@@ -12,7 +26,16 @@ public sealed class ExcelCellGrid
     /// <summary>The maximum number of columns.</summary>
     public const int MaxColumns = 256;
 
-    private readonly List<ExcelCell[]> _rows = [];
+    private const int EntrySize = 6;
+
+    private readonly List<ExcelCell?[]?> _rows = [];
+
+    // The file the grid was read from, or null for a grid built in memory.
+    private byte[]? _source;
+    private int _tableStart;
+    private int _dataStart;
+    private int _sourceRows;
+    private int _sourceColumns;
 
     /// <summary>Gets the number of rows.</summary>
     public int RowCount => _rows.Count;
@@ -21,25 +44,67 @@ public sealed class ExcelCellGrid
     public int ColumnCount { get; private set; }
 
     /// <summary>
-    /// Gets a cell, creating and growing the grid as needed.
+    /// Gets a cell, creating it and growing the grid as needed.
     /// </summary>
+    /// <param name="row">The zero-based row (0–16383).</param>
+    /// <param name="column">The zero-based column (0–255).</param>
     public ExcelCell this[int row, int column]
     {
         get
         {
             EnsureSize(row + 1, column + 1);
-            return _rows[row][column];
+            return GetCell(row, column);
         }
     }
 
     /// <summary>
-    /// Gets a cell, or null if it is outside the grid.
+    /// Gets a cell by A1-style address (for example "B19"), creating it and growing the grid as needed.
     /// </summary>
-    public ExcelCell? TryGet(int row, int column)
-        => row >= 0 && row < RowCount && column >= 0 && column < ColumnCount ? _rows[row][column] : null;
+    public ExcelCell this[string address]
+    {
+        get
+        {
+            var parsed = ExcelCellAddress.Parse(address);
+            return this[parsed.Row, parsed.Column];
+        }
+    }
 
     /// <summary>
-    /// Gets the cells that have a value, in row-major order.
+    /// Gets a cell by A1-style address, or null if it is outside the grid. Never grows the grid.
+    /// </summary>
+    public ExcelCell? TryGet(string address)
+    {
+        var parsed = ExcelCellAddress.Parse(address);
+        return TryGet(parsed.Row, parsed.Column);
+    }
+
+    /// <summary>
+    /// Gets a cell, or null if it is outside the grid. Never grows the grid.
+    /// </summary>
+    public ExcelCell? TryGet(int row, int column)
+        => (uint)row < (uint)RowCount && (uint)column < (uint)ColumnCount ? GetCell(row, column) : null;
+
+    /// <summary>
+    /// Gets the type of a cell without creating it, or <see cref="ExcelCellType.Empty"/> outside the grid.
+    /// </summary>
+    public ExcelCellType GetCellType(int row, int column)
+    {
+        if ((uint)row >= (uint)RowCount || (uint)column >= (uint)ColumnCount)
+        {
+            return ExcelCellType.Empty;
+        }
+
+        var cell = _rows[row]?[column];
+        if (cell is not null)
+        {
+            return cell.Type;
+        }
+
+        return IsSourcePosition(row, column) ? (ExcelCellType)((SourceWord1(row, column) >> 9) & 7) : ExcelCellType.Empty;
+    }
+
+    /// <summary>
+    /// Gets the cells that have a value, in row-major order. Only those cells are created.
     /// </summary>
     public IEnumerable<(int Row, int Column, ExcelCell Cell)> NonEmptyCells
     {
@@ -49,13 +114,137 @@ public sealed class ExcelCellGrid
             {
                 for (int c = 0; c < ColumnCount; c++)
                 {
-                    if (_rows[r][c].HasValue)
+                    if (GetCellType(r, c) != ExcelCellType.Empty)
                     {
-                        yield return (r, c, _rows[r][c]);
+                        yield return (r, c, GetCell(r, c));
                     }
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Enumerates the cells that have a value as lightweight <see cref="ExcelCellRef"/> views, in row-major
+    /// order, without allocating. Use this to scan large sheets.
+    /// </summary>
+    public NonEmptyEnumerator EnumerateNonEmpty() => new(this);
+
+    /// <summary>
+    /// An allocation-free enumerator over the cells that have a value.
+    /// </summary>
+    public struct NonEmptyEnumerator
+    {
+        private readonly ExcelCellGrid _grid;
+        private int _row;
+        private int _column;
+
+        internal NonEmptyEnumerator(ExcelCellGrid grid)
+        {
+            _grid = grid;
+            _row = 0;
+            _column = -1;
+            Current = default;
+        }
+
+        /// <summary>Gets the current cell.</summary>
+        public ExcelCellRef Current { get; private set; }
+
+        /// <summary>Returns this enumerator.</summary>
+        public readonly NonEmptyEnumerator GetEnumerator() => this;
+
+        /// <summary>Advances to the next cell that has a value.</summary>
+        public bool MoveNext()
+        {
+            int columns = _grid.ColumnCount;
+            int rows = _grid.RowCount;
+            while (_row < rows)
+            {
+                while (++_column < columns)
+                {
+                    _grid.GetWords(_row, _column, out ushort word0, out ushort word1, out ushort word2);
+                    if ((word1 & 0x0E00) != 0)
+                    {
+                        Current = new ExcelCellRef(_grid, _row, _column, word0, word1, word2);
+                        return true;
+                    }
+                }
+
+                _row++;
+                _column = -1;
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Gets a cell's table words, from the created cell if there is one, otherwise from the file.
+    /// </summary>
+    internal void GetWords(int row, int column, out ushort word0, out ushort word1, out ushort word2)
+    {
+        var cell = _rows[row]?[column];
+        if (cell is not null)
+        {
+            word0 = cell.Word0;
+            word1 = cell.Word1;
+            word2 = cell.Word2;
+        }
+        else if (IsSourcePosition(row, column))
+        {
+            var entry = _source.AsSpan(EntryOffset(row, column), EntrySize);
+            word0 = BinaryPrimitives.ReadUInt16BigEndian(entry);
+            word1 = BinaryPrimitives.ReadUInt16BigEndian(entry.Slice(2));
+            word2 = BinaryPrimitives.ReadUInt16BigEndian(entry.Slice(4));
+        }
+        else
+        {
+            word0 = 0;
+            word1 = 0;
+            word2 = 0x4000;
+        }
+    }
+
+    /// <summary>
+    /// Gets the file bytes starting at an untouched cell's data, or returns false if the cell has been
+    /// created or is not from the file.
+    /// </summary>
+    internal bool TryGetRawData(int row, int column, out ReadOnlySpan<byte> data)
+    {
+        data = default;
+        if (_rows[row]?[column] is not null || !IsSourcePosition(row, column))
+        {
+            return false;
+        }
+
+        var entry = _source.AsSpan(EntryOffset(row, column), EntrySize);
+        int offset = DataOffset(BinaryPrimitives.ReadUInt16BigEndian(entry), BinaryPrimitives.ReadUInt16BigEndian(entry.Slice(2)));
+        if ((uint)offset >= (uint)_source!.Length)
+        {
+            return false;
+        }
+
+        data = _source.AsSpan(offset);
+        return true;
+    }
+
+    /// <summary>
+    /// Counts the cells that have a value, without creating any.
+    /// </summary>
+    public int CountNonEmpty()
+    {
+        int count = 0;
+        for (int r = 0; r < _rows.Count; r++)
+        {
+            for (int c = 0; c < ColumnCount; c++)
+            {
+                if (GetCellType(r, c) != ExcelCellType.Empty)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
     }
 
     /// <summary>
@@ -71,15 +260,12 @@ public sealed class ExcelCellGrid
         {
             for (int r = 0; r < _rows.Count; r++)
             {
-                var old = _rows[r];
-                var grown = new ExcelCell[columns];
-                old.CopyTo(grown, 0);
-                for (int c = old.Length; c < columns; c++)
+                if (_rows[r] is { } row)
                 {
-                    grown[c] = new ExcelCell();
+                    var grown = new ExcelCell?[columns];
+                    row.CopyTo(grown, 0);
+                    _rows[r] = grown;
                 }
-
-                _rows[r] = grown;
             }
 
             ColumnCount = columns;
@@ -87,29 +273,107 @@ public sealed class ExcelCellGrid
 
         while (_rows.Count < rows)
         {
-            var row = new ExcelCell[ColumnCount];
-            for (int c = 0; c < row.Length; c++)
-            {
-                row[c] = new ExcelCell();
-            }
-
-            _rows.Add(row);
+            _rows.Add(null);
         }
     }
 
-    internal void Load(int rows, int columns, Func<int, int, ExcelCell> factory)
+    private ExcelCell GetCell(int row, int column)
     {
-        _rows.Clear();
-        ColumnCount = columns;
-        for (int r = 0; r < rows; r++)
+        var cells = _rows[row] ??= new ExcelCell?[ColumnCount];
+        return cells[column] ??= CreateCell(row, column);
+    }
+
+    private ExcelCell CreateCell(int row, int column)
+    {
+        if (!IsSourcePosition(row, column))
         {
-            var row = new ExcelCell[columns];
-            for (int c = 0; c < columns; c++)
+            return new ExcelCell();
+        }
+
+        var entry = _source.AsSpan(EntryOffset(row, column), EntrySize);
+        ushort word0 = BinaryPrimitives.ReadUInt16BigEndian(entry);
+        ushort word1 = BinaryPrimitives.ReadUInt16BigEndian(entry.Slice(2));
+        var cell = new ExcelCell(word0, word1, BinaryPrimitives.ReadUInt16BigEndian(entry.Slice(4)));
+        if (HasCellData(cell.Type))
+        {
+            int offset = DataOffset(word0, word1);
+            if (offset >= _source!.Length)
             {
-                row[c] = factory(r, c);
+                throw new ExcelFormatException($"The data of cell {new ExcelCellAddress(row, column)} lies outside the file.");
             }
 
-            _rows.Add(row);
+            cell.LoadLazy(_source, offset);
         }
+
+        return cell;
+    }
+
+    internal static bool HasCellData(ExcelCellType type)
+        => type is ExcelCellType.Number or ExcelCellType.Text or ExcelCellType.NumericFormula or ExcelCellType.Formula;
+
+    private bool IsSourcePosition(int row, int column) => _source is not null && row < _sourceRows && column < _sourceColumns;
+
+    private int EntryOffset(int row, int column) => _tableStart + (row * _sourceColumns + column) * EntrySize;
+
+    private ushort SourceWord1(int row, int column) => BinaryPrimitives.ReadUInt16BigEndian(_source.AsSpan(EntryOffset(row, column) + 2));
+
+    private int DataOffset(ushort word0, ushort word1) => _dataStart + (word0 << 4) + (word1 >> 12);
+
+    /// <summary>
+    /// Attaches the grid to a file's cell table. Rows and cells are created on demand.
+    /// </summary>
+    internal void AttachSource(byte[] source, int tableStart, int dataStart, int rows, int columns)
+    {
+        if (tableStart + (long)rows * columns * EntrySize > source.Length)
+        {
+            throw new ExcelFormatException("The cell table runs past the end of the file.");
+        }
+
+        _rows.Clear();
+        _rows.Capacity = rows;
+        for (int r = 0; r < rows; r++)
+        {
+            _rows.Add(null);
+        }
+
+        _source = source;
+        _tableStart = tableStart;
+        _dataStart = dataStart;
+        _sourceRows = rows;
+        _sourceColumns = columns;
+        ColumnCount = columns;
+    }
+
+    /// <summary>
+    /// Gets an untouched cell's raw table entry and cell data so the writer can copy them, or returns
+    /// false if the cell has been created (and may have changed) or is not from the file.
+    /// </summary>
+    internal bool TryGetRawCell(int row, int column, out ushort word0, out ushort word1, out ushort word2, out ReadOnlySpan<byte> data)
+    {
+        word0 = word1 = word2 = 0;
+        data = default;
+        if (_rows[row]?[column] is not null || !IsSourcePosition(row, column))
+        {
+            return false;
+        }
+
+        var entry = _source.AsSpan(EntryOffset(row, column), EntrySize);
+        word0 = BinaryPrimitives.ReadUInt16BigEndian(entry);
+        word1 = BinaryPrimitives.ReadUInt16BigEndian(entry.Slice(2));
+        word2 = BinaryPrimitives.ReadUInt16BigEndian(entry.Slice(4));
+        var type = (ExcelCellType)((word1 >> 9) & 7);
+        if (HasCellData(type))
+        {
+            int offset = DataOffset(word0, word1);
+            if (offset >= _source!.Length)
+            {
+                throw new ExcelFormatException($"The data of cell {new ExcelCellAddress(row, column)} lies outside the file.");
+            }
+
+            var tail = _source.AsSpan(offset);
+            data = tail.Slice(0, ExcelFormula.MeasureCellData(type, tail));
+        }
+
+        return true;
     }
 }
