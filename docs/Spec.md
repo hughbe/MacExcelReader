@@ -1559,7 +1559,7 @@ record by its byte 6 (`3c.01` in 1.00).
 | 7 | Marker (below) |
 | 8 | Word: bit 15: automatic marker; bit 13: set when a format is made (`0f.12`), never read; bit 12: automatic area; bit 11: a data label for the series, made from built-in text object −2; bit 10: a data label on each data point, made from built-in text object −1 (`33.10` in 1.00; §16.5); bit 9: the labels show percentages (for a pie the label code totals the series, `33.00`); Pie format 6 sets it with bit 10 |
 | 11 | Byte: how far a pie slice is pulled out, as a percentage of the radius: 25 for the first slice of Pie format 3 (a point record), 20 for every slice of Pie format 4 (the default series format) |
-| 0, 5, 9–10 | Not identified: byte 0 is the line format's unused byte, and nothing in Excel 1.00's chart code reads 5, 9 or 10 **(unknown)** |
+| 0, 5, 9–10 | Not identified. Byte 0 is the line format's unused byte; bytes 5, 9 and 10 are 0 in every record seen, Excel 1.00's Patterns dialogs leave them alone, and nothing in its chart code reads them **(unknown)**. |
 
 Marker, in the order of the Marker Pattern dialog (`Point Markers` sample, Excel 1.00):
 
@@ -1594,9 +1594,9 @@ Each series is:
 | Pascal string | Series name |
 | 2 strings | Two label strings, each one length byte, the first part, `.`, and as much of the second part as fits in 255. For a series of its own with no second part, Excel 1.00 writes the series name and `.` in both (`Series 1.`). |
 | | Source document: `0x00` if none; otherwise the three bytes `02 1B 06` |
-| Pascal string | Name of the source document (empty if none) |
-| Pascal string | Second reference, **as formula text** (R1C1). A series without one gets a short string left over from memory (5 bytes in every chart Excel 1.00 re-saved in the experiments). |
-| Pascal string | First reference, as formula text |
+| Pascal string | Name of the source document. Excel 1.x plots only data on a document: a series without one opens and draws in Excel 1.00, but its SERIES formula shows bytes left over from memory as the document name. |
+| Pascal string | Second reference, the values, **as formula text** in R1C1 form without `=` or the document (`R26C7:R37C7` in `PROFIT CHART`, whose document is `BREAKEVEN`). An empty reference gets a short string left over from memory when Excel saves (5 bytes in every chart Excel 1.00 re-saved in the experiments). |
+| Pascal string | First reference, the categories, likewise. Excel shows an empty one held as literal text (header word 14) as just the document name: `=SERIES("S1",Data!,Data!R2C1:R2C3,1)`. |
 | 4 bytes | Four empty strings |
 
 A zero word ends the series section.

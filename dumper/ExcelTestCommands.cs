@@ -573,8 +573,8 @@ sealed class CheckCommand : Command<CheckSettings>
                     continue;
                 }
 
-                // A series with no second reference gets a few bytes left over from memory as one (spec §16.9).
-                if (!all && key == "secondReference" && oa[key]?.GetValue<string>() is "")
+                // A series with an empty reference gets a few bytes left over from memory as one (spec §16.9).
+                if (!all && key is "firstReference" or "secondReference" && oa[key]?.GetValue<string>() is "")
                 {
                     continue;
                 }

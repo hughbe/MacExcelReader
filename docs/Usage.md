@@ -308,6 +308,14 @@ if (chart.OverlayChart is { } overlay)
 }
 ```
 
+To build a chart, give each series its source document and references, as Excel 1.x always has them:
+
+```csharp
+var newChart = ChartDocument.Create(ChartType.ColumnOrBar);
+newChart.Series.Add(ChartSeries.Create("Sales", [1, 3, 2], "Data", "R2C1:R2C3", categoriesReference: "R1C1:R1C3"));
+newChart.Save("Sales Chart");
+```
+
 Patterns, markers, line weights and arrowheads are enums (`ChartPattern`, `ChartMarker`, `ChartLineWeight`,
 `ArrowHeadWidth`, `ArrowHeadLength`, `ArrowHeadStyle`) named after Excel 1.00's Patterns dialogs.
 

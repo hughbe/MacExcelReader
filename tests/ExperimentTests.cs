@@ -404,7 +404,7 @@ public class ExperimentTests
         // series format (spec §16.8, §16.9).
         var saved = ChartDocument.Load(SamplePath(name)).Series[0];
         var built = ChartDocument.Create(ChartType.Line);
-        built.Series.Add(ChartSeries.Create(saved.SecondValues.Select(v => v.ToDouble()), saved.Name, saved.FirstReference));
+        built.Series.Add(ChartSeries.Create(saved.Name, saved.SecondValues.Select(v => v.ToDouble()), saved.SourceDocument, saved.SecondReference));
         var ours = ChartDocument.Read(built.ToArray()).Series[0];
         var a = ours.Header.ToArray();
         var b = saved.Header.ToArray();
@@ -451,5 +451,21 @@ public class ExperimentTests
         Assert.Equal(ChartMarker.Diamond, chart.DefaultSeriesFormat.Marker);
         Assert.Equal([8, 10], Enumerable.Range(0, chart.PointFormats.Count).Select(i => (int)chart.GetPointFormat(i).SeriesOrPoint));
         Assert.All(Enumerable.Range(0, chart.PointFormats.Count), i => Assert.Equal(ChartMarker.X, chart.GetPointFormat(i).Marker));
+    }
+
+    [Fact]
+    public void ColumnFill_OverrideHoldsBorderAndArea()
+    {
+        // Excel 1.00: Format > Patterns on the first series of a column chart: vertical stripes, a grey thick border
+        // (spec §16.8). Bytes 5, 9 and 10 stay 0.
+        var chart = ChartDocument.Load(SamplePath("Column Fill")).MainChart;
+        var format = chart.GetPointFormat(0);
+        Assert.Equal(0, format.SeriesOrPoint);
+        Assert.Equal(ChartPattern.VerticalStripes, format.AreaPattern);
+        Assert.False(format.AutomaticArea);
+        Assert.Equal(ChartPattern.Gray, format.Line.Pattern);
+        Assert.Equal(ChartLineWeight.Thick, format.Line.Weight);
+        Assert.False(format.AutomaticLine);
+        Assert.Equal(new byte[3], new[] { chart.PointFormats[0][5], chart.PointFormats[0][9], chart.PointFormats[0][10] });
     }
 }

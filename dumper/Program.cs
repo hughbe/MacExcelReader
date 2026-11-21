@@ -976,7 +976,7 @@ sealed class NewChartCommand : Command<NewChartSettings>
         for (int i = 0; i < series.Length; i++)
         {
             var values = series[i].Split(',').Select(v => double.Parse(v, CultureInfo.InvariantCulture)).ToList();
-            document.Series.Add(ChartSeries.Create(values, $"Series {i + 1}", $"=R{i + 1}C1:R{i + 1}C{values.Count}"));
+            document.Series.Add(ChartSeries.Create($"Series {i + 1}", values, "Data", $"R{i + 1}C1:R{i + 1}C{values.Count}"));
         }
 
         File.WriteAllBytes(settings.Output, document.ToArray());

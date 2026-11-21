@@ -25,10 +25,20 @@ public sealed class ChartSeries
     }
 
     /// <summary>
-    /// Creates a numeric series with the constants Excel writes.
+    /// Creates a numeric series as Excel writes one: its values, and where they come from. Excel 1.x plots only data
+    /// from a document, so a series names its source document and the references to the values and, optionally, the
+    /// categories on it, in R1C1 form without a leading "=" (spec §16.9).
     /// </summary>
-    public static ChartSeries Create(IEnumerable<double> values, string name, string reference)
+    /// <param name="name">The series name.</param>
+    /// <param name="values">The values, which the chart file keeps a copy of.</param>
+    /// <param name="document">The source document, such as "Sales".</param>
+    /// <param name="valuesReference">The values' reference on that document, such as "R2C1:R2C3".</param>
+    /// <param name="categoriesReference">The categories' reference, or null for none (categories are 1, 2, 3…).</param>
+    /// <param name="categories">The category values, or null for 1, 2, 3….</param>
+    public static ChartSeries Create(string name, IEnumerable<double> values, string document, string valuesReference, string? categoriesReference = null, IEnumerable<double>? categories = null)
     {
+        ArgumentException.ThrowIfNullOrEmpty(document);
+        ArgumentException.ThrowIfNullOrEmpty(valuesReference);
         var header = new byte[HeaderSize];
         // Series type 1 (numbers), bits 11 and 7, and bit 10: in the first list, the main chart's. Without bit 10
         // Excel 1.00 draws nothing of the chart (spec §16.9).
@@ -38,7 +48,8 @@ public sealed class ChartSeries
         header[6] = header[7] = 10;
         BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(8), 60);
         BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(10), 60);
-        BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(14), 0xC000);
+        // Bits 15–14: 3, a reference held as formula text; 2, literal text (an empty categories reference).
+        BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(14), categoriesReference is null ? (ushort)0x8000 : (ushort)0xC000);
         BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(16), 0xC000);
         for (int i = 0; i < 4; i++)
         {
@@ -52,13 +63,19 @@ public sealed class ChartSeries
         }
 
         // Excel writes each label as the series name and "." (spec §16.9).
-        var series = new ChartSeries(header) { Name = name, FirstReference = reference, FirstLabel = name + ".", SecondLabel = name + "." };
-        series.SecondValues.AddRange(values.Select(MicrosoftDecimal.FromDouble));
-        for (int i = 1; i <= series.SecondValues.Count; i++)
+        var series = new ChartSeries(header)
         {
-            series.FirstValues.Add(MicrosoftDecimal.FromDouble(i));
-        }
-
+            Name = name,
+            FirstLabel = name + ".",
+            SecondLabel = name + ".",
+            SourceMarker = "\u001B\u0006",
+            SourceDocument = document,
+            FirstReference = categoriesReference ?? string.Empty,
+            SecondReference = valuesReference,
+        };
+        series.SecondValues.AddRange(values.Select(MicrosoftDecimal.FromDouble));
+        var x = categories?.ToList() ?? Enumerable.Range(1, series.SecondValues.Count).Select(i => (double)i).ToList();
+        series.FirstValues.AddRange(x.Select(MicrosoftDecimal.FromDouble));
         return series;
     }
 

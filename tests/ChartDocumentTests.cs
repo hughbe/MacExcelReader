@@ -139,7 +139,7 @@ public class ChartDocumentTests
         document.MainChart.SeriesWords.AddRange([10, 20]);
         document.MainChart.PointFormats.Add(new byte[12]);
 
-        var textSeries = ChartSeries.Create([], "Categories", "=R1C1:R1C2");
+        var textSeries = ChartSeries.Create("Categories", [], "Data", "R2C1:R2C2", "R1C1:R1C2");
         textSeries.SeriesType = 3;
         textSeries.FirstTexts.AddRange(["One", "Two"]);
         textSeries.SecondValues.AddRange([MicrosoftDecimal.FromDouble(3), MicrosoftDecimal.FromDouble(4)]);
@@ -235,10 +235,10 @@ public class ChartDocumentTests
         label.Text = null;
         chart.Texts.Add(label);
 
-        var first = ChartSeries.Create([1, 2.5, 4], "Q1", "=R1C1:R1C3");
+        var first = ChartSeries.Create("Q1", [1, 2.5, 4], "Data", "R1C1:R1C3");
         first.InFirstList = true;
         document.Series.Add(first);
-        document.Series.Add(ChartSeries.Create([10, 20], "Q2", "=R2C1:R2C2"));
+        document.Series.Add(ChartSeries.Create("Q2", [10, 20], "Data", "R2C1:R2C2"));
 
         var bytes = document.ToArray();
         var reread = ChartDocument.Read(bytes);
@@ -252,7 +252,8 @@ public class ChartDocumentTests
         Assert.Equal(2, reread.Series.Count);
         Assert.Equal([1, 2.5, 4], reread.Series[0].SecondValues.Select(v => v.ToDouble()));
         Assert.Equal("Q2", reread.Series[1].Name);
-        Assert.Equal("=R2C1:R2C2", reread.Series[1].FirstReference);
+        Assert.Equal("R2C1:R2C2", reread.Series[1].SecondReference);
+        Assert.Equal("Data", reread.Series[1].SourceDocument);
         Assert.Equal(bytes, reread.ToArray());
     }
 
