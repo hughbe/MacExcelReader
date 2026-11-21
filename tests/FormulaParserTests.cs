@@ -65,6 +65,22 @@ public class FormulaParserTests
 
     [Theory]
     [MemberData(nameof(Sheets))]
+    public void SetDefinition_SetsTheReferenceFlagAsExcelDoes(string sample)
+    {
+        // Excel sets flag 0x04 on exactly the names defined as a cell, an area or a union of them.
+        var bytes = File.ReadAllBytes(SampleFile(sample));
+        var version = SavedBy(bytes);
+        var document = ExcelDocument.Read(bytes);
+        foreach (var name in document.Names.Where(n => n.Definition.Length > 0))
+        {
+            var copy = new ExcelDefinedName(name.Name, flags: (byte)(name.Flags ^ ExcelDefinedName.ReferenceFlag));
+            copy.SetDefinition("=" + name.GetDefinitionText(document), document, version);
+            Assert.True((copy.Flags & ExcelDefinedName.ReferenceFlag) == (name.Flags & ExcelDefinedName.ReferenceFlag), $"{name.Name} ={name.GetDefinitionText(document)}");
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Sheets))]
     public void EverySampleFormulaReparsesToExcelsTokens(string sample)
     {
         var bytes = File.ReadAllBytes(SampleFile(sample));
@@ -283,7 +299,7 @@ public class FormulaParserTests
         Assert.Equal("=Book!A1:B2", external.ToText(document));
         Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=Book!A1:Missing", document));
 
-        document.Names.Add(new ExcelDefinedName("RunMe", flags: ExcelDefinedName.MacroFlag));
+        document.Names.Add(new ExcelDefinedName("RunMe", flags: ExcelDefinedName.ReferenceFlag));
         Assert.True(ExcelFormula.Parse("=RunMe(1)", document).Expression.Length > 0);
     }
 
@@ -291,7 +307,7 @@ public class FormulaParserTests
     public void RejectsBranchOffsetsBeyondEncodingLimit()
     {
         var document = ExcelDocument.CreateWorksheet();
-        document.Names.Add(new ExcelDefinedName("RunMe", flags: ExcelDefinedName.MacroFlag));
+        document.Names.Add(new ExcelDefinedName("RunMe", flags: ExcelDefinedName.ReferenceFlag));
         var huge = "RunMe(" + string.Join(",", Enumerable.Repeat("1", 130)) + ")";
         Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse($"=IF(TRUE,{huge},0)", document));
         Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse($"={huge}:A1", document));

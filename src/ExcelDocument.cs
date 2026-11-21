@@ -458,6 +458,24 @@ public sealed class ExcelDocument
     {
         int rows = Cells.ColumnCount == 0 ? 0 : Cells.RowCount;
         int columns = rows == 0 ? 0 : Cells.ColumnCount;
+
+        // Excel uses rows 0 to word 0x014 - 1 and columns 0 to word 0x274 - 1. In the usual last-index form (word
+        // 0x020 = 1) that leaves the table's last row and column as a margin: values there are not drawn, cells
+        // in the last column load over one another, a one-row table hangs Excel 1.03, and it can drop rows from
+        // the end of the sheet. Every sheet Excel saves in that form has no values in its margin, so keep a blank
+        // row and column after the last one in use. A table read in the count form is kept as it is.
+        if (rows > 0 && !State.HoldsCountForm(rows, columns))
+        {
+            bool padRow = rows < ExcelCellGrid.MaxRows && !IsBlankRow(rows - 1, columns);
+            bool padColumn = columns < ExcelCellGrid.MaxColumns && !IsBlankColumn(columns - 1, rows);
+            if (padRow || padColumn)
+            {
+                rows += padRow ? 1 : 0;
+                columns += padColumn ? 1 : 0;
+                Cells.EnsureSize(rows, columns);
+            }
+        }
+
         State.SetExtent(rows, columns);
         while (RowIndex.Count < rows)
         {
@@ -627,6 +645,35 @@ public sealed class ExcelDocument
 
         return writer.ToArray();
     }
+
+    private bool IsBlankRow(int row, int columns)
+    {
+        for (int c = 0; c < columns; c++)
+        {
+            if (!IsBlankEntry(row, c))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool IsBlankColumn(int column, int rows)
+    {
+        for (int r = 0; r < rows; r++)
+        {
+            if (!IsBlankEntry(r, column))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // A cell with no value. Excel's own files can have formatting in the margin, but never a value.
+    private bool IsBlankEntry(int row, int column) => Cells.GetCellType(row, column) == ExcelCellType.Empty;
 
     private void WriteCells(BigEndianWriter writer, int tableStart, int rows, int columns)
     {

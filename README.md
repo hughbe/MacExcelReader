@@ -130,7 +130,8 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `cells <file> [-r A1:D20] [--all]` | Every non-empty cell with its displayed value, format, style and formula |
 | `cell <file> <address>` | Everything about one cell: value, date, formats, flags, formula, result, raw bytes and a token-by-token breakdown |
 | `parse <formula> [-f file] [--name] [--array] [--excel 1.5]` | Compile formula text and show the tokens Excel would store |
-| `coverage <output> [--experimental]` | Write a macro sheet that uses every kind of formula, for checking in Excel |
+| `sheet <list> <output> [--split N] [--excel 1.5]` | Build sheets from a formula list (`tests/Data`), for testing formulas in Excel |
+| `excel-test pack <disk> <files...>` / `excel-test check <disk>` | Test files in a real Excel under an emulator: see [Testing in a real Excel](docs/Testing.md) |
 | `names <file>` | Defined names, command shortcuts and definitions |
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |
@@ -150,9 +151,9 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
 
 - New documents carry empty embedded p-code segments. Excel 1.03 never uses a file's own copy, but a different build of Excel linking to the document while it is closed would; copy the segments from an existing document if that matters.
 - The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`; Excel recalculates it when it opens the file.
-- The parser's rules come from Excel's code and tables and were checked against every sample formula; formulas unlike any in the samples could still encode differently. Excel 1.5's functions numbered above 255 follow its Save code, as no sample uses one.
+- The parser's rules come from Excel's code and tables and were checked against every sample formula; formulas unlike any in the samples could still encode differently. Excel 1.5's functions numbered above 255 follow its Save code, as no sample uses one; Excel 1.5 accepts them.
 - Tables (the Table command) and page breaks are implemented from the spec alone, because no sample contains them.
-- Nothing written by the library has been opened in Excel itself yet.
+- Files written by the library have been checked in Excel 1.03 and 1.5 under Mini vMac: every formula in `tests/Data` in 1.03, and part of the 1.5 list, including functions above 255 ([Testing in a real Excel](docs/Testing.md)). Worksheets other than formula lists, and charts the library builds from scratch, have not.
 
 ---
 

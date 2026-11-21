@@ -29,9 +29,19 @@ public sealed class Program
                 .WithDescription("Compile formula text to Excel's tokens, optionally resolving names against a file.")
                 .WithExample("parse", "=IF(A1>0,SUM(A1:A3),-1)")
                 .WithExample("parse", "=COLUMNS(!ADD)", "--file", "DB.FORM");
-            config.AddCommand<CoverageCommand>("coverage")
-                .WithDescription("Write a macro sheet that uses every formula feature, for checking in Excel.")
-                .WithExample("coverage", "Formulas", "--experimental");
+            config.AddCommand<SheetCommand>("sheet")
+                .WithDescription("Build sheets from a formula list, for testing formulas in Excel.")
+                .WithExample("sheet", "tests/Data/formulas-1.0.txt", "Formulas", "--split", "100");
+            config.AddBranch("excel-test", branch =>
+            {
+                branch.SetDescription("Test files in a real Excel under an emulator (see docs/Testing.md).");
+                branch.AddCommand<PackCommand>("pack")
+                    .WithDescription("Put files on a floppy image with a Driver macro sheet that opens, probes and re-saves each.")
+                    .WithExample("excel-test", "pack", "Test.dsk", "Formulas 01", "Chart1");
+                branch.AddCommand<CheckCommand>("check")
+                    .WithDescription("After Driver has run in Excel, compare Excel's results and re-saved copies with the originals.")
+                    .WithExample("excel-test", "check", "Test.dsk");
+            });
             config.AddCommand<ExportCommand>("export")
                 .WithDescription("Export the sheet as CSV (or TSV), as displayed values or formulas.")
                 .WithExample("export", "Expenses", "-o", "expenses.csv");
@@ -581,8 +591,8 @@ sealed class DumpCommand : Command<FileSettings>
         {
             var name = document.Names[i];
             string kind = name.IsCommand ? $"command (Option-⌘-{(char)name.ShortcutKey})"
-                : (name.Flags & ExcelDefinedName.MacroFlag) != 0 ? "macro"
-                : name.Definition.Length == 0 ? "undefined" : "name";
+                : name.Definition.Length == 0 ? "undefined"
+                : (name.Flags & ExcelDefinedName.ReferenceFlag) != 0 ? "reference" : "formula";
             names.AddRow((i + 1).ToString(CultureInfo.InvariantCulture), Program.Escape(name.Name), Program.Escape(kind),
                 Program.Escape(name.Definition.Length == 0 ? string.Empty : "=" + name.GetDefinitionText(document)));
         }
@@ -741,7 +751,7 @@ sealed class JsonCommand : Command<JsonSettings>
         return 0;
     }
 
-    private static object SheetModel(ExcelDocument document, bool includeEmpty)
+    internal static object SheetModel(ExcelDocument document, bool includeEmpty)
     {
         var state = document.State;
         var cells = new List<object>();
@@ -823,7 +833,7 @@ sealed class JsonCommand : Command<JsonSettings>
         };
     }
 
-    private static object ChartModel(ChartDocument document) => new
+    internal static object ChartModel(ChartDocument document) => new
     {
         version = document.Version,
         charts = document.Charts.Select(c => new

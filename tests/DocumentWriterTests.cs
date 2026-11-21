@@ -89,7 +89,7 @@ public class DocumentWriterTests
     public void Names_CommandMacrosAndDefinitionsRoundTrip()
     {
         var document = ExcelDocument.CreateMacroSheet();
-        document.Names.Add(new ExcelDefinedName("Go", [0x2C, 0x00, 0x04, 0x01], ExcelDefinedName.CommandFlag | ExcelDefinedName.MacroFlag)
+        document.Names.Add(new ExcelDefinedName("Go", [0x2C, 0x00, 0x04, 0x01], ExcelDefinedName.CommandFlag | ExcelDefinedName.ReferenceFlag)
         {
             ShortcutKey = (byte)'g',
         });
@@ -367,8 +367,9 @@ public class DocumentWriterTests
         document.Cells[300, 7].SetText("new corner");
 
         var reread = RoundTrip(document);
-        Assert.Equal(301, reread.Cells.RowCount);
-        Assert.Equal(8, reread.Cells.ColumnCount);
+        // The table keeps a blank row and column after the last cell with a value (Excel's margin).
+        Assert.Equal(302, reread.Cells.RowCount);
+        Assert.Equal(9, reread.Cells.ColumnCount);
         Assert.Equal("new corner", reread.Cells[300, 7].TextValue);
         Assert.Equal("Date", reread.Cells["A10"].TextValue);
         Assert.Equal(29220, reread.Cells["A11"].IntegerValue);

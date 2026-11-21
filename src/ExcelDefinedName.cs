@@ -7,8 +7,12 @@ namespace MacExcelReader;
 /// </summary>
 public sealed class ExcelDefinedName
 {
-    /// <summary>Flag: defined on a macro sheet as a function or command name.</summary>
-    public const byte MacroFlag = 0x04;
+    /// <summary>
+    /// Flag: the definition is a reference: a cell, an area, or a union of them. Excel sets it on every such name,
+    /// on worksheets and macro sheets alike, so a name used as a macro has it too (spec §11).
+    /// <see cref="SetDefinition"/> sets it.
+    /// </summary>
+    public const byte ReferenceFlag = 0x04;
 
     /// <summary>Flag: the definition is array-valued.</summary>
     public const byte ArrayFlag = 0x20;
@@ -64,7 +68,8 @@ public sealed class ExcelDefinedName
     public List<byte[]> ArrayConstants { get; } = [];
 
     /// <summary>
-    /// Sets the definition from formula text, such as <c>=$A$1:$B$5</c> or <c>={1,2,3}</c>.
+    /// Sets the definition from formula text, such as <c>=$A$1:$B$5</c> or <c>={1,2,3}</c>, and sets or clears
+    /// <see cref="ReferenceFlag"/> to match it.
     /// </summary>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
     public void SetDefinition(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
@@ -73,6 +78,25 @@ public sealed class ExcelDefinedName
         Definition = definition;
         ArrayConstants.Clear();
         ArrayConstants.AddRange(arrays);
+        Flags = IsReference(definition) ? (byte)(Flags | ReferenceFlag) : (byte)(Flags & ~ReferenceFlag);
+    }
+
+    // A single cell or area token (2C, 2D in any class), or a union in its definition form (2E n ...).
+    private static bool IsReference(ReadOnlySpan<byte> definition)
+    {
+        if (definition.IsEmpty)
+        {
+            return false;
+        }
+
+        int code = definition[0] < 0x20 ? definition[0] : (definition[0] & 0x1F) | 0x20;
+        return code switch
+        {
+            0x2C => definition.Length == 4,
+            0x2D => definition.Length == 7,
+            0x2E => true,
+            _ => false,
+        };
     }
 
     internal static ExcelDefinedName Read(BigEndianReader reader, byte nameLength)
