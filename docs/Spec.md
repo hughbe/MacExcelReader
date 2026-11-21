@@ -491,7 +491,7 @@ Entry:
 
 | Size | Meaning |
 |-----:|---------|
-| 6 bytes | First 6 bytes of the in-memory entry, which Excel 1.00's Save writes as they are (`47.0b`), followed by the name the 3-byte pointer at entry offset 6 points to. Zero in every file seen, including links Excel had just made and links saved while the linked document was open; what they hold in memory is **(unknown)**. |
+| 6 bytes | Not used; 0. These are the first 6 bytes of Excel 1.00's 12-byte in-memory entry. Excel clears them when it makes an entry (`16.00` in 1.00), Open reads them into the entry (`16.09`) and Save writes them back (`47.0b`), and nothing else reads or writes them. The rest of the entry is a pointer to the document's name (offset 6), which Save writes out as the string below, and a pointer into the list of formulas that use the link (offset 9), which Open rebuilds. |
 | Pascal string | Document name: usually a file name (`CASHBUDGET`, `GREAT BRITAIN`), but it can be a full path (`::sampler files - current 1/13:Files:DATA`). Excel 1.00's Save always writes the entry's name; Excel 1.03's writes a zero-length name for an entry that refers to this document itself. An entry named with the single character `0x00` stands for whichever sheet is active: `DB.FORM`'s macros use it as `!DATABASE` and `!FORM`, Excel 1.03 makes one for `=!A1` (`Links` sample), and the test harness's `GET.FORMULA(!B4)` reads B4 of the active document. |
 
 An external reference names its document by the entry's 1-based position in this table (§15.2, token `1A`).
@@ -1928,7 +1928,6 @@ None of these affects reading the samples or writing valid files.
 
 **Worksheets and macro sheets**
 
-* What the six bytes at the start of an external-document entry hold in memory; Excel writes zeros (§8).
 * Most of the 88 extra window-state bytes of version 18 (§13), and what else in a number format makes Excel
   1.5 save version 18 (§2.1).
 * What Excel 1.04 changed besides adding CHANGE.LINK; no 1.04 code or sample is available (§2.1).

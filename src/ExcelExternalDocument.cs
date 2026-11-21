@@ -1,7 +1,7 @@
 namespace MacExcelReader;
 
 /// <summary>
-/// An entry of the external-document table (spec §6.2): a document this sheet refers to.
+/// An entry of the external-document table (spec §8): a document this sheet refers to.
 /// </summary>
 public sealed class ExcelExternalDocument
 {
@@ -21,7 +21,8 @@ public sealed class ExcelExternalDocument
     public string Name { get; set; }
 
     /// <summary>
-    /// Gets the six unidentified bytes that precede the name.
+    /// Gets the six bytes that precede the name: the start of Excel's in-memory entry, which Excel never uses and keeps
+    /// at 0 (spec §8). They are kept so a file round-trips byte for byte.
     /// </summary>
     public byte[] Reserved { get; internal set; }
 
