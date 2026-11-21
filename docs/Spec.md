@@ -484,7 +484,7 @@ Entry:
 
 | Size | Meaning |
 |-----:|---------|
-| 6 bytes | First 6 bytes of the in-memory entry. Excel writes zeros, including for a link it has just created; what they hold in memory is **(unknown)**. |
+| 6 bytes | First 6 bytes of the in-memory entry, which Excel 1.00's Save writes as they are (`47.0b`), followed by the name the 3-byte pointer at entry offset 6 points to. Zero in every file seen, including links Excel had just made and links saved while the linked document was open; what they hold in memory is **(unknown)**. |
 | Pascal string | Document name: usually a file name (`CASHBUDGET`, `GREAT BRITAIN`), but it can be a full path (`::sampler files - current 1/13:Files:DATA`). Excel 1.00's Save always writes the entry's name; Excel 1.03's writes a zero-length name for an entry that refers to this document itself. `DB.FORM` has one entry whose name is the single character `0x00`. Its macros use it as `!DATABASE` and `!FORM`, meaning the names on whichever worksheet is active **(inferred)**. |
 
 An external reference names its document by the entry's 1-based position in
@@ -706,16 +706,18 @@ as it is (`46.06` in 1.00) and the TABLE command builds (`4b.06` in 1.00):
 | 5 | byte | Last column |
 | 6 | 3 bytes | Memory pointer linking the record into one of two lists whose heads are globals (`g28ea`, `g28ee` in 1.00), or 0 when it is in neither. The TABLE command (`4b.06` in 1.00) sets it to 0, and `1d.06` unlinks the record and clears it. What the lists are for is **(unknown)**. Junk on disk; write 0. |
 | 9 | byte | Column of the first input cell |
-| 10 | word | Bits 15–2: row of the first input cell. Bits 1–0: flags, which the TABLE command clears **(unknown)** |
+| 10 | word | Bits 15–2: row of the first input cell. Bit 0: the input cell has been deleted, and the formula shows `#REF!` in its place (`1d.01` in 1.00). Bit 1: a mark the code that moves and deletes cells sets and clears; while it is set that code clears bit 0 (`0e.01`, `4f.0b`) **(inferred)**. |
 | 12 | word | Left over from memory (`FF FF` in every table seen) |
 | 14 | byte | Bit 6: the first input is the row input. Bit 7: there is a second input, the column input. Without bit 6 the first input is the column input. |
 | 15 | byte | Column of the second input cell |
-| 16 | word | Bits 15–2: row of the second input cell. Bit 1: a flag, which the TABLE command clears **(unknown)** |
+| 16 | word | Bits 15–2: row of the second input cell. Bits 1–0 as in the word at offset 10. |
 
 `TABLE(Y7,X5)` on B2:C3 is `00 01 00 02 01 02 00 00 00 18 00 18 FF FF C0 17 00 10`. `TABLE(,X1)` on B2:B3 has X1
 as its first input with byte 14 = 0, and `TABLE(Y7,)` has Y7 as its first input with byte 14 = `40`; bytes 15–17
 are then left over from memory. The macro command `TABLE(Y7)`, with one argument, stores byte 14 = `C0` and a
-second input of P1 (column 15, row 0) every time; what Excel does with that input is **(unknown)**. GET.FORMULA
+second input that is whatever was left in its argument buffer: the command reads its arguments into a stack
+buffer it does not clear and takes a slot that does not hold the "missing" marker `0x4000` as a second input
+(`4b.05` in 1.00). It was P1 (column 15, row 0) every time here. See [Excel bugs and quirks](ExcelBugs.md). GET.FORMULA
 gives a table's inputs as absolute references, `=TABLE(R7C25,R5C24)`, so the library writes `{=TABLE($Y$7,$X$5)}`.
 
 *Any other cell* of the range:
@@ -948,7 +950,7 @@ were verified by walking every formula in the samples; `0x38`–`0x3A` are Excel
 | 2C | 3 | Cell reference inside a name definition |
 | 2D | 6 | Area reference inside a name definition |
 | 2E | 1 | Memory function inside a name definition (the definition form of `29`; `INVOICE TEMPLATE`) |
-| 2F | 1 | A one-byte memory token used in name definitions. The recalculation code handles it with `2E` as a pair (`25.01`), as it handles `26`–`28` together; which state it marks is **(unknown)**. |
+| 2F | 1 | Memory function with no memory, in a name definition: what `2E` becomes when recalculation runs out of memory while evaluating it. The evaluator rewrites the token's low five bits to `0F` (`25.01` in 1.00), as it turns `26`–`28` into `28`, and Open turns `2F` back into `2E` (`46.06`) so that it is evaluated again. |
 | 30 | 7 | Marked copy of `23` (name) |
 | 31 | 3 | Marked copy of `24` (cell reference) |
 | 32 | 6 | Marked copy of `25` (area reference) |
@@ -1280,6 +1282,7 @@ the codes back.
 | 2 | Word: bits 15–12 = border weight |
 | 5 | Background pattern (0 = none) |
 | 6 | Word: bits 11–8 non-zero = shadow; bit 14 = automatic size (text boxes); bits 15 and 14 are set when a chart is loaded |
+| 8 | Four words: the box as top, left, height and width, in twips, worked out when the chart is drawn (`37.03` in 1.00). The chart area's is (0, 0, height, width) of the drawing rectangle (§16.5); the plot area's is relative to it. `PROFIT CHART`'s chart area is (0, 0, 4784, 9075) and its plot area (996, 1336, 2824, 7213). |
 
 Pattern bytes index Excel's 15-entry pattern palette, 1-based, with 0 meaning
 "invisible". "Automatic" is a separate flag where the object supports it.
@@ -1325,13 +1328,13 @@ label per point) (§16.8).
 |-------:|---------|
 | 0 | Word of flags: bit 14 = 100%; bit 13 = stacked; bit 12 = bars (horizontal) rather than columns; bit 11 = vary colours by category; overlay chart only: bit 10 = automatic series distribution, bits 9–2 = first series in the overlay chart |
 | 2 | Word: **chart type** — 1 column or bar, 2 line, 3 pie, 4 area, 5 scatter |
-| 4 | Byte: the number of categories, worked out when the chart is drawn (12 for `PROFIT CHART` once Excel has drawn it, 0 in overlays); the drawing code divides it by the categories between tick labels to place them (`37.2b` in 1.00). |
+| 4 | Byte: the number of categories, the largest point count of the chart's series, worked out when the chart is drawn (`37.13` in 1.00; 12 for `PROFIT CHART` once Excel has drawn it, 0 in overlays). The drawing code divides it by the categories between tick labels to place them (`37.2b`). |
 | 5 | Byte: 12 in every main chart Excel 1.00 or 1.03 saves, 0 in overlays **(unknown)** |
-| 6 | Word that follows the chart type when Excel saves: 266 for column, line, area and scatter charts, 116 for bar charts, 300 or 405 for pie charts **(unknown)** |
+| 6 | Word: how much narrower the plot became when Excel laid out the axis and tick labels, the width before layout less the width after (`37.03` in 1.00): 266 for `PROFIT CHART`'s column, line, area and scatter forms, 116 for its bar forms, 300 or 405 for its pie forms. |
 | 8 | Word: % overlap (column/bar). Negative means the "Overlapped" option is on; the magnitude is the percentage. |
 | 10 | Word: % cluster spacing (column/bar) |
 | 12 | Word: angle of the first pie slice, degrees from vertical (0–359) |
-| 14 | 4 bytes, not identified; no gallery format changes them |
+| 14 | Two words: the top and left margins, in twips, of the chart's drawing rectangle, which Excel centres in the window's drawing size (§16.6) when it draws the chart (`37.03` in 1.00). The rectangle's height and width are in the chart area format (bytes 8–15). `PROFIT CHART`: margins 208 and 302 around 4784 by 9075, in a 5200 by 9680 drawing size. |
 
 The Gallery's "Main Chart" choices map as Area → 4, Bar → 1 with bit 12 set,
 Column → 1, Line → 2, Pie → 3, Scatter → 5.
@@ -1342,7 +1345,8 @@ Column → 1, Line → 2, Pie → 3, Scatter → 5.
 |-------:|---------|
 | 0 | Word: bits 15–12 = major tick marks, bits 11–8 = minor tick marks (0 invisible, 1 inside, 2 outside, 3 cross); bits 7–4 = tick label position (0 none, 1 next to axis, 2 low, 3 high); bit 3 is set on load |
 | 2 | Font descriptor for the tick labels |
-| 6 | 6 bytes, not identified. Excel rewrites bytes 8–11 on every save, with values that change with the gallery format: positions worked out when the chart is drawn **(inferred)**. The plot area's bytes 8–15 behave the same way. |
+| 6 | Word: tick-mark length in twips, a seventieth of the smaller side of the plot rectangle (`37.03` in 1.00) |
+| 8 | Two words worked out when the chart is drawn, changing with the gallery format: the space the tick labels take and the axis's position **(inferred)**. In a column chart the value axis's second word is the plot area's left edge. |
 | 12 | **Axis line** format; 0 pattern = axis hidden. Bits 9–2 of its word at +2 hold the saved Macintosh font number. |
 | 16 | **Major gridlines** format. Bits 9–2 of its word at +2 hold the saved font size. |
 | 20 | **Minor gridlines** format |
@@ -1428,7 +1432,8 @@ into Excel's three title slots.
 ### 16.8 Data-point formats and the series word list
 
 The **series word list** is one word per series of the chart (count at mem
-312). Open skips it.
+312): the memory pointers to the chart's series structures, which the drawing
+code collects into a list (`37.13` in 1.00). Junk on disk; Open skips it.
 
 **Data-point format records** (12 bytes each, count at mem 316) hold
 per-point overrides; the same layout is used for the chart's default series
@@ -1591,10 +1596,8 @@ None of these affects reading the samples or writing valid files.
 **Worksheets and macro sheets**
 
 * What the six bytes at the start of an external-document entry hold in memory; Excel writes zeros (§8).
-* A table record's flag bits, what the lists its link at offset 6 joins are for, and what Excel does with the
-  P1 input a one-argument TABLE stores (§12.6).
+* What the lists a table record's link at offset 6 joins are for (§12.6).
 * Most of the 88 extra window-state bytes of version 18 (§13).
-* Which state memory token `2F` marks (§15.2).
 * What Excel 1.04 changed besides adding CHANGE.LINK; no 1.04 code or sample is available (§2.1).
 
 **Checked in Excel but not kept as samples**
@@ -1604,14 +1607,11 @@ Functions numbered 256 and up, compiled by Excel 1.5 from `tests/Data/formulas-1
 **Charts** (§16)
 
 * Option flags 11–10 of the chart record, which overlays set and nothing reads (§16.5).
-* The chart header's bytes 5–7 and 14–17 (§16.5).
-* The 12-byte record trailer words.
-* The per-series word list.
+* The chart header's byte 5, and the axis records' words at offsets 8 and 10 (§16.5).
 
 **Workspace files** (Appendix B)
 
 * The layout of the preferred chart format.
-* What the word after each folder name refers to.
 
 ---
 
@@ -1957,7 +1957,7 @@ Window entry:
 | byte | Document kind: `0x10` worksheet, `0x40` macro sheet, `0x20` chart (the in-memory kinds of §5) |
 | Pascal string | Document name. Excel 1.00 writes the window title, which includes the volume for a document on another disk (`Ws:Clock saved`). |
 | Pascal string | Folder: the volume name and any folder names, each followed by `:` |
-| word | Used only on a system with HFS (low-memory `FSFCBLen` above 0). 0 for a document on the startup disk, 2 for one on the third floppy mounted, so presumably a volume or directory reference **(inferred)**. |
+| word | 0 unless the system has HFS (low-memory `FSFCBLen` above 0). Then it is the low word of the directory ID of the document's folder, from an HFS Dispatch call whose parameter block returns it at offset 50, `ioWDDirID`'s low word (`48.22` in 1.00) **(inferred from the parameter-block offsets)**. 2, the ID of a volume's root directory, for a document at the top of a floppy; 0 for one on the startup disk. |
 | 4 words | Window rectangle (top, left, bottom, right), in global coordinates. Open fits it to the screen. |
 | 41 bytes | Window state, as in §13. Absent for a chart. |
 | word + `n` × 6 bytes | Selected areas, as in §13. Absent for a chart. |

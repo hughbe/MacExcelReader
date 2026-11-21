@@ -156,6 +156,7 @@ Things to know:
 | Nov 2026 | 1.03 | COLUMN.WIDTH, error formulas, `recalc 1`, `=(R1C1,R2C2)`, TABLE with one input | Column widths in pixels, all seven error codes, state word 0x018 makes Open recalculate, memory error `27` with #NULL! or #VALUE!, table byte 14 (spec §6, §12.4, §12.6, §15.4) |
 | Nov 2026 | 1.5 | Re-saved version-18 sheets as samples | A stream position on a block boundary is stored as offset 512 (spec §1.2) |
 | Nov 2026 | 1.00 | Chart > Axes on an overlay chart, with the chart code decompiled | Overlay axes are their axis line patterns; the overlay option flags share the main chart's scales; data-label bits and the two built-in text objects (spec §16.5, §16.7, §16.8) |
+| Nov 2026 | 1.00 | A sheet linked to `Src`, saved while `Src` was open | External-document entries still start with 6 zero bytes (spec §8) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

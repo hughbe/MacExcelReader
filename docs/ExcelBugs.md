@@ -89,6 +89,14 @@ at 0 still showed 0 for `=1/0` and `=SQRT(-1)` after CALCULATE.NOW, in automatic
 a loaded formula only when something it depends on changes, or when it opens a file whose state word `0x018` is
 1 or 2 (§6). A writer that cannot work out the results should set that word.
 
+## TABLE with one argument takes a second input from stale memory (Excel 1.00, 1.03)
+
+Seen in Excel 1.03, and read from Excel 1.00's code (`4b.05`). The macro command TABLE copies its arguments
+into a buffer on the stack without clearing it, and treats each slot whose row is not the "missing" marker
+`0x4000` as an input. With one argument, `=TABLE(!Y7)`, the second slot keeps whatever was there before, so the
+table gets a column input it was not given: P1 every time in these tests. Write `=TABLE(!Y7,)` for a table
+with only a row input.
+
 ## Old fixed-argument tokens in Excel 1.5 (deliberate)
 
 Not a bug, but it looks like one. It was read from Excel 1.5's Save code, and the samples bear it out. Excel

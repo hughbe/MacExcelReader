@@ -102,6 +102,8 @@ public static class FormulaTokens
         0x2B => "DeletedArea",
         0x2C => "NameReference",
         0x2D => "NameArea",
+        0x2E => "DefinitionMemoryFunction",
+        0x2F => "DefinitionMemoryNoMemory",
         >= 0x30 and <= 0x37 => "Marked" + GetName((byte)(code - (code == 0x37 ? 0x13 : 0x0D))),
         0x38 => "FunctionVarArgsInternal",
         0x39 => "FunctionHigh",

@@ -27,9 +27,9 @@ public sealed class ExcelWorkspaceWindow
     public string Folder { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the word that follows the folder. Resume only uses it on a system with HFS. It was 0 for a
-    /// document on the startup disk and 2 for one on the third floppy, so it is presumably a volume or directory
-    /// reference <b>(inferred)</b>.
+    /// Gets or sets the low word of the directory ID of the document's folder, which Excel writes only on a system
+    /// with HFS, and 0 otherwise: 2 (a volume's root directory) for a document at the top of a floppy (spec
+    /// Appendix B).
     /// </summary>
     public ushort Directory { get; set; }
 

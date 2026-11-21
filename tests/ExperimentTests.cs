@@ -96,7 +96,7 @@ public class ExperimentTests
     [Fact]
     public void TableOneArgument_StoresTwoInputs()
     {
-        // The macro command TABLE(Y7) with one argument stores both flags and a second input of P1 (spec §12.6).
+        // The macro command TABLE(Y7) with one argument takes a second input from an uncleared buffer: P1 here (spec §12.6).
         var formula = Load("Table One Argument").Cells["B6"].Formula!;
         Assert.Equal(0xC0, formula.Fixups[3 + 14]);
         Assert.Equal((ExcelCellAddress.Parse("Y7"), ExcelCellAddress.Parse("P1")), formula.TableInputs);
