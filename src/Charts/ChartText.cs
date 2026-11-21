@@ -104,11 +104,32 @@ public sealed class ChartText
     /// <summary>Gets or sets an arrow's head width.</summary>
     public ArrowHeadWidth HeadWidth { get => (ArrowHeadWidth)((Word(18) >> 12) & 3); set => SetWord(18, (ushort)((Word(18) & ~0x3000) | (((int)value & 3) << 12))); }
 
-    /// <summary>Gets or sets an arrow's head length.</summary>
-    public ArrowHeadLength HeadLength { get => (ArrowHeadLength)((Word(18) >> 6) & 3); set => SetWord(18, (ushort)((Word(18) & ~0x00C0) | (((int)value & 3) << 6))); }
+    /// <summary>Gets or sets an arrow's head length; <see cref="ArrowHeadLength.None"/> means no head.</summary>
+    public ArrowHeadLength HeadLength { get => (ArrowHeadLength)((Word(18) >> 8) & 3); set => SetWord(18, (ushort)((Word(18) & ~0x0300) | (((int)value & 3) << 8))); }
 
-    /// <summary>Gets or sets an arrow's head style.</summary>
-    public ArrowHeadStyle HeadStyle { get => (ArrowHeadStyle)((Word(18) >> 8) & 3); set => SetWord(18, (ushort)((Word(18) & ~0x0300) | (((int)value & 3) << 8))); }
+    /// <summary>
+    /// Gets or sets an arrow's head style. Setting <see cref="ArrowHeadStyle.None"/> sets the length to
+    /// <see cref="ArrowHeadLength.None"/>; setting a head on an arrow without one gives it a medium length.
+    /// </summary>
+    public ArrowHeadStyle HeadStyle
+    {
+        get => HeadLength == ArrowHeadLength.None ? ArrowHeadStyle.None : (Word(18) & 0x0080) != 0 ? ArrowHeadStyle.Open : ArrowHeadStyle.Filled;
+        set
+        {
+            if (value == ArrowHeadStyle.None)
+            {
+                HeadLength = ArrowHeadLength.None;
+                return;
+            }
+
+            if (HeadLength == ArrowHeadLength.None)
+            {
+                HeadLength = ArrowHeadLength.Medium;
+            }
+
+            SetWord(18, (ushort)(value == ArrowHeadStyle.Open ? Word(18) | 0x0080 : Word(18) & ~0x0080));
+        }
+    }
 
     private ushort Word(int offset) => System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(Record.AsSpan(offset));
 

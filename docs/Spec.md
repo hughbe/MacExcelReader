@@ -1009,7 +1009,7 @@ numbers from 56 on; its translation table (§2.2) maps between them. Functions 1
 | Byte | Meaning |
 |-----:|---------|
 | 0–1 | Bits 15–4: the offset of the function's name in the name list. In Excel 1.00 the list is the Pascal strings at `PCOD` 0 offset `0x14FA` (COUNT is at `0x00B`, TRUE at 0); Save's function-name list (§14) reads names this way. Excel 1.03 and 1.5 build the list at start-up and use the same field as an offset into it (`g0812` in 1.03), with different values. Bits 3–0: flags, below. |
-| 1 | Low nibble: flags. `0x01`: macro sheets only. `0x04`: has a dialog-box form: the compiler accepts `NAME?(…)` only for functions with this flag (`0f.00`). `0x08`: volatile; it is set on INDEX, RAND, NOW, AREAS, ROWS and COLUMNS, and formulas that call these start with `19 01`. `0x02` is set on SERIES (a chart-only function) and on functions 176, 203 and 204; it marks functions that cannot be used in cell formulas **(inferred)**. The high nibble belongs to the name offset. |
+| 1 | Low nibble: flags. `0x01`: macro sheets only. `0x04`: has a dialog-box form: the compiler accepts `NAME?(…)` only for functions with this flag (`0f.00`). `0x08`: volatile; it is set on INDEX, RAND, NOW, AREAS, ROWS and COLUMNS, and formulas that call these start with `19 01`. `0x02` is set on SERIES (a chart-only function) and on functions 176, 203 and 204, and marks functions that cannot be used in a cell formula: Excel 1.00's FORMULA would not enter `=SERIES("a",R1C1,R1C2,1)` in a macro-sheet cell (`Empty Arguments` sample).. The high nibble belongs to the name offset. |
 | 2 | Low nibble = minimum arguments; high nibble − 1 = maximum arguments |
 | 3 | Return type |
 | 4 | Type the first argument accepts |
@@ -1017,10 +1017,12 @@ numbers from 56 on; its translation table (§2.2) maps between them. Functions 1
 | 6–9 | How the function is implemented. Byte 7 selects a family of routines (in 1.03, `0x1C` for commands, `0x11` for SUM-like aggregates, `0x12` for IF and CHOOSE, `0x16` for date and financial functions); byte 6 is an argument to it; for commands bytes 8–9 are the segment and procedure that carry them out (PROTECT.DOCUMENT is `22.07`, TABLE `4a.05`). Excel 1.5's families are renumbered (`0x28` for commands). |
 
 Type bytes are bit masks. `0x01`: number; `0x02`: text; `0x04`: logical; `0x08`: reference; `0x10`: error;
-`0x20`: command; `0x40`: array; `0x80`: the argument may be left empty. `0x80` is on the arguments of the
+`0x20`: command; `0x40`: array; `0x80`: an empty argument means "not given". `0x80` is on the arguments of the
 commands whose omitted arguments mean "leave unchanged" or "use the dialog's setting" (STYLE, BORDER, FONT,
 PAGE.SETUP, CALCULATION, SORT…), OPEN's second, INPUT's later ones and DCOUNT's field, and on no function that
-needs every argument **(inferred from which functions have it)**.
+needs every argument **(inferred from which functions have it)**. The compiler accepts an empty argument
+anywhere (`=ROUND(1,)` is `1E 00 01 16 41 1B`); where the bit is absent the function sees 0, so `=ROUND(1,)`
+gives 1 and `=MID("abc",,1)` gives #VALUE! in Excel 1.00 (`Empty Arguments` sample).
 
 ### 15.4 How Excel compiles formula text
 
@@ -1487,13 +1489,13 @@ memory offsets:
 | 10 | Word: bit 13: **automatic text**; bit 12: vertical orientation; bits 11–9: horizontal alignment; bits 8–6: vertical alignment (values below); bit 5: show key; bit 4: show value |
 | 12 | Font descriptor |
 | 16 | An arrow's line format (§16.4). Byte 17 is its pattern: 0 for text, so a non-zero byte 17 is what makes the object an **arrow**. The word at 18 holds the shaft weight in bits 13–12 (line weight values). |
-| 20 | Text: bytes 20 and 21 hold the saved Macintosh font number and size. Arrow: a word, bits 13–12: head width; bit 9: the head is open rather than filled; bit 8: there is a head; bits 7–6: head length (values below). |
+| 20 | Text: bytes 20 and 21 hold the saved Macintosh font number and size. Arrow: a word, bits 13–12: head width; bits 9–8: head length, 0 meaning no head; bit 7: the head is open rather than filled (values below). |
 | 22 | Area format of the text box. Bit 14 of its word at +6 is automatic size, and its box (+8) is the text's position and size in twips. |
-| 38, 46, 48 | The arrow's other end, held as mem 0 and mem 30–33 hold the first: thousandths at 38 (and 44, not saved), twips at 46 and 48 (`33.19`). The arrowhead is at this end **(inferred from `PROFIT CHART`'s arrow, which points at the break-even point)**. |
+| 38, 46, 48 | The arrow's other end, held as mem 0 and mem 30–33 hold the first: thousandths at 38 (and 44, not saved), twips at 46 and 48 (`33.19`). The arrowhead is drawn at this end: in the `Arrow` and `Arrow Heads` samples it is the end with the larger x, where Excel 1.00 draws the head. |
 
 An arrow is a free object (kind 6) with automatic text and no string; Chart > Add Arrow makes one, and its
-Format > Patterns dialog sets the fields above (`Arrow` and `Arrow Patterns` samples, Excel 1.00). The values
-come from setting each field in that dialog and saving.
+Format > Patterns dialog sets the fields above (`Arrow`, `Arrow Patterns` and `Arrow Heads` samples, Excel
+1.00). The values come from setting each field in that dialog and saving, five times in all.
 
 Text kind:
 
@@ -1521,22 +1523,24 @@ Vertical alignment:
 | 1 | Centre |
 | 2 | Top |
 
-Arrow head width and length (head length values from the first and third choices; the second is
-**(inferred)**):
+Arrow head width:
 
-| Value | Width | Length |
-|---:|---|---|
-| 0 | Narrow | Short |
-| 1 | Medium | Medium |
-| 2 | Wide | Long |
-
-Arrow head style:
-
-| Bits 9–8 | Dialog choice |
+| Value | Width |
 |---:|---|
-| 0 | No head |
-| 1 | Filled head |
-| 3 | Open head |
+| 0 | Narrow |
+| 1 | Medium |
+| 2 | Wide |
+
+Arrow head length, which is also whether there is a head:
+
+| Value | Length |
+|---:|---|
+| 0 | No head (the dialog's first head style) |
+| 1 | Short |
+| 2 | Medium |
+| 3 | Long |
+
+With a head, bit 7 chooses the dialog's second head style (open, bit set) or third (filled, bit clear).
 
 On load the titles (kinds 1–3) of the main chart are moved out of the list into Excel's three title slots.
 
@@ -1754,7 +1758,7 @@ rules from the function tables (§15.3), and numbers 208–291 from Excel 1.5's 
   other uses `22` (§15.4).
 * **Returns**, **First**, **Others**: what the function returns and what its first and later arguments accept:
   **N** number, **T** text, **L** logical, **R** reference, **E** error, **C** command, **A** array, **?**
-  type bit `0x80`: the argument may be left empty **(inferred, §15.3)**.
+  type bit `0x80`: an empty argument means "not given" **(inferred, §15.3)**.
 * **Flags**: **M** macro sheets only, **D** has a dialog-box form (`NAME?(…)`), **V** volatile (formulas start
   with `19 01`), **X** flag `0x02` (§15.3).
 * **Since**: the first release with the function (§2.1).

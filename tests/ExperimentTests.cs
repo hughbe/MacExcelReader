@@ -430,9 +430,11 @@ public class ExperimentTests
     [Theory]
     [InlineData("Arrow", 4, ChartPattern.Solid, ChartLineWeight.Hairline, ArrowHeadWidth.Medium, ArrowHeadLength.Short, ArrowHeadStyle.Filled)]
     [InlineData("Arrow Patterns", 5, ChartPattern.DarkGray, ChartLineWeight.Medium, ArrowHeadWidth.Narrow, ArrowHeadLength.Long, ArrowHeadStyle.Open)]
+    [InlineData("Arrow Heads", 5, ChartPattern.DarkGray, ChartLineWeight.Medium, ArrowHeadWidth.Narrow, ArrowHeadLength.None, ArrowHeadStyle.None)]
     public void Arrows_PatternWeightAndHead(string name, int index, ChartPattern pattern, ChartLineWeight weight, ArrowHeadWidth width, ArrowHeadLength length, ArrowHeadStyle style)
     {
-        // PROFIT CHART's arrow, and an arrow set in Format > Patterns in Excel 1.00 (spec §16.7).
+        // PROFIT CHART's arrow, and an arrow set in Format > Patterns in Excel 1.00: long and open, then no head
+        // (spec §16.7).
         var arrow = ChartDocument.Load(SamplePath(name)).MainChart.Texts[index];
         Assert.True(arrow.IsArrow);
         Assert.Equal(pattern, arrow.ArrowLine.Pattern);
@@ -467,5 +469,17 @@ public class ExperimentTests
         Assert.Equal(ChartLineWeight.Thick, format.Line.Weight);
         Assert.False(format.AutomaticLine);
         Assert.Equal(new byte[3], new[] { chart.PointFormats[0][5], chart.PointFormats[0][9], chart.PointFormats[0][10] });
+    }
+
+    [Fact]
+    public void EmptyArguments_CompileEverywhereButSeriesIsRefused()
+    {
+        // Excel 1.00 macro sheet, formulas entered with FORMULA (spec §15.3). An empty argument compiles to 16 whether
+        // or not the function's type byte has 0x80; SERIES (flag 0x02) is refused, leaving C6 empty.
+        var document = Load("Empty Arguments");
+        Assert.Equal([0x1E, 0x00, 0x01, 0x16, 0x41, 0x1B], document.Cells["C2"].Formula!.Expression.ToArray());
+        Assert.Equal(1, Convert.ToDouble(document.Cells["C2"].Value));          // ROUND(1,) is ROUND(1,0)
+        Assert.Equal("#VALUE!", document.Cells["C3"].Value);                   // MID("abc",,1): start 0
+        Assert.Equal(ExcelCellType.Empty, document.Cells["C6"].Type);
     }
 }

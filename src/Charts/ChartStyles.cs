@@ -117,28 +117,31 @@ public enum ArrowHeadWidth
     Wide = 2,
 }
 
-/// <summary>The length of an arrowhead (spec §16.7).</summary>
+/// <summary>The length of an arrowhead: bits 9–8 of the arrow's head word, 0 meaning no head (spec §16.7).</summary>
 public enum ArrowHeadLength
-{
-    /// <summary>Short.</summary>
-    Short = 0,
-
-    /// <summary>Medium.</summary>
-    Medium = 1,
-
-    /// <summary>Long.</summary>
-    Long = 2,
-}
-
-/// <summary>The style of an arrowhead: bits 9–8 of the arrow's head word (spec §16.7).</summary>
-public enum ArrowHeadStyle
 {
     /// <summary>No head.</summary>
     None = 0,
 
-    /// <summary>A filled head.</summary>
+    /// <summary>Short.</summary>
+    Short = 1,
+
+    /// <summary>Medium.</summary>
+    Medium = 2,
+
+    /// <summary>Long.</summary>
+    Long = 3,
+}
+
+/// <summary>The style of an arrowhead, as the Patterns dialog offers it (spec §16.7).</summary>
+public enum ArrowHeadStyle
+{
+    /// <summary>No head: the head length is 0.</summary>
+    None = 0,
+
+    /// <summary>A filled head: bit 7 clear.</summary>
     Filled = 1,
 
-    /// <summary>An open head.</summary>
-    Open = 3,
+    /// <summary>An open head: bit 7 set.</summary>
+    Open = 2,
 }
