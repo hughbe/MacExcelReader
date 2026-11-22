@@ -41,6 +41,9 @@ public sealed class Program
                 branch.AddCommand<PackCommand>("pack")
                     .WithDescription("Put files on a floppy image with a Driver macro sheet that opens, probes and re-saves each.")
                     .WithExample("excel-test", "pack", "Test.dsk", "Formulas 01", "Chart1");
+                branch.AddCommand<JunkCommand>("junk")
+                    .WithDescription("Fill every field Excel is said to ignore or rebuild with junk, to test it in Excel.")
+                    .WithExample("excel-test", "junk", "Expenses", "out/Expenses");
                 branch.AddCommand<CheckCommand>("check")
                     .WithDescription("After Driver has run in Excel, compare Excel's results and re-saved copies with the originals.")
                     .WithExample("excel-test", "check", "Test.dsk");
