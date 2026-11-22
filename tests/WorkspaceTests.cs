@@ -18,7 +18,7 @@ public class WorkspaceTests
         Assert.False(workspace.Iteration);
         Assert.Equal(0.001, workspace.MaxChange);
         var window = Assert.Single(workspace.Windows);
-        Assert.Equal(ExcelWorkspaceWindow.WorksheetKind, window.Kind);
+        Assert.Equal(ExcelDocumentKind.Worksheet, window.Kind);
         Assert.Equal("Expenses", window.DocumentName);
         Assert.Equal("Excel Data:", window.Folder);
         Assert.Equal((short)73, window.Window.Top);
@@ -46,7 +46,7 @@ public class WorkspaceTests
         Assert.Equal(2, workspace.PrinterBaud);   // 1200
         Assert.Equal(1, workspace.PrinterPort);   // modem
         Assert.Equal(1640, workspace.PreferredChartFormat.Length);
-        Assert.Equal([ExcelWorkspaceWindow.ChartKind, ExcelWorkspaceWindow.MacroSheetKind, ExcelWorkspaceWindow.MacroSheetKind], workspace.Windows.Select(w => w.Kind));
+        Assert.Equal([ExcelDocumentKind.Chart, ExcelDocumentKind.MacroSheet, ExcelDocumentKind.MacroSheet], workspace.Windows.Select(w => w.Kind));
         Assert.Equal("Ws:Clock saved", workspace.Windows[0].DocumentName);
         Assert.Equal(bytes, workspace.ToArray());
     }
@@ -76,7 +76,7 @@ public class WorkspaceTests
         var workspace = new ExcelWorkspace();
         workspace.Windows.Add(new ExcelWorkspaceWindow
         {
-            Kind = ExcelWorkspaceWindow.ChartKind,
+            Kind = ExcelDocumentKind.Chart,
             DocumentName = "Chart1",
             Folder = "Disk:",
             Window = new ExcelWindow(40, 10, 300, 400, new byte[ExcelWindow.StateSize]),

@@ -18,7 +18,7 @@ charts. It was reverse-engineered from the applications' code and checked agains
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 60 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 70 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
@@ -136,7 +136,7 @@ from memory (above), except in the cell table, where the writer replaces them wi
 | 1.03 | 17 | 0–207 | Writes a zero-length name for an external entry that refers to the document itself (§8), and makes its in-memory external entries 16 bytes (§8). Function table and tokens identical to 1.01's. |
 | 1.04 | 17 | 0–208 | Adds CHANGE.LINK (208, a command with up to two text arguments, carried out by `44.00` in 1.04) and a third argument to OPEN, matching the Read Only box its Open dialog gains (Appendix A). Its Save writes the function count as one more than the highest function number a formula uses (§5): 209 for a sheet calling CHANGE.LINK, and 208 for one that calls nothing newer even when the file it opened said 209 (`Changes 1.04`, `No New Functions 1.04` samples). It keeps a document's file reference between saves and flushes the volume after saving (`44.0c`, `44.0d` in 1.04), which does not change the bytes written. Embedded code identical to 1.03's apart from the import word (§2.3). Compiler and tokens identical to 1.03's. |
 | 1.06 (December 1987) | 17 | 0–208 | Writes the same files as 1.04, with byte-identical embedded code, so its files cannot be told from 1.04's (§2.3); compiler, function table and tokens unchanged (`Changes 1.06` and `No New Functions 1.06` samples). Its other changes are inside the application: a `SIZE` resource for MultiFinder, one routine (`01.1a` in 1.06) for all its checks for pending events, and no longer reserving master pointers around Open (1.04's `15.2b`, `15.2c`). |
-| 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of eleven more functions (Appendix A; OPEN's had changed in 1.04) and the token class of function calls inside IF and CHOOSE (§15.4). Marks charts with more than 102 categories as chart version 1, which earlier releases refuse (§16.2). Adds frozen panes and gridline colours to windows (§13) and text sections, scaling by trailing commas, `@` and colours to number formats (§7). |
+| 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of eleven more functions (Appendix A; OPEN's had changed in 1.04). Marks charts with more than 102 categories as chart version 1, which earlier releases refuse (§16.2). Adds frozen panes and gridline colours to windows (§13) and text sections, scaling by trailing commas, `@` and colours to number formats (§7). |
 
 The format version is header word 2 (§4). Excel 1.00's Open accepts only version 17 (`46.06`), and so do
 1.01's (`46.07`), 1.03's, 1.04's and 1.06's (`44.0e` in 1.04 and 1.06). Excel 1.5 writes 17 unless the
@@ -312,8 +312,9 @@ functions. Between the base count and the count, 1.00's files hold the names of 
 start of section 7 (§14). In released 1.00 the base count and the table length are both 208, so it always
 writes 208 and never a name. Excel 1.01 keeps the flag per document, in state word `0x01C` (§6), and drops
 the names; 1.03 does the same. Excel 1.04's Save (`45.0d` in 1.04 and 1.06) and 1.5's write 208, or one more
-than the highest function number any formula uses if that is higher. Every sample has 208 except `INVOICE MACROS`, which uses
-GET.DOCUMENT (238) and has 239.
+than the highest function number any formula uses if that is higher. Every sample has 208 except
+`INVOICE MACROS` (GET.DOCUMENT, 238, so 239), `Changes 1.04` and `Changes 1.06` (CHANGE.LINK, 208, so 209) and
+`Functions 256 And Up` (292).
 
 ---
 
@@ -1195,15 +1196,25 @@ for the same tokens as `=SUM(A1,B1)`. On an English system it keeps the comma, a
 For a function call:
 
 * Reference class when it is in one of the first three places above.
-* In Excel 1.00–1.03, reference class as any argument of `IF` or `CHOOSE`. In Excel 1.5 these arguments follow
-  the next two rules, like any other argument (§2.1).
 * Array class (`0x6x`) when it is an argument that accepts arrays and the function returns an array.
 * Reference class when it is an argument that accepts references and the function can return a reference.
 * Value class everywhere else.
 
-**Array formulas and name definitions.** In the shared expression of an array formula (§12.6) and in a name
-definition, operands of operators, and arguments that accept arrays (type bit `0x40`), take array class where
-the rules above give value class. The expression as a whole keeps the class the rules give.
+The arguments of `IF` and `CHOOSE` follow these rules like any other: `=IF(A1,NOW())` is `… 41 4C …` and
+`=IF(A1,IF(B1,1))` gives the inner IF reference class (`22 02 01`), since IF's branches accept references and IF
+can return one, while an IF in the condition gets value class (`If Classes`, Excel 1.00, typed and through
+FORMULA alike; `formulas-1.5`, Excel 1.5). The macro sheets of the 1.00 disk (`COMMANDS`, `DB.FORM`, `REPLACE`,
+`MATRIX`, `CLOCK.MS`) instead have reference class for every function call directly inside IF or CHOOSE,
+`=IF(ISERROR(A2),GOTO(A15))` as `… 21 03 … 21 35 …`. Excel never recompiles a formula when it opens a file, so
+those tokens come from the compiler of an earlier build **(inferred)**; a reader decompiles both the same way.
+
+**Array formulas and name definitions.** In a name definition, operands of operators and arguments that accept
+arrays (type bit `0x40`) take array class where the rules above give value class. In the shared expression of
+an array formula (§12.6), arguments that accept arrays do too, and operands of operators only where the
+operator is itself inside such an argument: Excel 1.00 and 1.5 compile `{=A1:A2*2}` with the area in value
+class (`45 …`) but `{=SUM(A1:A2*B1:B2)}` with both areas in array class (`Array Formula Classes`, `Formulas 1.5
+Sheet 2`). The expression as a
+whole keeps the class the rules give.
 `{=AVERAGE(D4-B9:B18)}` is `64 C0 03 03  65 C0 08 C0 11 01 01  04  42 01 05` (both operands of the subtraction
 in array class, AVERAGE itself in value class); the definition `rads = PI()/180` is `61 13  1E 00 B4  06`.
 
@@ -1216,7 +1227,10 @@ arguments in the fixed-count form, so older releases can still read it. `FORMULA
 release and `FORMULA(A1,B1)` is `42 02 39`, readable only by 1.5 (Save warns, and records that in the function
 count, §5). Its Save also warns for DISPLAY with four or more arguments, PRINT with six or more, and OPEN with
 three or more (Excel 1.04 already accepts a third OPEN argument; 1.03 and earlier do not). The pre-release 1.5
-build in the samples lacks the exception (§2.3).
+build in the samples lacks the exception (§2.3). Excel 1.5's Save (`47.19`) also writes every call of a
+function whose minimum and maximum argument counts are equal in the fixed-count form, whatever its argument
+count byte holds, so it drops the dialog-box bit: `DATA.DELETE?()`, the only dialog-box function with a fixed
+count, is `42 80 82` from Excel 1.00 and `41 82` from 1.5 (`Formulas 1.5 Sheet 5`).
 
 **Dialog-box forms** *(code)*. A `?` directly after a function name, as in `RUN?()`, sets bit 7 of the
 argument count. That forces the `22` form: `RUN?()` is `42 80 91`. It is a syntax error unless the function

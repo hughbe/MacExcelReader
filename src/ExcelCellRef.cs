@@ -109,7 +109,7 @@ public readonly struct ExcelCellRef
     /// <summary>
     /// Gets the full <see cref="ExcelCell"/>, creating it if needed.
     /// </summary>
-    public ExcelCell GetCell() => _grid.TryGet(Row, Column)!;
+    public ExcelCell GetCell() => _grid.Find(Row, Column)!;
 
     /// <inheritdoc/>
     public override string ToString() => $"{Address} ({Type})";

@@ -303,7 +303,7 @@ sealed class FormulaList
 
         if (RecalculationState is { } state)
         {
-            document.State.RecalculationState = state;
+            document.State.RecalculationState = (ExcelRecalculationState)state;
         }
 
         return document;

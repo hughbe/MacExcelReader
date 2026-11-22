@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace MacExcelReader;
 
 /// <summary>
-/// The 630-byte sheet state block (spec §5): calculation settings, grid extent, column widths,
+/// The 630-byte sheet state block (spec §6): calculation settings, grid extent, column widths,
 /// protection and the standard font. The raw bytes are kept so unknown fields round-trip; the
 /// properties read and write the fields whose meaning is known.
 /// </summary>
@@ -121,12 +121,33 @@ public sealed class ExcelSheetState
     }
 
     /// <summary>
-    /// Gets or sets the recalculation state: 0 clean, 1 needs recalculation, 2 a distinct pending state.
+    /// Gets or sets the recalculation state (spec §6, 0x018). Excel recalculates a sheet saved in any state but
+    /// <see cref="ExcelRecalculationState.Clean"/> as soon as it opens it.
     /// </summary>
-    public ushort RecalculationState
+    public ExcelRecalculationState RecalculationState
     {
-        get => GetWord(RecalculationStateOffset);
-        set => SetWord(RecalculationStateOffset, value);
+        get => (ExcelRecalculationState)GetWord(RecalculationStateOffset);
+        set => SetWord(RecalculationStateOffset, (ushort)value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether a formula uses a function beyond Excel 1.00's 208 (spec §6, 0x01C), which Excel 1.01
+    /// and later set and use to choose the function count they save.
+    /// </summary>
+    public bool UsesLaterFunctions
+    {
+        get => GetWord(0x01C) != 0;
+        set => SetWord(0x01C, (ushort)(value ? 1 : 0));
+    }
+
+    /// <summary>
+    /// Gets or sets the number of defined names that have a definition (spec §6, 0x022). Define Name counts it up
+    /// and Excel carries it through Open and Save unchanged, so a writer should keep it equal to the true count.
+    /// </summary>
+    public ushort DefinedNameCount
+    {
+        get => GetWord(0x022);
+        set => SetWord(0x022, value);
     }
 
     /// <summary>
@@ -279,6 +300,19 @@ public sealed class ExcelSheetState
         state.SetWord(0x254, 7);
         return state;
     }
+}
+
+/// <summary>The recalculation state: state word 0x018 (spec §6).</summary>
+public enum ExcelRecalculationState : ushort
+{
+    /// <summary>The stored results are current.</summary>
+    Clean = 0,
+
+    /// <summary>The sheet needs recalculating.</summary>
+    Needed = 1,
+
+    /// <summary>A pending state Excel never lowers to <see cref="Needed"/>; it also recalculates on Open.</summary>
+    Pending = 2,
 }
 
 /// <summary>The calculation mode: state word 0x002 (spec §6).</summary>

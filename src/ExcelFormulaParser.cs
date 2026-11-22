@@ -23,7 +23,7 @@ public sealed class ExcelFormulaSyntaxException : FormatException
 }
 
 /// <summary>
-/// Compiles A1-style formula text, such as <c>=SUM($A$1:$A$5)*2</c>, into parsed expressions (spec §9),
+/// Compiles A1-style formula text, such as <c>=SUM($A$1:$A$5)*2</c>, into parsed expressions (spec §15),
 /// choosing token classes and <c>IF</c> jump tokens the way Excel 1.x does.
 /// </summary>
 /// <remarks>
@@ -59,10 +59,10 @@ public static class ExcelFormulaParser
     /// </param>
     /// <param name="version">
     /// The Excel release whose functions and encoding to use. Excel 1.00–1.03 (the default) produce formulas
-    /// every Excel 1.x can read; Excel 1.5 adds functions and encodes a few things differently (spec §9.4).
+    /// every Excel 1.x can read; Excel 1.5 adds functions and encodes a few things differently (spec §15.4).
     /// </param>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
-    public static ExcelFormula Parse(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
+    internal static ExcelFormula Parse(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
     {
         var (expression, fixups) = Compile(text, document, definition: false, version);
         return new ExcelFormula(expression, fixups);
@@ -676,7 +676,7 @@ public static class ExcelFormulaParser
         }
 
         // {1,2;3,4}: rows separated by ';', columns by ','. Elements are numbers (optionally negative) or strings,
-        // the two element types the samples show (spec §8.5).
+        // the two element types the samples show (spec §12.5).
         private ArrayNode ParseArrayConstant()
         {
             var start = _current;
@@ -741,7 +741,7 @@ public static class ExcelFormulaParser
                 throw new ExcelFormulaSyntaxException("The array constant is too large", start.Position);
             }
 
-            // The data block (spec §8.5): column count (0 = 256), row count, then elements: type 1 and a double,
+            // The data block (spec §12.5): column count (0 = 256), row count, then elements: type 1 and a double,
             // or type 2 and a Pascal string.
             var block = new List<byte> { (byte)columns, (byte)(rows.Count >> 8), (byte)rows.Count };
             foreach (var r in rows)
@@ -1051,6 +1051,9 @@ public static class ExcelFormulaParser
 
     private readonly record struct Context(ContextKind Kind, ExcelValueTypes Accepts = ExcelValueTypes.None)
     {
+        // For an operator's operands: whether the operator itself sits where an array is accepted.
+        public bool InArrayArgument { get; init; }
+
         public static Context Top => new(ContextKind.Top);
 
         public static Context DefinitionTop => new(ContextKind.DefinitionTop);
@@ -1085,14 +1088,21 @@ public static class ExcelFormulaParser
 
         private static byte WithClass(byte baseCode, int tokenClass) => (byte)((baseCode & 0x1F) | (tokenClass << 5));
 
-        // In an array formula or a name definition, operator operands and arguments that accept arrays take array
-        // class where they would otherwise take value class; the formula as a whole does not (spec §9.4).
+        // In a name definition, operator operands and arguments that accept arrays take array class where they would
+        // otherwise take value class. In an array formula, arguments that accept arrays do, and operator operands only
+        // where the operator is itself in such an argument: {=A1:A2*2} keeps value class in Excel 1.00 and 1.5, while
+        // {=SUM(A1:A2*B1:B2)} takes array class (spec §15.4). The formula as a whole keeps the class the other rules give.
         private int InArrayFormula(Context context, int tokenClass)
-            => (ArrayFormula || _definition) && tokenClass == ValueClass
-                && (context.Kind == ContextKind.Operator
-                    || (context.Kind is ContextKind.Argument or ContextKind.IfArgument && (context.Accepts & ExcelValueTypes.Array) != 0))
+            => tokenClass == ValueClass
+                && (context.Kind == ContextKind.Operator ? _definition || (ArrayFormula && context.InArrayArgument) : (ArrayFormula || _definition) && AcceptsArrays(context))
                 ? ArrayClass
                 : tokenClass;
+
+        private static bool AcceptsArrays(Context context)
+            => context.Kind is ContextKind.Argument or ContextKind.IfArgument && (context.Accepts & ExcelValueTypes.Array) != 0;
+
+        private static Context OperatorContext(Context parent)
+            => Context.Operator with { InArrayArgument = parent.Kind == ContextKind.Operator ? parent.InArrayArgument : AcceptsArrays(parent) };
 
         public bool ArrayFormula { get; init; }
 
@@ -1103,12 +1113,11 @@ public static class ExcelFormulaParser
             _ => ValueClass,
         });
 
-        // Excel 1.00–1.03 give every function call inside IF or CHOOSE reference class; Excel 1.5 treats them like
-        // other arguments (spec §9.4).
+        // The arguments of IF and CHOOSE follow the same rules as any other in every release; the 1.00 disk's macro
+        // sheets carry reference-class calls from an earlier build's compiler (spec §15.4).
         private int FunctionClass(Context context, ExcelValueTypes returns) => InArrayFormula(context, context.Kind switch
         {
             ContextKind.Range or ContextKind.MacroTarget or ContextKind.DefinitionTop => ReferenceClass,
-            ContextKind.IfArgument when _version < ExcelVersion.Excel150 => ReferenceClass,
             ContextKind.Argument or ContextKind.IfArgument when returns == ExcelValueTypes.Array && (context.Accepts & ExcelValueTypes.Array) != 0 => ArrayClass,
             ContextKind.Argument or ContextKind.IfArgument when (context.Accepts & ExcelValueTypes.Reference) != 0 && (returns & ExcelValueTypes.Reference) != 0 => ReferenceClass,
             _ => ValueClass,
@@ -1219,13 +1228,13 @@ public static class ExcelFormulaParser
                     EmitExternal(name.External, () => EmitName(name.Index, OperandClass(context)));
                     break;
                 case UnaryNode unary:
-                    Emit(unary.Operand, Context.Operator);
+                    Emit(unary.Operand, OperatorContext(context));
                     Add(unary.Operator);
                     break;
                 case BinaryNode binary:
                 {
                     bool reference = binary.Operator is 0x0F or 0x10 or 0x11;
-                    var operandContext = reference ? Context.Range : Context.Operator;
+                    var operandContext = reference ? Context.Range : OperatorContext(context);
 
                     // The outermost union or intersection, or range whose operands are not both plain references, is
                     // wrapped in a memory token giving the length of what follows. Built from cell references alone,
@@ -1459,7 +1468,9 @@ public static class ExcelFormulaParser
 
             // Functions numbered 256 and up use 0x39 and 0x3A, holding the number minus 256 (Excel 1.5's Save).
             int high = function.Number > 255 ? 0x18 : 0;
-            if (function.Dialog)
+            // Excel 1.5's Save writes every call of a fixed-count function in the fixed form, dropping a dialog
+            // form's bit (47.19 in 1.5): DATA.DELETE?() is 41 82, where 1.00's compiler keeps 42 80 82.
+            if (function.Dialog && !(definition.HasFixedArguments && _version >= ExcelVersion.Excel150))
             {
                 Add(WithClass((byte)(0x22 + high), tokenClass));
                 Add((byte)(function.Arguments.Count | 0x80));

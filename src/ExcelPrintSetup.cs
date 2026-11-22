@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace MacExcelReader;
 
 /// <summary>
-/// The Page Setup record and its strings (spec §13).
+/// The Page Setup record and its strings (spec §14).
 /// </summary>
 public sealed class ExcelPrintSetup
 {
@@ -36,23 +36,21 @@ public sealed class ExcelPrintSetup
     /// <summary>Gets or sets the printer set-up message for serial printers, or null if there is none.</summary>
     public string? PrinterMessage { get; set; }
 
-    /// <summary>
-    /// Gets a margin as stored: 0 left, 1 right, 2 top, 3 bottom (order inferred from the dialog).
-    /// </summary>
-    public double GetMargin(int index)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(index);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(index, 3);
-        return BinaryPrimitives.ReadDoubleBigEndian(Record.AsSpan(62 + 8 * index));
-    }
+    /// <summary>Gets or sets the left margin in inches (spec §14, offset 62).</summary>
+    public double LeftMargin { get => GetDouble(62); set => SetDouble(62, value); }
 
-    /// <summary>Sets a margin; see <see cref="GetMargin"/>.</summary>
-    public void SetMargin(int index, double value)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(index);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(index, 3);
-        BinaryPrimitives.WriteDoubleBigEndian(Record.AsSpan(62 + 8 * index), value);
-    }
+    /// <summary>Gets or sets the right margin in inches (offset 70).</summary>
+    public double RightMargin { get => GetDouble(70); set => SetDouble(70, value); }
+
+    /// <summary>Gets or sets the top margin in inches (offset 78).</summary>
+    public double TopMargin { get => GetDouble(78); set => SetDouble(78, value); }
+
+    /// <summary>Gets or sets the bottom margin in inches (offset 86).</summary>
+    public double BottomMargin { get => GetDouble(86); set => SetDouble(86, value); }
+
+    private double GetDouble(int offset) => BinaryPrimitives.ReadDoubleBigEndian(Record.AsSpan(offset));
+
+    private void SetDouble(int offset, double value) => BinaryPrimitives.WriteDoubleBigEndian(Record.AsSpan(offset), value);
 
     /// <summary>Gets or sets whether row and column headings are printed.</summary>
     public bool PrintHeadings { get => Record[97] != 0; set => Record[97] = (byte)(value ? 1 : 0); }

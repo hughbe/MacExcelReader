@@ -129,14 +129,14 @@ public class CellTests
     public void Grid_GrowsAndNeverShrinks()
     {
         var grid = new ExcelCellGrid();
-        Assert.Null(grid.TryGet(0, 0));
+        Assert.Null(grid.Find(0, 0));
         _ = grid[4, 2];
         Assert.Equal(5, grid.RowCount);
         Assert.Equal(3, grid.ColumnCount);
         grid.EnsureSize(1, 1);
         Assert.Equal(5, grid.RowCount);
-        Assert.NotNull(grid.TryGet("C5"));
-        Assert.Null(grid.TryGet("D5"));
+        Assert.NotNull(grid.Find("C5"));
+        Assert.Null(grid.Find("D5"));
         Assert.Throws<ArgumentOutOfRangeException>(() => grid.EnsureSize(16385, 1));
         Assert.Throws<ArgumentOutOfRangeException>(() => grid.EnsureSize(1, 257));
     }

@@ -78,7 +78,7 @@ public sealed class ExcelDefinedName
 
     /// <summary>
     /// Gets the data of the array constants (<c>0x20</c> tokens) in the definition, one block per token in order
-    /// (spec §8.5). They are stored after the list of names (spec §11).
+    /// (spec §12.5). They are stored after the list of names (spec §11).
     /// </summary>
     public List<byte[]> ArrayConstants { get; } = [];
 

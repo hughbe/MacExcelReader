@@ -58,7 +58,7 @@ are zero-based; addresses use A1 notation.
 
 ```csharp
 var cell = document.Cells["B19"];          // same as document.Cells[18, 1]
-var maybe = document.Cells.TryGet("Z99");  // null outside the grid; never grows it
+var maybe = document.Cells.Find("Z99");  // null outside the grid; never grows it
 
 switch (cell.Type)
 {
@@ -102,10 +102,13 @@ ExcelCellType type = document.Cells.GetCellType(5, 2);   // without creating the
 
 ## Displaying values
 
-`ExcelValueFormatter` formats numbers with the 19 built-in formats, the way Excel shows them:
+`ExcelValueFormatter` formats values the way Excel shows them, through the tokens of their number format. Pass the
+document so it can use the sheet's own formats (index 19 and up):
 
 ```csharp
-string shown = ExcelValueFormatter.FormatCell(cell);          // "1/1/84", "$1,000 ", "26%"…
+string shown = ExcelValueFormatter.FormatCell(cell, document); // "1/1/84", "$1,000 ", "22-17-023"…
+ExcelNumberFormat format = document.GetNumberFormat(cell.NumberFormat)!;
+string text = format.ToText();                                 // "00-00-000", as the Format Number dialog shows it
 string fmt = ExcelValueFormatter.GetBuiltInFormat(10);        // "m/d/yy"
 DateTime date = ExcelValueFormatter.ToDateTime(29220);        // 1984-01-01
 double serial = ExcelValueFormatter.ToSerial(DateTime.Today);
@@ -147,7 +150,7 @@ gives a particular release's rules, and `ExcelFunctions.FindNumber("SUM")` goes 
 var formula = ExcelFormula.Parse("=IF(A1>0,SUM($A$1:$A$5)*2,-1)");
 formula.SetResult(0);            // the value Excel shows until it recalculates
 document.Cells["B1"].SetFormula(formula);
-document.State.RecalculationState = 1;   // have Excel recalculate the sheet when it opens it
+document.State.RecalculationState = ExcelRecalculationState.Needed;   // have Excel recalculate the sheet when it opens it
 ```
 
 Excel does not recalculate the formulas it loads until something they depend on changes, so set the
@@ -297,7 +300,7 @@ Console.WriteLine(scale.AutomaticMaximum ? "auto" : scale.Maximum.ToString());
 
 foreach (var series in chart.Series)
 {
-    Console.WriteLine($"{series.Name} ({series.FirstReference}): {string.Join(", ", series.SecondValues)}");
+    Console.WriteLine($"{series.Name} ({series.CategoriesReference}): {string.Join(", ", series.Values)}");
 }
 
 var format = main.DefaultSeriesFormat;      // and main.GetPointFormat(i) for per-series or per-point overrides

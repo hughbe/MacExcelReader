@@ -1,0 +1,613 @@
+using System.Globalization;
+using System.Text;
+
+namespace MacExcelReader;
+
+/// <summary>A section of a number format (spec §7).</summary>
+public enum ExcelNumberFormatSection
+{
+    /// <summary>Negative numbers.</summary>
+    Negative = 0,
+
+    /// <summary>Zero.</summary>
+    Zero = 1,
+
+    /// <summary>Positive numbers.</summary>
+    Positive = 2,
+
+    /// <summary>Text: Excel 1.5's fourth section, present only in version-18 files.</summary>
+    Text = 3,
+}
+
+/// <summary>
+/// A tokenised number format: a descriptor giving each section's offset and length within the body, then the body
+/// (spec §7). User-defined formats are stored in the document; the 19 built-in ones are in <see cref="BuiltIn"/>.
+/// </summary>
+/// <param name="Descriptor">The section offsets, the section lengths and the single-section byte: 7 bytes with three
+/// sections, or 9 with Excel 1.5's text section.</param>
+/// <param name="Body">The tokens.</param>
+public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
+{
+    private static readonly string[] s_colors = ["black", "white", "red", "green", "blue", "yellow", "magenta", "cyan"];
+
+    // The bodies of Excel 1.00's FRMT 256 resource, in index order.
+    private static readonly ExcelNumberFormat[] s_builtIn =
+    [
+        Create("00000001010101", "01"),
+        Create("00000006060601", "030100000601"),
+        Create("00000009090901", "030102020601050602"),
+        Create("00000009090901", "030400000704030601"),
+        Create("0000000C0C0C01", "030402020704030601050602"),
+        Create("0C00000E0C0C00", "0304000022070403060102200304000002282207040306010229"),
+        Create("0F0000110F0F00", "0304020222070403060105060202200304020202282207040306010506020229"),
+        Create("00000008080801", "0301000206010225"),
+        Create("0000000B0B0B01", "0301020406010506020225"),
+        Create("0000000F0F0F01", "1C010202060105060202451D020602"),
+        Create("00000007070701", "0F022F0B022F19"),
+        Create("00000007070701", "0B022D11022D19"),
+        Create("00000004040401", "0B022D11"),
+        Create("00000004040401", "11022D19"),
+        Create("0000000D0D0D01", "1F023A160220210202414D504D"),
+        Create("00000010101001", "1F023A16023A180220210202414D504D"),
+        Create("00000004040401", "13023A16"),
+        Create("00000007070701", "13023A16023A18"),
+        Create("0000000D0D0D01", "0F022F0B022F19022013023A16"),
+    ];
+
+    /// <summary>
+    /// Gets Excel's 19 built-in formats, by index, as Excel 1.00's <c>FRMT</c> 256 resource holds them. Files store
+    /// only the index (spec §7).
+    /// </summary>
+    public static IReadOnlyList<ExcelNumberFormat> BuiltIn => s_builtIn;
+
+    /// <summary>Gets the number of sections: 3, or 4 with Excel 1.5's text section.</summary>
+    public int SectionCount => Descriptor.Length == 9 ? 4 : 3;
+
+    /// <summary>Gets whether the format has a single section: every slot is the same bytes at offset 0.</summary>
+    public bool IsSingleSection => Descriptor[^1] != 0;
+
+    /// <summary>Gets whether the format shows a date or time (its positive section has a date or time token).</summary>
+    public bool IsDate
+    {
+        get
+        {
+            foreach (var token in Tokenize(GetSection(ExcelNumberFormatSection.Positive)))
+            {
+                if (token.Code is (>= 0x0B and <= 0x1A) or 0x1F or 0x20 or 0x21)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>Gets the tokens of one section, or an empty span for a text section the format does not have.</summary>
+    public ReadOnlySpan<byte> GetSection(ExcelNumberFormatSection section)
+    {
+        int count = SectionCount;
+        int index = (int)section;
+        if (index >= count)
+        {
+            return [];
+        }
+
+        return Body.AsSpan(Descriptor[index], Descriptor[count + index]);
+    }
+
+    /// <summary>
+    /// Gets the format as text, the way Excel 1.5's Format Number dialog shows it (spec §7): the positive section,
+    /// then the negative, zero and text sections where they differ from it, separated by <c>;</c>.
+    /// </summary>
+    public string ToText()
+    {
+        var text = new StringBuilder();
+        int count = SectionCount;
+        int Offset(ExcelNumberFormatSection s) => Descriptor[(int)s];
+        int Length(ExcelNumberFormatSection s) => Descriptor[count + (int)s];
+        bool SameAsPositive(ExcelNumberFormatSection s)
+            => Offset(s) == Offset(ExcelNumberFormatSection.Positive) && Length(s) == Length(ExcelNumberFormatSection.Positive) && Length(s) != 0;
+
+        AppendSectionText(text, GetSection(ExcelNumberFormatSection.Positive));
+        if (!SameAsPositive(ExcelNumberFormatSection.Negative))
+        {
+            text.Append(';');
+            AppendSectionText(text, GetSection(ExcelNumberFormatSection.Negative));
+            if (!SameAsPositive(ExcelNumberFormatSection.Zero))
+            {
+                text.Append(';');
+                AppendSectionText(text, GetSection(ExcelNumberFormatSection.Zero));
+            }
+        }
+
+        if (count == 4 && HasOwnTextSection())
+        {
+            text.Append(';');
+            AppendSectionText(text, GetSection(ExcelNumberFormatSection.Text));
+        }
+
+        return text.ToString();
+    }
+
+    /// <summary>Formats a number with this format.</summary>
+    public string Format(double value)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return ExcelValueFormatter.FormatGeneral(value);
+        }
+
+        if (value == 0)
+        {
+            return FormatSection(GetSection(ExcelNumberFormatSection.Zero), 0, value);
+        }
+
+        if (value > 0)
+        {
+            return FormatSection(GetSection(ExcelNumberFormatSection.Positive), value, value);
+        }
+
+        if (IsSingleSection)
+        {
+            string shown = FormatSection(GetSection(ExcelNumberFormatSection.Positive), -value, value);
+            return shown.Length == 0 || shown == ExcelValueFormatter.FormatGeneral(value) ? shown : "-" + shown;
+        }
+
+        return FormatSection(GetSection(ExcelNumberFormatSection.Negative), -value, value);
+    }
+
+    /// <summary>
+    /// Formats text with this format: through Excel 1.5's text section when the format has one of its own (where
+    /// <c>@</c> stands for the text), and otherwise as it is.
+    /// </summary>
+    public string Format(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (SectionCount < 4 || !HasOwnTextSection())
+        {
+            return value;
+        }
+
+        var text = new StringBuilder();
+        foreach (var token in Tokenize(GetSection(ExcelNumberFormatSection.Text)))
+        {
+            if (token.Code == 0x23)
+            {
+                text.Append(value);
+            }
+            else
+            {
+                AppendDisplayLiteral(text, token);
+            }
+        }
+
+        return text.ToString();
+    }
+
+    // Excel 1.5's decompiler writes the text section when it is not General and is not the positive section's
+    // bytes (0d.19 in 1.5).
+    private bool HasOwnTextSection()
+    {
+        var textSection = GetSection(ExcelNumberFormatSection.Text);
+        if (textSection.Length == 1 && textSection[0] == 0x01)
+        {
+            return false;
+        }
+
+        return Descriptor[(int)ExcelNumberFormatSection.Text] != Descriptor[(int)ExcelNumberFormatSection.Positive]
+            || Descriptor[4 + (int)ExcelNumberFormatSection.Text] != Descriptor[4 + (int)ExcelNumberFormatSection.Positive]
+            || textSection.Length == 0;
+    }
+
+    private static ExcelNumberFormat Create(string descriptor, string body)
+        => new(Convert.FromHexString(descriptor), Convert.FromHexString(body));
+
+    private readonly record struct Token(byte Code, byte[] Operands);
+
+    private static List<Token> Tokenize(ReadOnlySpan<byte> section)
+    {
+        var tokens = new List<Token>();
+        int i = 0;
+        while (i < section.Length)
+        {
+            byte code = section[i++];
+            int length = code switch
+            {
+                0x02 or 0x04 or 0x06 or 0x0A or 0x1D or 0x1E or 0x24 => 1,
+                0x03 or 0x1C => 3,
+                0x09 => i < section.Length ? 1 + section[i] : 0,
+                0x21 => i + 1 < section.Length ? 2 + section[i] + section[i + 1] : 0,
+                _ => 0,
+            };
+            length = Math.Min(length, section.Length - i);
+            tokens.Add(new Token(code, section.Slice(i, length).ToArray()));
+            i += length;
+        }
+
+        return tokens;
+    }
+
+    // Characters a literal can show without a backslash: those at positions 6–14 of Excel 1.5's format-character
+    // string (spec §7).
+    private static bool IsUnescaped(char c) => c is ',' or ':' or '/' or ' ' or '-' or '+' or '(' or ')' or '.';
+
+    private static void AppendSectionText(StringBuilder text, ReadOnlySpan<byte> section)
+    {
+        var tokens = Tokenize(section);
+        int integerLeft = 0;
+        int digitsLeft = 0;
+        int scale = 0;
+        int percents = 0;
+        bool thousands = false;
+        bool afterPoint = false;
+        for (int t = 0; t < tokens.Count; t++)
+        {
+            var token = tokens[t];
+            byte[] op = token.Operands;
+            switch (token.Code)
+            {
+                case 0x01:
+                    text.Append("General");
+                    break;
+                case 0x02 when op.Length == 1:
+                    char c = (char)op[0];
+                    bool beforeExponent = t + 1 < tokens.Count && tokens[t + 1].Code is 0x1D or 0x1E;
+                    if (c == '%' && percents > 0)
+                    {
+                        percents--;
+                    }
+                    else if (!beforeExponent && !IsUnescaped(c))
+                    {
+                        text.Append('\\');
+                    }
+
+                    text.Append(MacRoman.GetString([op[0]]));
+                    break;
+                case 0x03 or 0x1C when op.Length == 3:
+                    integerLeft = op[0];
+                    digitsLeft = op[0] + op[1];
+                    int extra = (sbyte)op[2] - op[1];
+                    percents = extra > 0 ? extra / 2 : 0;
+                    scale = extra < 0 ? -extra / 3 : 0;
+                    thousands = false;
+                    afterPoint = false;
+                    break;
+                case 0x04 or 0x06 when op.Length == 1:
+                    char digit = token.Code == 0x04 ? '#' : '0';
+                    for (int n = 0; n < op[0]; n++)
+                    {
+                        text.Append(digit);
+                        integerLeft--;
+                        digitsLeft--;
+                        if (!afterPoint && thousands && integerLeft > 0 && integerLeft % 3 == 0)
+                        {
+                            text.Append(',');
+                        }
+                    }
+
+                    if (digitsLeft == 0)
+                    {
+                        for (; scale > 0; scale--)
+                        {
+                            text.Append(',');
+                        }
+                    }
+
+                    break;
+                case 0x05:
+                    text.Append('.');
+                    afterPoint = true;
+                    break;
+                case 0x07:
+                    thousands = true;
+                    break;
+                case 0x1D or 0x1E when op.Length == 1:
+                    text.Append(token.Code == 0x1D ? '+' : '-');
+                    integerLeft = op[0];
+                    digitsLeft = op[0];
+                    afterPoint = false;
+                    thousands = false;
+                    break;
+                case 0x09 or 0x0A or 0x22 or 0x23 or 0x24 or 0x21:
+                case >= 0x0B and <= 0x1A:
+                case 0x1F or 0x20:
+                    AppendLiteral(text, token);
+                    break;
+            }
+        }
+    }
+
+    private static void AppendLiteral(StringBuilder text, Token token)
+    {
+        byte[] op = token.Operands;
+        switch (token.Code)
+        {
+            case 0x02 when op.Length == 1:
+                text.Append(MacRoman.GetString([op[0]]));
+                break;
+            case 0x09 when op.Length >= 1:
+                text.Append('"').Append(MacRoman.GetString(op.AsSpan(1))).Append('"');
+                break;
+            case 0x0A when op.Length == 1:
+                text.Append('*').Append(MacRoman.GetString([op[0]]));
+                break;
+            case 0x22:
+                text.Append('$');
+                break;
+            case 0x23:
+                text.Append('@');
+                break;
+            case 0x24 when op.Length == 1:
+                text.Append('[').Append(op[0] < s_colors.Length ? s_colors[op[0]] : op[0].ToString(CultureInfo.InvariantCulture)).Append(']');
+                break;
+            case 0x21 when op.Length >= 2:
+                text.Append(MacRoman.GetString(op.AsSpan(2, op[0]))).Append('/').Append(MacRoman.GetString(op.AsSpan(2 + op[0], op[1])));
+                break;
+            default:
+                text.Append(token.Code switch
+                {
+                    0x0B => "d", 0x0C => "dd", 0x0D => "ddd", 0x0E => "dddd",
+                    0x0F => "m", 0x10 => "mm", 0x11 => "mmm", 0x12 => "mmmm",
+                    0x13 or 0x1F => "h", 0x14 or 0x20 => "hh",
+                    0x15 => "m", 0x16 => "mm", 0x17 => "s", 0x18 => "ss",
+                    0x19 => "yy", 0x1A => "yyyy",
+                    _ => string.Empty,
+                });
+                break;
+        }
+    }
+
+    // Formats a non-negative magnitude with one section; original is the signed value, used where the section is
+    // General or a date.
+    private static string FormatSection(ReadOnlySpan<byte> section, double magnitude, double original)
+    {
+        var tokens = Tokenize(section);
+        if (tokens.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        bool isDate = tokens.Exists(t => t.Code is (>= 0x0B and <= 0x1A) or 0x1F or 0x20 or 0x21);
+        if (isDate)
+        {
+            return FormatDate(tokens, original);
+        }
+
+        int header = tokens.FindIndex(t => t.Code is 0x03 or 0x1C);
+        if (header < 0)
+        {
+            var text = new StringBuilder();
+            foreach (var token in tokens)
+            {
+                if (token.Code == 0x01)
+                {
+                    text.Append(ExcelValueFormatter.FormatGeneral(magnitude));
+                }
+                else
+                {
+                    AppendDisplayLiteral(text, token);
+                }
+            }
+
+            return text.ToString();
+        }
+
+        return FormatNumber(tokens, header, magnitude);
+    }
+
+    private static string FormatNumber(List<Token> tokens, int header, double magnitude)
+    {
+        byte[] h = tokens[header].Operands;
+        bool scientific = tokens[header].Code == 0x1C;
+        int decimals = h[1];
+        int extra = (sbyte)h[2] - h[1];
+        double value = magnitude * Math.Pow(100, extra > 0 ? extra / 2 : 0) / Math.Pow(1000, extra < 0 ? -extra / 3 : 0);
+        bool thousands = tokens.Exists(t => t.Code == 0x07);
+
+        // Split the tokens into mantissa digit placeholders (before and after the point) and exponent ones.
+        var integerPlaces = new List<char>();
+        var fractionPlaces = new List<char>();
+        var exponentPlaces = new List<char>();
+        int part = 0; // 0 integer, 1 fraction, 2 exponent
+        foreach (var token in tokens)
+        {
+            if (token.Code == 0x05 && part == 0)
+            {
+                part = 1;
+            }
+            else if (token.Code is 0x1D or 0x1E)
+            {
+                part = 2;
+            }
+            else if (token.Code is 0x04 or 0x06 && token.Operands.Length == 1)
+            {
+                var list = part == 0 ? integerPlaces : part == 1 ? fractionPlaces : exponentPlaces;
+                list.AddRange(Enumerable.Repeat(token.Code == 0x04 ? '#' : '0', token.Operands[0]));
+            }
+        }
+
+        int exponent = 0;
+        if (scientific && value != 0)
+        {
+            int mantissaDigits = Math.Max(1, integerPlaces.Count);
+            exponent = (int)Math.Floor(Math.Log10(value)) - (mantissaDigits - 1);
+            double mantissa = Math.Round(value / Math.Pow(10, exponent), decimals, MidpointRounding.AwayFromZero);
+            if (mantissa >= Math.Pow(10, mantissaDigits))
+            {
+                exponent++;
+            }
+
+            value /= Math.Pow(10, exponent);
+        }
+
+        string fixedText = Math.Round(value, decimals, MidpointRounding.AwayFromZero).ToString("F" + decimals.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+        int point = fixedText.IndexOf('.');
+        string integerDigits = (point < 0 ? fixedText : fixedText[..point]).TrimStart('0');
+        string fractionDigits = point < 0 ? string.Empty : fixedText[(point + 1)..];
+        string[][] pieces =
+        [
+            FillInteger(integerDigits, integerPlaces, thousands),
+            FillFraction(fractionDigits, fractionPlaces),
+            FillInteger(Math.Abs(exponent).ToString(CultureInfo.InvariantCulture).TrimStart('0'), exponentPlaces, false),
+        ];
+
+        // Walk the tokens again, putting each digit where its placeholder is.
+        var text = new StringBuilder();
+        int[] next = new int[3];
+        part = 0;
+        foreach (var token in tokens)
+        {
+            switch (token.Code)
+            {
+                case 0x04 or 0x06 when token.Operands.Length == 1:
+                    for (int n = 0; n < token.Operands[0] && next[part] < pieces[part].Length; n++)
+                    {
+                        text.Append(pieces[part][next[part]++]);
+                    }
+
+                    break;
+                case 0x05 when part == 0:
+                    text.Append('.');
+                    part = 1;
+                    break;
+                case 0x1D or 0x1E:
+                    if (exponent < 0)
+                    {
+                        text.Append('-');
+                    }
+                    else if (token.Code == 0x1D)
+                    {
+                        text.Append('+');
+                    }
+
+                    part = 2;
+                    break;
+                default:
+                    AppendDisplayLiteral(text, token);
+                    break;
+            }
+        }
+
+        return text.ToString();
+    }
+
+    // What each integer placeholder shows, left to right: a 0 shows a digit or 0, a # a digit or nothing, digits
+    // that do not fit go with the first placeholder, and a separator follows every third position from the right.
+    private static string[] FillInteger(string digits, List<char> places, bool thousands)
+    {
+        var pieces = new string[places.Count];
+        int width = Math.Max(places.Count, digits.Length);
+        var piece = new StringBuilder();
+        int placeIndex = 0;
+        for (int i = 0; i < width; i++)
+        {
+            int place = i - (width - places.Count);
+            int digitIndex = i - (width - digits.Length);
+            char? shown = digitIndex >= 0 ? digits[digitIndex] : place >= 0 && places[place] == '0' ? '0' : null;
+            if (shown is not null)
+            {
+                piece.Append(shown.Value);
+                int remaining = width - i - 1;
+                if (thousands && remaining > 0 && remaining % 3 == 0)
+                {
+                    piece.Append(',');
+                }
+            }
+
+            if (place >= 0)
+            {
+                pieces[placeIndex++] = piece.ToString();
+                piece.Clear();
+            }
+        }
+
+        return pieces;
+    }
+
+    // What each decimal placeholder shows: its digit, except trailing zeros where the placeholder is #.
+    private static string[] FillFraction(string digits, List<char> places)
+    {
+        var pieces = new string[places.Count];
+        int keep = places.Count;
+        while (keep > 0 && places[keep - 1] == '#' && keep - 1 < digits.Length && digits[keep - 1] == '0')
+        {
+            keep--;
+        }
+
+        for (int i = 0; i < places.Count; i++)
+        {
+            pieces[i] = i < keep && i < digits.Length ? digits[i].ToString() : string.Empty;
+        }
+
+        return pieces;
+    }
+
+    // A token as it shows in a formatted value: strings without their quotes, and fills (which need a column
+    // width) and colours as nothing.
+    private static void AppendDisplayLiteral(StringBuilder text, Token token)
+    {
+        byte[] op = token.Operands;
+        switch (token.Code)
+        {
+            case 0x02 when op.Length == 1:
+                text.Append(MacRoman.GetString([op[0]]));
+                break;
+            case 0x09 when op.Length >= 1:
+                text.Append(MacRoman.GetString(op.AsSpan(1)));
+                break;
+            case 0x22:
+                text.Append('$');
+                break;
+        }
+    }
+
+    private static string FormatDate(List<Token> tokens, double serial)
+    {
+        if (serial < 0 || serial > 2_958_465)
+        {
+            return ExcelValueFormatter.FormatGeneral(serial);
+        }
+
+        var date = ExcelValueFormatter.ToDateTime(Math.Round(serial * 86400, MidpointRounding.AwayFromZero) / 86400);
+        bool twelveHour = tokens.Exists(t => t.Code == 0x21);
+        var invariant = CultureInfo.InvariantCulture;
+        var text = new StringBuilder();
+        foreach (var token in tokens)
+        {
+            int hour12 = date.Hour % 12 == 0 ? 12 : date.Hour % 12;
+            switch (token.Code)
+            {
+                case 0x0B: text.Append(date.Day.ToString(invariant)); break;
+                case 0x0C: text.Append(date.ToString("dd", invariant)); break;
+                case 0x0D: text.Append(date.ToString("ddd", invariant)); break;
+                case 0x0E: text.Append(date.ToString("dddd", invariant)); break;
+                case 0x0F: text.Append(date.Month.ToString(invariant)); break;
+                case 0x10: text.Append(date.ToString("MM", invariant)); break;
+                case 0x11: text.Append(date.ToString("MMM", invariant)); break;
+                case 0x12: text.Append(date.ToString("MMMM", invariant)); break;
+                case 0x13: text.Append((twelveHour ? hour12 : date.Hour).ToString(invariant)); break;
+                case 0x14: text.Append((twelveHour ? hour12 : date.Hour).ToString("00", invariant)); break;
+                case 0x1F: text.Append(hour12.ToString(invariant)); break;
+                case 0x20: text.Append(hour12.ToString("00", invariant)); break;
+                case 0x15: text.Append(date.Minute.ToString(invariant)); break;
+                case 0x16: text.Append(date.Minute.ToString("00", invariant)); break;
+                case 0x17: text.Append(date.Second.ToString(invariant)); break;
+                case 0x18: text.Append(date.Second.ToString("00", invariant)); break;
+                case 0x19: text.Append(date.ToString("yy", invariant)); break;
+                case 0x1A: text.Append(date.Year.ToString(invariant)); break;
+                case 0x21 when token.Operands.Length >= 2:
+                    byte[] op = token.Operands;
+                    text.Append(date.Hour < 12
+                        ? MacRoman.GetString(op.AsSpan(2, op[0]))
+                        : MacRoman.GetString(op.AsSpan(2 + op[0], op[1])));
+                    break;
+                default:
+                    AppendDisplayLiteral(text, token);
+                    break;
+            }
+        }
+
+        return text.ToString();
+    }
+}

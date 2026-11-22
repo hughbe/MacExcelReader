@@ -1,7 +1,7 @@
 namespace MacExcelReader;
 
 /// <summary>
-/// The type of a cell (bits 11–9 of the second cell-table word, spec §7).
+/// The type of a cell (bits 11–9 of the second cell-table word, spec §9).
 /// </summary>
 public enum ExcelCellType : byte
 {

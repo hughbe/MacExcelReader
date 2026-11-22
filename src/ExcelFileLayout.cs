@@ -33,7 +33,7 @@ public enum ExcelSection
 }
 
 /// <summary>
-/// Where each part of a worksheet or macro sheet file lies (spec §2), read without parsing the contents.
+/// Where each part of a worksheet or macro sheet file lies (spec §3), read without parsing the contents.
 /// Useful for inspecting and debugging files.
 /// </summary>
 public sealed class ExcelFileLayout

@@ -144,8 +144,8 @@ public class DocumentWriterTests
             PrintGridlines = true,
             TtyPrintWidth = 80,
         };
-        print.SetMargin(0, 0.75);
-        print.SetMargin(3, 1.25);
+        print.LeftMargin = 0.75;
+        print.BottomMargin = 1.25;
         document.PrintSetup = print;
 
         var bytes = document.ToArray();
@@ -159,8 +159,8 @@ public class DocumentWriterTests
         Assert.Null(setup.PrinterMessage);
         Assert.True(setup.PrintHeadings && setup.PrintGridlines);
         Assert.Equal(80, setup.TtyPrintWidth);
-        Assert.Equal(0.75, setup.GetMargin(0));
-        Assert.Equal(1.25, setup.GetMargin(3));
+        Assert.Equal(0.75, setup.LeftMargin);
+        Assert.Equal(1.25, setup.BottomMargin);
         Assert.Equal(bytes, reread.ToArray());
     }
 
@@ -177,8 +177,6 @@ public class DocumentWriterTests
         Assert.Equal(78, setup.TtyPrintWidth);
         Assert.Equal(3, setup.TtyTopMargin);
         Assert.Equal(60, setup.TtyPrintLength);
-        Assert.Throws<ArgumentOutOfRangeException>(() => setup.GetMargin(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => setup.SetMargin(4, 1));
     }
 
     [Fact]
@@ -350,7 +348,7 @@ public class DocumentWriterTests
                 continue;
             }
 
-            var other = reread.Cells.TryGet(row, column)!;
+            var other = reread.Cells.Find(row, column)!;
             Assert.Equal(cell.Type, other.Type);
             Assert.Equal(cell.Formula?.ToText(original), other.Formula?.ToText(reread));
             if (cell.Type == ExcelCellType.Text)

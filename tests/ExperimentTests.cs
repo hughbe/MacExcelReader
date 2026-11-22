@@ -408,7 +408,7 @@ public class ExperimentTests
     {
         // Excel 1.5 saves version 18 for colour or @ number formats, a text section, trailing-comma scaling,
         // gridline colours and frozen panes (spec §2.1).
-        Assert.Equal(ExcelDocument.Excel15FormatVersion, Load(name).Version);
+        Assert.Equal(ExcelDocument.Version18, Load(name).Version);
     }
 
     [Theory]
@@ -608,7 +608,7 @@ public class ExperimentTests
         // series format (spec §16.8, §16.9).
         var saved = ChartDocument.Load(SamplePath(name)).Series[0];
         var built = ChartDocument.Create(ChartType.Line);
-        built.Series.Add(ChartSeries.Create(saved.Name, saved.SecondValues.Select(v => v.ToDouble()), saved.SourceDocument, saved.SecondReference));
+        built.Series.Add(ChartSeries.Create(saved.Name, saved.Values.Select(v => v.ToDouble()), saved.SourceDocument, saved.ValuesReference));
         var ours = ChartDocument.Read(built.ToArray()).Series[0];
         var a = ours.Header.ToArray();
         var b = saved.Header.ToArray();
@@ -696,5 +696,44 @@ public class ExperimentTests
         Assert.Equal([0x44, 0xC0, 0x00, 0x00, 0x5A, 0x01, 0x00], document.Cells["B4"].Formula!.Expression.ToArray());
         Assert.Equal(292, document.FunctionCount);
         Assert.Empty(document.ExtraFunctionNames);
+    }
+
+    [Fact]
+    public void Excel15_SavesDataDeleteDialogInTheFixedForm()
+    {
+        // formulas-1.5 sheet 5 re-entered in Excel 1.5: DATA.DELETE?() comes back as 41 82 (spec §15.4).
+        Assert.Equal([0x41, 0x82], Load("Formulas 1.5 Sheet 5").Cells["B38"].Formula!.Expression.ToArray());
+    }
+
+    [Fact]
+    public void Excel15_ArrayFormulaOperandsTakeArrayClassOnlyInsideArrayArguments()
+    {
+        // formulas-1.5 sheet 2 re-entered in Excel 1.5 with FORMULA.ARRAY (spec §15.4).
+        var document = Load("Formulas 1.5 Sheet 2");
+        Assert.Equal(0x45, document.Cells["B60"].Formula!.SharedExpression[0]);   // {=A1:A2*2}
+        Assert.Equal(0x65, document.Cells["B64"].Formula!.SharedExpression[0]);   // {=SUM(A1:A2*B1:B2)}
+    }
+
+    [Fact]
+    public void ArrayFormulaOperands_TakeValueClassAtTheTop()
+    {
+        // Excel 1.00 re-entering array formulas with FORMULA.ARRAY: an operator at the top of an array formula
+        // leaves its operands in value class, as Excel 1.5 does (spec §15.4).
+        var document = Load("Array Formula Classes");
+        Assert.Equal(0x45, document.Cells["B4"].Formula!.SharedExpression[0]);    // {=A1:A2*2}
+        Assert.Equal(0x45, document.Cells["B10"].Formula!.SharedExpression[0]);   // {=A1:B1+A2:B2}
+        Assert.Equal(0x45, document.Cells["B12"].Formula!.SharedExpression[0]);   // {=-A1:A2}
+    }
+
+    [Theory]
+    [InlineData("B8", 0x41)]    // =IF(A1,NOW()): NOW in value class
+    [InlineData("B21", 0x41)]   // =IF(ISERROR(A1),1), typed: ISERROR in value class
+    [InlineData("B22", 0x41)]   // =IF(A1,GOTO(B1)), typed: GOTO in value class
+    public void IfArguments_FollowTheArgumentRules(string address, byte expected)
+    {
+        // Excel 1.00 compiling through FORMULA and by typing (spec §15.4).
+        var expression = Load("If Classes").Cells[address].Formula!.Expression.ToArray();
+        Assert.Contains(expected, expression.Where(b => (b & 0x9F) is 0x01 or 0x02));
+        Assert.DoesNotContain(expression, b => b is 0x21 or 0x22);
     }
 }

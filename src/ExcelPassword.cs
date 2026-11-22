@@ -1,7 +1,7 @@
 namespace MacExcelReader;
 
 /// <summary>
-/// The document-protection password hash (spec §5.2).
+/// The document-protection password hash (spec §6.2).
 /// </summary>
 public static class ExcelPassword
 {

@@ -4,7 +4,7 @@ using MacExcelReader.Internal;
 namespace MacExcelReader;
 
 /// <summary>
-/// A formula record (spec §8.3): the current value, the parsed expression and the fix-ups that follow it.
+/// A formula record (spec §12.3): the current value, the parsed expression and the fix-ups that follow it.
 /// </summary>
 /// <remarks>
 /// The record is held as a single byte array in its on-disk layout:
@@ -25,9 +25,9 @@ public sealed class ExcelFormula
     /// <summary>
     /// Creates a formula from a parsed expression.
     /// </summary>
-    /// <param name="expression">The parsed expression (spec §9), at most 255 bytes.</param>
+    /// <param name="expression">The parsed expression (spec §15), at most 255 bytes.</param>
     /// <param name="fixups">
-    /// The fix-up bytes that follow the expression (spec §8.5): one word per name token (its 1-based
+    /// The fix-up bytes that follow the expression (spec §12.5): one word per name token (its 1-based
     /// index in the name list) and per external-sheet token, in token order. Empty if none are needed.
     /// </param>
     public ExcelFormula(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups = default)
@@ -139,10 +139,10 @@ public sealed class ExcelFormula
         return "=" + FormulaDecompiler.Decompile(Expression, GetFixupWords(), document, fixupsInPlace: false, FormulaTokens.ReadArrayBlocks(Expression, Fixups));
     }
 
-    /// <summary>Gets whether the cell is part of an array formula (spec §8.6).</summary>
+    /// <summary>Gets whether the cell is part of an array formula (spec §12.6).</summary>
     public bool IsArrayFormula => FormulaTokens.IsSharedReference(Expression) && FormulaTokens.Normalize(Expression[0]) == 0x01;
 
-    /// <summary>Gets whether the cell is part of a data table made with the Table command (spec §8.6).</summary>
+    /// <summary>Gets whether the cell is part of a data table made with the Table command (spec §12.6).</summary>
     public bool IsTable => FormulaTokens.IsSharedReference(Expression) && FormulaTokens.Normalize(Expression[0]) == 0x02;
 
     /// <summary>
@@ -256,7 +256,7 @@ public sealed class ExcelFormula
         {
             // Another cell holds the shared record.
             if (document is not null && SharedAnchor is { } anchor
-                && document.Cells.TryGet(anchor.Row, anchor.Column)?.Formula is { IsSharedAnchor: true } shared)
+                && document.Cells.Find(anchor.Row, anchor.Column)?.Formula is { IsSharedAnchor: true } shared)
             {
                 return shared.SharedText(document);
             }

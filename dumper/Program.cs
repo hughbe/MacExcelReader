@@ -130,7 +130,7 @@ sealed class InfoCommand : Command<FileSettings>
 
         var table = new Table().Title("[bold]Summary[/]").AddColumn("Field").AddColumn("Value");
         table.AddRow("Kind", $"{document.Kind} (Finder type {document.FinderType})");
-        table.AddRow("Code signature", $"0x{document.Signature:X4}{(document.Signature == ExcelDocument.Excel103Signature ? " (Excel 1.03)" : string.Empty)}");
+        table.AddRow("Code signature", $"0x{document.Signature:X4}{(document.Signature == ExcelDocument.CodeSignature ? " (Excel 1.03)" : string.Empty)}");
         table.AddRow("Grid", $"{document.Cells.RowCount} rows × {document.Cells.ColumnCount} columns");
         table.AddRow("Cells with values", $"{cells} ({numbers} numbers, {text} text, {formulas} formulas)");
         table.AddRow("Defined names", document.Names.Count.ToString(CultureInfo.InvariantCulture));
@@ -167,7 +167,7 @@ sealed class CellsCommand : Command<CellsSettings>
         {
             for (int c = first.Column; c <= last.Column; c++)
             {
-                var cell = document.Cells.TryGet(r, c);
+                var cell = document.Cells.Find(r, c);
                 if (cell is null || (!cell.HasValue && !(settings.All && cell.RawAttributes != 0x4000 || settings.All && (cell.NumberFormat != 0 || cell.Alignment != 0))))
                 {
                     continue;
@@ -177,8 +177,8 @@ sealed class CellsCommand : Command<CellsSettings>
                 table.AddRow(
                     new ExcelCellAddress(r, c).ToString(),
                     cell.Type.ToString(),
-                    Program.Escape(ExcelValueFormatter.FormatCell(cell)),
-                    Program.Escape(ExcelValueFormatter.GetBuiltInFormat(cell.NumberFormat) ?? $"user #{cell.NumberFormat}"),
+                    Program.Escape(ExcelValueFormatter.FormatCell(cell, document)),
+                    Program.Escape(document.GetNumberFormat(cell.NumberFormat)?.ToText() ?? $"#{cell.NumberFormat} (missing)"),
                     Program.Escape(CellCommand.Style(cell)),
                     Program.Escape(cell.Formula?.ToText(document)));
             }
@@ -291,7 +291,7 @@ sealed class CellCommand : Command<CellSettings>
     {
         var document = ExcelDocument.Load(settings.Input);
         var address = ExcelCellAddress.Parse(settings.Address);
-        var cell = document.Cells.TryGet(address.Row, address.Column);
+        var cell = document.Cells.Find(address.Row, address.Column);
         if (cell is null)
         {
             AnsiConsole.MarkupLine($"[yellow]{address} is outside the sheet ({document.Cells.RowCount} rows × {document.Cells.ColumnCount} columns) and is empty.[/]");
@@ -306,7 +306,7 @@ sealed class CellCommand : Command<CellSettings>
     {
         var table = new Table().Title($"[bold]{address}[/]").AddColumn("Field").AddColumn("Value");
         table.AddRow("Type", cell.Type.ToString());
-        table.AddRow("Display", Program.Escape(ExcelValueFormatter.FormatCell(cell)));
+        table.AddRow("Display", Program.Escape(ExcelValueFormatter.FormatCell(cell, document)));
         table.AddRow("Value", Program.Escape(cell.Value switch
         {
             null => "(empty)",
@@ -314,12 +314,12 @@ sealed class CellCommand : Command<CellSettings>
             double d => d.ToString("R", CultureInfo.InvariantCulture),
             var other => Convert.ToString(other, CultureInfo.InvariantCulture),
         }));
-        if (cell.TryGetNumber(out double number) && ExcelValueFormatter.IsDateFormat(cell.NumberFormat))
+        if (cell.TryGetNumber(out double number) && document.GetNumberFormat(cell.NumberFormat)?.IsDate == true)
         {
             table.AddRow("As date", ExcelValueFormatter.ToDateTime(number).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
         }
 
-        table.AddRow("Number format", $"{cell.NumberFormat} ({Program.Escape(ExcelValueFormatter.GetBuiltInFormat(cell.NumberFormat) ?? "user-defined")})");
+        table.AddRow("Number format", $"{cell.NumberFormat}: {Program.Escape(document.GetNumberFormat(cell.NumberFormat)?.ToText() ?? "(missing)")}{(cell.NumberFormat >= ExcelValueFormatter.BuiltInFormatCount ? " (user-defined)" : string.Empty)}");
         table.AddRow("Alignment", cell.Alignment.ToString());
         table.AddRow("Style", Program.Escape(Style(cell)));
         table.AddRow("Protection", $"locked {Program.YesNo(cell.IsLocked)}, hidden {Program.YesNo(cell.IsHidden)}");
@@ -463,11 +463,11 @@ sealed class ExportCommand : Command<ExportSettings>
                     output.Append(separator);
                 }
 
-                var cell = document.Cells.TryGet(r, c);
+                var cell = document.Cells.Find(r, c);
                 string text = cell is null ? string.Empty
                     : settings.Formulas && cell.Formula is { } formula ? formula.ToText(document)
                     : settings.Raw ? Convert.ToString(cell.Value, CultureInfo.InvariantCulture) ?? string.Empty
-                    : ExcelValueFormatter.FormatCell(cell);
+                    : ExcelValueFormatter.FormatCell(cell, document);
                 output.Append(Quote(text, separator));
             }
 
@@ -526,7 +526,7 @@ sealed class DumpCommand : Command<FileSettings>
 
         header.AddRow("Built-in formats", document.BuiltInFormatCount.ToString(CultureInfo.InvariantCulture));
         header.AddRow("User formats", document.NumberFormats.Count == 0 ? "(none)"
-            : string.Join("; ", document.NumberFormats.Select(f => Program.Hex(f.Descriptor) + " " + Program.Hex(f.Body))));
+            : string.Join("; ", document.NumberFormats.Select((f, i) => $"{ExcelValueFormatter.BuiltInFormatCount + i} {f.ToText()}").Select(Program.Escape)));
         AnsiConsole.Write(header);
 
         var settingsTable = new Table().Title("[bold]Sheet settings[/]").AddColumn("Setting").AddColumn("Value");
@@ -534,12 +534,14 @@ sealed class DumpCommand : Command<FileSettings>
         settingsTable.AddRow("Precision", state.FullPrecision ? "full" : "as displayed");
         settingsTable.AddRow("Iteration", $"{Program.YesNo(state.Iteration)}, max {state.MaxIterations}, max change {state.MaxChange.ToString(CultureInfo.InvariantCulture)}");
         settingsTable.AddRow("Reference style", state.ReferenceStyle.ToString());
-        settingsTable.AddRow("Recalculation state", state.RecalculationState switch
+        settingsTable.AddRow("Recalculation state", $"{(ushort)state.RecalculationState} ({state.RecalculationState switch
         {
-            0 => "0 (clean)",
-            1 => "1 (needs recalculation)",
-            var other => $"{other} (pending)",
-        });
+            ExcelRecalculationState.Clean => "clean",
+            ExcelRecalculationState.Needed => "needs recalculation",
+            _ => "pending",
+        }})");
+        settingsTable.AddRow("Uses later functions", Program.YesNo(state.UsesLaterFunctions));
+        settingsTable.AddRow("Defined names with a definition", state.DefinedNameCount.ToString(CultureInfo.InvariantCulture));
         settingsTable.AddRow("Protected", $"{Program.YesNo(state.IsProtected)}, password hash 0x{state.PasswordHash:X4}");
         settingsTable.AddRow("Standard font", $"font {state.StandardFont}, {state.StandardFontSize} pt");
         settingsTable.AddRow("Last non-hidden column", state.LastVisibleColumn.ToString(CultureInfo.InvariantCulture));
@@ -596,7 +598,7 @@ sealed class DumpCommand : Command<FileSettings>
             table.AddRow("Header", Program.Escape(print.Header ?? "(none)"));
             table.AddRow("Footer", Program.Escape(print.Footer ?? "(none)"));
             table.AddRow("Printer message", Program.Escape(print.PrinterMessage ?? "(none)"));
-            table.AddRow("Margins (L, R, T, B)", string.Join(", ", Enumerable.Range(0, 4).Select(i => print.GetMargin(i).ToString(CultureInfo.InvariantCulture))));
+            table.AddRow("Margins (inches)", string.Create(CultureInfo.InvariantCulture, $"left {print.LeftMargin}, right {print.RightMargin}, top {print.TopMargin}, bottom {print.BottomMargin}"));
             table.AddRow("Print headings / gridlines", $"{Program.YesNo(print.PrintHeadings)} / {Program.YesNo(print.PrintGridlines)}");
             AnsiConsole.Write(table);
         }
@@ -609,7 +611,7 @@ sealed class DumpCommand : Command<FileSettings>
         foreach (var (row, column, cell) in document.Cells.NonEmptyCells)
         {
             cells.AddRow(new ExcelCellAddress(row, column).ToString(), cell.Type.ToString(),
-                Program.Escape(ExcelValueFormatter.FormatCell(cell)), Program.Escape(cell.Formula?.ToText(document)));
+                Program.Escape(ExcelValueFormatter.FormatCell(cell, document)), Program.Escape(cell.Formula?.ToText(document)));
         }
 
         AnsiConsole.Write(cells);
@@ -710,13 +712,13 @@ sealed class ChartCommand : Command<FileSettings>
             for (int i = 0; i < series.PointCount; i++)
             {
                 string first = series.SeriesType == 3
-                    ? i < series.FirstTexts.Count ? series.FirstTexts[i] : string.Empty
-                    : i < series.FirstValues.Count ? series.FirstValues[i].ToString() : string.Empty;
+                    ? i < series.CategoryTexts.Count ? series.CategoryTexts[i] : string.Empty
+                    : i < series.CategoryValues.Count ? series.CategoryValues[i].ToString() : string.Empty;
                 table.AddRow((i + 1).ToString(CultureInfo.InvariantCulture), Program.Escape(first),
-                    i < series.SecondValues.Count ? series.SecondValues[i].ToString() : string.Empty);
+                    i < series.Values.Count ? series.Values[i].ToString() : string.Empty);
             }
 
-            table.Caption($"{series.SeriesType switch { 0 => "dates", 3 => "text categories", _ => "numbers" }}, references {Program.Escape(series.FirstReference)} / {Program.Escape(series.SecondReference)}{(series.SourceDocument.Length > 0 ? ", from " + Program.Escape(series.SourceDocument) : string.Empty)}");
+            table.Caption($"{series.SeriesType switch { 0 => "dates", 3 => "text categories", _ => "numbers" }}, references {Program.Escape(series.CategoriesReference)} / {Program.Escape(series.ValuesReference)}{(series.SourceDocument.Length > 0 ? ", from " + Program.Escape(series.SourceDocument) : string.Empty)}");
             AnsiConsole.Write(table);
         }
 
@@ -832,7 +834,7 @@ sealed class JsonCommand : Command<JsonSettings>
                     continue;
                 }
 
-                var cell = document.Cells.TryGet(r, c)!;
+                var cell = document.Cells.Find(r, c)!;
                 if (!cell.HasValue && cell.RawAttributes == 0x4000 && cell.NumberFormat == 0 && cell.Alignment == 0)
                 {
                     continue;
@@ -843,7 +845,7 @@ sealed class JsonCommand : Command<JsonSettings>
                     address = new ExcelCellAddress(r, c).ToString(),
                     type = cell.Type.ToString(),
                     value = cell.Value,
-                    display = ExcelValueFormatter.FormatCell(cell),
+                    display = ExcelValueFormatter.FormatCell(cell, document),
                     formula = cell.Formula?.ToText(document),
                     numberFormat = cell.NumberFormat,
                     alignment = cell.Alignment.ToString(),
@@ -877,7 +879,7 @@ sealed class JsonCommand : Command<JsonSettings>
                 columnWidths = Enumerable.Range(0, ExcelSheetState.ColumnCount).Where(i => state.GetColumnWidth(i) != 75)
                     .ToDictionary(i => FormulaDecompiler.ColumnName(i), i => (int)state.GetColumnWidth(i)),
             },
-            numberFormats = document.NumberFormats.Select(f => Convert.ToHexString(f.Descriptor) + " " + Convert.ToHexString(f.Body)),
+            numberFormats = document.NumberFormats.Select(f => new { text = f.ToText(), bytes = Convert.ToHexString(f.Descriptor) + " " + Convert.ToHexString(f.Body) }),
             externalDocuments = document.ExternalDocuments.Select(d => new { name = d.Name, names = d.Names }),
             names = document.Names.Select(n => new
             {
@@ -920,10 +922,10 @@ sealed class JsonCommand : Command<JsonSettings>
         {
             name = s.Name,
             type = s.SeriesType,
-            firstReference = s.FirstReference,
-            secondReference = s.SecondReference,
-            categories = s.SeriesType == 3 ? s.FirstTexts.Cast<object>() : s.FirstValues.Select(v => (object)v.ToDouble()),
-            values = s.SecondValues.Select(v => v.ToDouble()),
+            categoriesReference = s.CategoriesReference,
+            valuesReference = s.ValuesReference,
+            categories = s.SeriesType == 3 ? s.CategoryTexts.Cast<object>() : s.CategoryValues.Select(v => (object)v.ToDouble()),
+            values = s.Values.Select(v => v.ToDouble()),
         }),
     };
 }
@@ -953,15 +955,15 @@ sealed class WorkspaceCommand : Command<FileSettings>
         {
             string kind = entry.Kind switch
             {
-                ExcelWorkspaceWindow.WorksheetKind => "worksheet",
-                ExcelWorkspaceWindow.MacroSheetKind => "macro sheet",
-                ExcelWorkspaceWindow.ChartKind => "chart",
+                ExcelDocumentKind.Worksheet => "worksheet",
+                ExcelDocumentKind.MacroSheet => "macro sheet",
+                ExcelDocumentKind.Chart => "chart",
                 _ => $"0x{entry.Kind:X2}",
             };
             var w = entry.Window;
             windows.AddRow(kind, Program.Escape(entry.DocumentName), Program.Escape(entry.Folder), entry.Directory.ToString(CultureInfo.InvariantCulture),
                 $"{w.Top}, {w.Left}, {w.Bottom}, {w.Right}",
-                entry.Kind == ExcelWorkspaceWindow.ChartKind ? "" : new ExcelCellAddress(w.ActiveRow, w.ActiveColumn).ToString());
+                entry.Kind == ExcelDocumentKind.Chart ? "" : new ExcelCellAddress(w.ActiveRow, w.ActiveColumn).ToString());
         }
 
         AnsiConsole.Write(windows);

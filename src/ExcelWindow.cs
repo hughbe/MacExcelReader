@@ -13,7 +13,7 @@ namespace MacExcelReader;
 public readonly record struct ExcelRange(ushort FirstRow, ushort LastRow, byte FirstColumn, byte LastColumn);
 
 /// <summary>
-/// A saved window (spec §12).
+/// A saved window (spec §13).
 /// </summary>
 public sealed class ExcelWindow
 {

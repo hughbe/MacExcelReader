@@ -37,11 +37,26 @@ public class VersionTests
     }
 
     [Fact]
-    public void FunctionsInsideIf_ChangeClassInExcel15()
+    public void Excel15_WritesFixedCountFunctionsWithoutTheDialogBit()
     {
-        // GOTO inside IF: reference class (21) in 1.00–1.03, value class (41) in 1.5.
-        Assert.Contains("2135", Convert.ToHexString(ExcelFormula.Parse("=IF(A1,GOTO(B1))").Expression));
-        Assert.Contains("4135", Convert.ToHexString(ExcelFormula.Parse("=IF(A1,GOTO(B1))", null, ExcelVersion.Excel150).Expression));
+        // DATA.DELETE takes no arguments: 1.00 keeps DATA.DELETE?() as 42 80 82, Excel 1.5's Save writes 41 82
+        // (47.19 in 1.5; formulas-1.5 sheet 5 re-entered in Excel 1.5).
+        Assert.Equal("428082", Convert.ToHexString(ExcelFormula.Parse("=DATA.DELETE?()").Expression));
+        Assert.Equal("4182", Convert.ToHexString(ExcelFormula.Parse("=DATA.DELETE?()", null, ExcelVersion.Excel150).Expression));
+        Assert.Equal("428091", Convert.ToHexString(ExcelFormula.Parse("=RUN?()", null, ExcelVersion.Excel150).Expression));
+    }
+
+    [Fact]
+    public void FunctionsInsideIf_FollowTheArgumentRules()
+    {
+        // GOTO inside IF is value class (41) in Excel 1.00 and 1.5; an IF in a branch, which can return a
+        // reference, is reference class (22), and one in the condition value class (42) (spec §15.4).
+        foreach (var version in new[] { ExcelVersion.Excel100, ExcelVersion.Excel150 })
+        {
+            Assert.Contains("4135", Convert.ToHexString(ExcelFormula.Parse("=IF(A1,GOTO(B1))", null, version).Expression));
+            Assert.Contains("220201", Convert.ToHexString(ExcelFormula.Parse("=IF(A1,IF(B1,1))", null, version).Expression));
+            Assert.Contains("420201", Convert.ToHexString(ExcelFormula.Parse("=IF(IF(A1,B1),1)", null, version).Expression)[..^6]);
+        }
     }
 
     [Fact]
@@ -161,7 +176,7 @@ public class VersionTests
         var chart = ChartDocument.Read(Sample(name));
         Assert.Equal(charts, chart.Charts.Count);
         Assert.Equal(series, chart.Series.Count);
-        Assert.All(chart.Series, s => Assert.Equal(s.PointCount, s.SecondValues.Count));
+        Assert.All(chart.Series, s => Assert.Equal(s.PointCount, s.Values.Count));
     }
 
     [Fact]

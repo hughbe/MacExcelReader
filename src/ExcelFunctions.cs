@@ -30,12 +30,12 @@ public enum ExcelValueTypes : byte
     /// <summary>An array.</summary>
     Array = 0x40,
 
-    /// <summary>Flag on some argument types (meaning not established).</summary>
-    Flag80 = 0x80,
+    /// <summary>An empty argument of this type means the argument was not given (spec §15.3).</summary>
+    EmptyMeansOmitted = 0x80,
 }
 
 /// <summary>
-/// Describes a worksheet function or macro command (spec §9.3), from Excel 1.03's function table.
+/// Describes a worksheet function or macro command (spec §15.3), from Excel 1.03's function table.
 /// </summary>
 /// <param name="Name">The function name.</param>
 /// <param name="MinArguments">The minimum number of arguments.</param>

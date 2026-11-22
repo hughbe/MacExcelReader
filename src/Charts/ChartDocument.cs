@@ -189,18 +189,18 @@ public sealed class ChartDocument
         {
             if (series.SeriesType == 3)
             {
-                series.FirstTexts.Add(reader.ReadPascalString());
+                series.CategoryTexts.Add(reader.ReadPascalString());
             }
             else
             {
-                series.FirstValues.Add(MicrosoftDecimal.FromBytes(reader.ReadBytes(8)));
+                series.CategoryValues.Add(MicrosoftDecimal.FromBytes(reader.ReadBytes(8)));
             }
         }
 
         reader.Position = start + secondArrayOffset;
         for (int i = 0; i < count; i++)
         {
-            series.SecondValues.Add(MicrosoftDecimal.FromBytes(reader.ReadBytes(8)));
+            series.Values.Add(MicrosoftDecimal.FromBytes(reader.ReadBytes(8)));
         }
 
         series.Name = reader.ReadPascalString();
@@ -208,8 +208,8 @@ public sealed class ChartDocument
         series.SecondLabel = reader.ReadPascalString();
         series.SourceMarker = reader.ReadPascalString();
         series.SourceDocument = reader.ReadPascalString();
-        series.SecondReference = reader.ReadPascalString();
-        series.FirstReference = reader.ReadPascalString();
+        series.ValuesReference = reader.ReadPascalString();
+        series.CategoriesReference = reader.ReadPascalString();
         for (int i = 0; i < series.TrailingStrings.Length; i++)
         {
             series.TrailingStrings[i] = reader.ReadPascalString();
@@ -360,18 +360,18 @@ public sealed class ChartDocument
         {
             if (series.SeriesType == 3)
             {
-                body.WritePascalString(i < series.FirstTexts.Count ? series.FirstTexts[i] : string.Empty);
+                body.WritePascalString(i < series.CategoryTexts.Count ? series.CategoryTexts[i] : string.Empty);
             }
             else
             {
-                body.WriteBytes((i < series.FirstValues.Count ? series.FirstValues[i] : MicrosoftDecimal.FromDouble(i + 1)).ToBytes());
+                body.WriteBytes((i < series.CategoryValues.Count ? series.CategoryValues[i] : MicrosoftDecimal.FromDouble(i + 1)).ToBytes());
             }
         }
 
         int secondArrayOffset = 4 + body.Position;
         for (int i = 0; i < count; i++)
         {
-            body.WriteBytes((i < series.SecondValues.Count ? series.SecondValues[i] : MicrosoftDecimal.Zero).ToBytes());
+            body.WriteBytes((i < series.Values.Count ? series.Values[i] : MicrosoftDecimal.Zero).ToBytes());
         }
 
         body.WritePascalString(series.Name);
@@ -379,8 +379,8 @@ public sealed class ChartDocument
         body.WritePascalString(series.SecondLabel);
         body.WritePascalString(series.SourceMarker);
         body.WritePascalString(series.SourceDocument);
-        body.WritePascalString(series.SecondReference);
-        body.WritePascalString(series.FirstReference);
+        body.WritePascalString(series.ValuesReference);
+        body.WritePascalString(series.CategoriesReference);
         foreach (var text in series.TrailingStrings)
         {
             body.WritePascalString(text);

@@ -142,8 +142,8 @@ public class ChartDocumentTests
 
         var textSeries = ChartSeries.Create("Categories", [], "Data", "R2C1:R2C2", "R1C1:R1C2");
         textSeries.SeriesType = 3;
-        textSeries.FirstTexts.AddRange(["One", "Two"]);
-        textSeries.SecondValues.AddRange([MicrosoftDecimal.FromDouble(3), MicrosoftDecimal.FromDouble(4)]);
+        textSeries.CategoryTexts.AddRange(["One", "Two"]);
+        textSeries.Values.AddRange([MicrosoftDecimal.FromDouble(3), MicrosoftDecimal.FromDouble(4)]);
         document.Series.Add(textSeries);
 
         var path = Path.GetTempFileName();
@@ -156,8 +156,8 @@ public class ChartDocumentTests
             Assert.Equal(document.PageSetup, reread.PageSetup);
             Assert.Equal([10, 20], reread.MainChart.SeriesWords);
             Assert.Single(reread.MainChart.PointFormats);
-            Assert.Equal(["One", "Two"], reread.Series[0].FirstTexts);
-            Assert.Equal([3, 4], reread.Series[0].SecondValues.Select(v => v.ToDouble()));
+            Assert.Equal(["One", "Two"], reread.Series[0].CategoryTexts);
+            Assert.Equal([3, 4], reread.Series[0].Values.Select(v => v.ToDouble()));
         }
         finally
         {
@@ -252,9 +252,9 @@ public class ChartDocumentTests
         Assert.Equal("Sales", reread.MainChart.Texts[0].Text);
         Assert.Null(reread.MainChart.Texts[1].Text);
         Assert.Equal(2, reread.Series.Count);
-        Assert.Equal([1, 2.5, 4], reread.Series[0].SecondValues.Select(v => v.ToDouble()));
+        Assert.Equal([1, 2.5, 4], reread.Series[0].Values.Select(v => v.ToDouble()));
         Assert.Equal("Q2", reread.Series[1].Name);
-        Assert.Equal("R2C1:R2C2", reread.Series[1].SecondReference);
+        Assert.Equal("R2C1:R2C2", reread.Series[1].ValuesReference);
         Assert.Equal("Data", reread.Series[1].SourceDocument);
         Assert.Equal(bytes, reread.ToArray());
     }

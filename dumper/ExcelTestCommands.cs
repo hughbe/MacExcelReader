@@ -380,8 +380,10 @@ sealed class CheckCommand : Command<CheckSettings>
                 continue;
             }
 
+            // GET.FORMULA gives every cell of an array formula the anchor's text, its offsets counted from the anchor.
             string text = value.Text!;
-            string back = R1C1.ToA1(text, r, c);
+            var origin = formula.IsArrayFormula && formula.SharedAnchor is { } anchor ? anchor : new ExcelCellAddress(r, c);
+            string back = R1C1.ToA1(text, origin.Row, origin.Column);
             if (!R1C1.Same(intended, back))
             {
                 AnsiConsole.MarkupLine($"  [yellow]{new ExcelCellAddress(r, c)}[/] {Markup.Escape(intended)} | Excel: {Markup.Escape(text)} | as A1: {Markup.Escape(back)}");
@@ -399,7 +401,7 @@ sealed class CheckCommand : Command<CheckSettings>
         int compared = 0;
         foreach (var (r, c, cell) in ours.Cells.NonEmptyCells)
         {
-            if (cell.Formula is not { } formula || (formula.IsArrayFormula && !formula.IsSharedAnchor) || excel.Cells.TryGet(r, c)?.Formula is not { } theirs)
+            if (cell.Formula is not { } formula || (formula.IsArrayFormula && !formula.IsSharedAnchor) || excel.Cells.Find(r, c)?.Formula is not { } theirs)
             {
                 continue;
             }
@@ -574,7 +576,7 @@ sealed class CheckCommand : Command<CheckSettings>
                 }
 
                 // A series with an empty reference gets a few bytes left over from memory as one (spec §16.9).
-                if (!all && key is "firstReference" or "secondReference" && oa[key]?.GetValue<string>() is "")
+                if (!all && key is "categoriesReference" or "valuesReference" && oa[key]?.GetValue<string>() is "")
                 {
                     continue;
                 }

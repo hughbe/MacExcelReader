@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace MacExcelReader;
 
 /// <summary>
-/// A token of a parsed expression (spec §9).
+/// A token of a parsed expression (spec §15).
 /// </summary>
 /// <param name="Offset">The offset of the token within the expression.</param>
 /// <param name="RawCode">The token byte as stored, including its class bits.</param>
@@ -270,7 +270,7 @@ public static class FormulaTokens
         => expression.Length > 0 && Normalize(expression[0]) is 0x01 or 0x02;
 
     /// <summary>
-    /// Measures the fix-ups that follow an expression in a cell formula record (spec §8.5, §8.6).
+    /// Measures the fix-ups that follow an expression in a cell formula record (spec §12.5, §12.6).
     /// </summary>
     /// <param name="expression">The expression.</param>
     /// <param name="data">The bytes that follow the expression (and its text result, if any).</param>
@@ -382,7 +382,7 @@ public static class FormulaTokens
     /// blocks are skipped.
     /// </summary>
     /// <summary>
-    /// Returns the array-constant blocks (spec §8.5) for the <c>0x20</c> tokens of an expression, in token order,
+    /// Returns the array-constant blocks (spec §12.5) for the <c>0x20</c> tokens of an expression, in token order,
     /// from fix-up data laid out as in a cell formula.
     /// </summary>
     internal static IReadOnlyList<byte[]> ReadArrayBlocks(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups)

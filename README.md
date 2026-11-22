@@ -8,7 +8,7 @@ The file format was reverse-engineered from the code of Excel 1.00, 1.01, 1.03, 
 
 ## Features
 
-- **Exact round-trips.** All 37 sample documents from the Excel 1.00, 1.03 and 1.5 disks, and 60 files Excel itself saved in experiments, read and write back byte for byte, sheets and charts, including Excel 1.5's version-18 files. Fields the library does not model are preserved untouched.
+- **Exact round-trips.** All 37 sample documents from the Excel 1.00, 1.03 and 1.5 disks, and 70 files Excel itself saved in experiments, read and write back byte for byte, sheets and charts, including Excel 1.5's version-18 files. Fields the library does not model are preserved untouched.
 - **Cells.** Integers, numbers, text and formulas with their current values, plus number formats, alignment, bold and italic, borders, and protection flags.
 - **Formulas, both ways.** Decompile tokens to A1-style text (`=IF(NOT(FORMULA.FIND(B19,1,2,1)),RETURN())`) and compile text back to tokens with `ExcelFormula.Parse`. The parser reproduces Excel's own encoding byte for byte for 1,281 of the samples' 1,282 formulas and all 206 name definitions, for whichever release saved them: token classes, `IF` and `CHOOSE` jumps, the one-argument `SUM` attribute, volatile and memory-function tokens, array formulas and array constants, macro commands, dialog-box forms (`RUN?()`), names, external references and calls to macros on this or another sheet. Every function Excel 1.00–1.5 knows, with each release's argument rules. Allocation-free token walking.
 - **Display formatting.** All 19 built-in number formats, with dates in the 1904 date system. User-defined formats are read and written.
@@ -35,7 +35,7 @@ var document = ExcelDocument.Load("Expenses");   // the file's data fork
 foreach (var (row, column, cell) in document.Cells.NonEmptyCells)
 {
     var address = new ExcelCellAddress(row, column);
-    Console.WriteLine($"{address}: {ExcelValueFormatter.FormatCell(cell)}  {cell.Formula?.ToText(document)}");
+    Console.WriteLine($"{address}: {ExcelValueFormatter.FormatCell(cell, document)}  {cell.Formula?.ToText(document)}");
 }
 
 Console.WriteLine(document.Cells["C11"].Value);   // 1000
@@ -78,7 +78,7 @@ var chart = ChartDocument.Load("Chart1");
 Console.WriteLine($"{chart.MainChart.Type}, legend {chart.MainChart.LegendPosition}");
 foreach (var series in chart.Series)
 {
-    Console.WriteLine($"{series.Name}: {string.Join(", ", series.SecondValues)}");
+    Console.WriteLine($"{series.Name}: {string.Join(", ", series.Values)}");
 }
 ```
 
@@ -151,10 +151,11 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
 
 ## Limitations
 
-- New documents carry empty embedded p-code segments. Excel 1.03 never uses a file's own copy, but a different build of Excel linking to the document while it is closed would; copy the segments from an existing document if that matters.
-- The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`, and Excel keeps it until something the formula depends on changes. Set `document.State.RecalculationState = 1` to have Excel recalculate the sheet when it opens it.
-- The parser's rules come from Excel's code and tables and were checked against every sample formula; formulas unlike any in the samples could still encode differently. Excel 1.5's functions numbered above 255 match Excel 1.5's own encoding (the `Functions 256 And Up` sample).
-- Files written by the library have been checked in Excel 1.00, 1.03 and 1.5 under Mini vMac: every formula in `tests/Data` in 1.03, part of the 1.5 list including functions above 255, and the experiments listed in [Testing in a real Excel](docs/Testing.md), including charts the library builds from scratch, which Excel 1.00 draws and re-saves with no change to their content.
+- New documents carry empty embedded p-code segments. No released Excel reads them: every release writes code signature `0xAB27`, which each treats as its own build, so each uses its own copy of the code (spec §4.1). Only a build with another signature would load them, to read a closed document through a link; copy the segments from an existing document if that matters.
+- The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`, and Excel keeps it until something the formula depends on changes. Set `document.State.RecalculationState = ExcelRecalculationState.Needed` to have Excel recalculate the sheet when it opens it.
+- The parser's rules come from Excel's code and tables and reproduce every formula in the samples. Excel itself has re-entered and saved (with the harness's `--recompile`) every formula in `tests/Data/formulas-1.0.txt`, sheet 1 in Excel 1.03 and the rest in Excel 1.00, and every formula in `formulas-1.5.txt` in Excel 1.5, and the library's tokens match. The one exception is a whole-sheet range such as `=A1:IV16384`, which GET.FORMULA gives as whole rows, so Excel's re-entry differs ([Excel bugs and quirks](docs/ExcelBugs.md)). Formulas unlike any of these could still encode differently.
+- `ExcelValueFormatter` and `ExcelNumberFormat.Format` show values as text, not as a cell on screen: a fill (`*-`) shows nothing, since it needs the column width, colours are dropped, and numbers too wide for their column are not turned into `###`. Format text uses the US letters and separators; a translated Excel shows its own (spec §7).
+- Files written by the library have been checked in Excel 1.00, 1.03 and 1.5 under Mini vMac, in the runs listed in [Testing in a real Excel](docs/Testing.md), including charts the library builds from scratch, which Excel 1.00 draws and re-saves with no change to their content.
 
 ---
 

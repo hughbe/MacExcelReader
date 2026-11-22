@@ -4,13 +4,6 @@ using MacExcelReader.Internal;
 namespace MacExcelReader;
 
 /// <summary>
-/// A user-defined number format (spec §6.1): a 7-byte descriptor and the tokenised body.
-/// </summary>
-/// <param name="Descriptor">Three section offsets, three section lengths and the single-section flag.</param>
-/// <param name="Body">The tokenised format.</param>
-public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body);
-
-/// <summary>
 /// An Excel 1.x for Macintosh worksheet or macro sheet.
 /// </summary>
 public sealed class ExcelDocument
@@ -18,20 +11,20 @@ public sealed class ExcelDocument
     /// <summary>The magic number at the start of every worksheet and macro sheet.</summary>
     public const ushort Magic = 0x5327;
 
-    /// <summary>The format version Excel 1.00–1.04 write, and Excel 1.5 writes unless it needs 18.</summary>
-    public const ushort FormatVersion = 17;
+    /// <summary>The format version every Excel 1.x release writes, and Excel 1.5 unless it needs 18 (spec §2.1).</summary>
+    public const ushort Version17 = 17;
 
-    /// <summary>The format version Excel 1.5 writes when a document needs features older versions lack.</summary>
-    public const ushort Excel15FormatVersion = 18;
+    /// <summary>The format version Excel 1.5 writes when a document needs something only it can read (spec §2.1).</summary>
+    public const ushort Version18 = 18;
 
     /// <summary>
     /// Gets or sets the format version: 17 (readable by every Excel 1.x) or 18 (written by Excel 1.5 when the
-    /// document uses something only Excel 1.5 can read). See spec §3.
+    /// document uses something only Excel 1.5 can read). See spec §2.1.
     /// </summary>
-    public ushort Version { get; set; } = FormatVersion;
+    public ushort Version { get; set; } = Version17;
 
-    /// <summary>The code signature of Excel 1.03.</summary>
-    public const ushort Excel103Signature = 0xAB27;
+    /// <summary>The code signature every Excel 1.x release writes in header word 4 (spec §4).</summary>
+    public const ushort CodeSignature = 0xAB27;
 
     private int _sourceLength;
 
@@ -41,13 +34,13 @@ public sealed class ExcelDocument
     }
 
     /// <summary>Gets or sets the code signature of the build that wrote the file (header word 4).</summary>
-    public ushort Signature { get; set; } = Excel103Signature;
+    public ushort Signature { get; set; } = CodeSignature;
 
     /// <summary>Gets the six zero bytes that follow the signature.</summary>
     public byte[] HeaderReserved { get; private set; } = new byte[6];
 
     /// <summary>
-    /// Gets the two embedded p-code segments (spec §3.1). They are only used when another build of Excel links
+    /// Gets the two embedded p-code segments (spec §4.1). They are only used when another build of Excel links
     /// to this document while it is closed. Documents created with this library have empty segments. Excel
     /// reads the data offset from a fixed position in the 24-byte header, so there must be exactly two.
     /// </summary>
@@ -77,8 +70,24 @@ public sealed class ExcelDocument
     /// <summary>Gets or sets the number of built-in number formats of the writing build (19).</summary>
     public byte BuiltInFormatCount { get; set; } = 19;
 
-    /// <summary>Gets the user-defined number formats.</summary>
+    /// <summary>Gets the user-defined number formats, numbered from 19 (spec §7).</summary>
     public List<ExcelNumberFormat> NumberFormats { get; } = [];
+
+    /// <summary>
+    /// Gets the number format a cell's format index refers to: one of the built-in formats, or one of
+    /// <see cref="NumberFormats"/> from 19 on. Returns null for an index past the last format.
+    /// </summary>
+    public ExcelNumberFormat? GetNumberFormat(int index)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        if (index < ExcelNumberFormat.BuiltIn.Count)
+        {
+            return ExcelNumberFormat.BuiltIn[index];
+        }
+
+        index -= ExcelNumberFormat.BuiltIn.Count;
+        return index < NumberFormats.Count ? NumberFormats[index] : null;
+    }
 
     /// <summary>
     /// Gets or sets whether the external-document table is written. It is written whenever
@@ -91,7 +100,7 @@ public sealed class ExcelDocument
 
 
     /// <summary>
-    /// Gets the per-row size hints of the recalculation dependency index (spec §6.2). Excel rebuilds the
+    /// Gets the per-row size hints of the recalculation dependency index (spec §8). Excel rebuilds the
     /// index on open; zeros are always valid.
     /// </summary>
     public List<ushort> RowIndex { get; } = [];
@@ -206,9 +215,9 @@ public sealed class ExcelDocument
         }
 
         ushort version = reader.ReadUInt16();
-        if (version is not (FormatVersion or Excel15FormatVersion))
+        if (version is not (Version17 or Version18))
         {
-            throw new ExcelFormatException($"Unsupported format version {version}; expected {FormatVersion} or {Excel15FormatVersion}.");
+            throw new ExcelFormatException($"Unsupported format version {version}; expected {Version17} or {Version18}.");
         }
 
         ushort signature = reader.ReadUInt16();
@@ -301,8 +310,8 @@ public sealed class ExcelDocument
         for (int i = 0; i < count; i++)
         {
             // Version 17: three section offsets, three lengths and a flag. Version 18 (Excel 1.5) adds a fourth
-            // section, for text, so four offsets and four lengths (spec §6.1).
-            int sections = Version >= Excel15FormatVersion ? 4 : 3;
+            // section, for text, so four offsets and four lengths (spec §7).
+            int sections = Version >= Version18 ? 4 : 3;
             var descriptor = reader.ReadBytes(2 * sections + 1);
             int bodyLength = 0;
             for (int s = 0; s < sections; s++)
@@ -363,7 +372,7 @@ public sealed class ExcelDocument
                 throw new ExcelFormatException($"Unexpected window marker 0x{marker:X2}.");
             }
 
-            Windows.Add(ExcelWindow.Read(reader, Version >= Excel15FormatVersion ? ExcelWindow.Version18StateSize : ExcelWindow.StateSize));
+            Windows.Add(ExcelWindow.Read(reader, Version >= Version18 ? ExcelWindow.Version18StateSize : ExcelWindow.StateSize));
         }
     }
 
@@ -423,7 +432,7 @@ public sealed class ExcelDocument
     public string FinderType => Kind == ExcelDocumentKind.MacroSheet ? "XLPG" : "XLBN";
 
     /// <summary>
-    /// Enters an array formula, such as <c>=TREND(B1:B5)</c>, into a range of cells (spec §8.6). The top-left cell
+    /// Enters an array formula, such as <c>=TREND(B1:B5)</c>, into a range of cells (spec §12.6). The top-left cell
     /// holds the shared formula; the other cells refer to it. Braces around the text are optional.
     /// </summary>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
@@ -544,7 +553,7 @@ public sealed class ExcelDocument
         sections[0] = writer.Position;
         writer.WriteByte(BuiltInFormatCount);
         writer.WriteByte(checked((byte)NumberFormats.Count));
-        int formatSections = Version >= Excel15FormatVersion ? 4 : 3;
+        int formatSections = Version >= Version18 ? 4 : 3;
         foreach (var format in NumberFormats)
         {
             if (format.Descriptor is null || format.Descriptor.Length != 2 * formatSections + 1)
@@ -630,7 +639,7 @@ public sealed class ExcelDocument
 
         // Section 6: windows.
         sections[6] = writer.Position;
-        int windowState = Version >= Excel15FormatVersion ? ExcelWindow.Version18StateSize : ExcelWindow.StateSize;
+        int windowState = Version >= Version18 ? ExcelWindow.Version18StateSize : ExcelWindow.StateSize;
         foreach (var window in Windows)
         {
             if (window.State.Length != windowState)
@@ -722,7 +731,7 @@ public sealed class ExcelDocument
                 int offset = writer.Position - dataStart;
                 if (!Cells.TryGetRawCell(r, c, out ushort word0, out ushort word1, out ushort word2, out var raw))
                 {
-                    var cell = Cells.TryGet(r, c)!;
+                    var cell = Cells.Find(r, c)!;
                     word0 = cell.Word0;
                     word1 = cell.Word1;
                     word2 = cell.Word2;

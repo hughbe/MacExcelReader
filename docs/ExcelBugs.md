@@ -69,15 +69,16 @@ B).
 Seen in Excel 1.03. `=A1:IV16384` comes back from GET.FORMULA as `=R[-20]:R[16363]`, and entering that text
 gives a different formula: a range of two whole-row areas wrapped in a memory area (`46 … 25 … 25 … 11`).
 
-## Display quirks of GET.FORMULA (Excel 1.03)
+## Display quirks of GET.FORMULA (Excel 1.03, 1.5)
 
-Seen in Excel 1.03. These look like mismatches but the formula is right:
+Seen in Excel 1.03; the whole-row and array-formula ones also in Excel 1.5. These look like mismatches but the formula is right:
 
 * GET.FORMULA returns R1C1 text even when the sheet shows A1 references: `=A1%` in B4 is `=R[-3]C[-1]%`.
 * A range of whole rows is shortened: `=A1:IV16384` becomes `=R[-20]:R[16363]`, and `=$A$1:$IV$16384` becomes
   `=R1:R16384`.
 * External documents get a leading colon inside the quotes: `=Budget!Rate*2` becomes `=':Budget'!Rate*2`.
-* Array formulas come back without braces: `{=A1:A2*2}` becomes `=R[-59]C[-1]:R[-58]C[-1]*2`.
+* Array formulas come back without braces, and every cell of the range gets the anchor's text, its offsets
+  counted from the anchor: `{=A1:A2*2}` in B60:B61 is `=R[-59]C[-1]:R[-58]C[-1]*2` in both cells.
 * Small numbers are written out in full: `1.5E-10` becomes `0.00000000015`.
 
 ## Loaded formulas keep their stored values (Excel 1.03)
