@@ -72,15 +72,15 @@ Most of BIFF2's settings records match a field of Excel 1.x's state block (§6),
 | Excel 1.x state block (§6) | BIFF2 record | Difference |
 |---|---|---|
 | `0x000` maximum iterations | CALCCOUNT (`0x0C`) | — |
-| `0x002` calculation mode: 1, −1, 0 | CALCMODE (`0x0D`) | Same values: 1 automatic, −1 automatic except tables, 0 manual |
-| `0x004` precision: 1 full, 0 as displayed | PRECISION (`0x0E`) | Same values |
-| `0x006` reference style: 1 A1, 0 R1C1 | REFMODE (`0x0F`) | Same values |
+| `0x002` calculation mode | CALCMODE (`0x0D`) | Same values: −1 automatic except tables, 0 manual, 1 automatic |
+| `0x004` precision: 0 as displayed, 1 full | PRECISION (`0x0E`) | Same values |
+| `0x006` reference style: 0 R1C1, 1 A1 | REFMODE (`0x0F`) | Same values |
 | `0x00A` maximum change (a double) | DELTA (`0x10`) | — |
 | `0x012` iteration enabled | ITERATION (`0x11`) | — |
-| `0x01E` document protected | PROTECT (`0x12`) | — |
-| `0x242` password hash | PASSWORD (`0x13`) | The same hash (§6.2, OOo §4.18.4) |
 | `0x014`, `0x274`, `0x020` grid size | DIMENSION (`0x00`) | Excel 1.x sizes the whole cell table with it (§6.1); BIFF2 gives the first and last used row and column |
+| `0x01E` document protected | PROTECT (`0x12`) | — |
 | `0x042` column widths | COLWIDTH (`0x24`), DEFCOLWIDTH (`0x55`) | Excel 1.x: 256 widths in pixels, 75 by default; BIFF2: ranges of columns in 1/256 of the width of `0` |
+| `0x242` password hash | PASSWORD (`0x13`) | The same hash (§6.2, OOo §4.18.4) |
 | `0x244`, `0x246` standard font and size | FONT (`0x31`) | Excel 1.x has one font for the whole sheet: a Toolbox font number and size. BIFF2 has a font list, with names and heights in twips |
 | `0x24C` row height (cached) | DEFAULTROWHEIGHT (`0x25`) | Excel 1.x derives it from the font; rows cannot have their own height |
 
@@ -106,11 +106,11 @@ record to find them (OOo §4.7).
 | 1 Integer | Unsigned 16-bit, in the entry itself | INTEGER (`0x02`), also unsigned 16-bit |
 | 2 Number | A double, in section 5 | NUMBER (`0x03`) |
 | 3 Text | A Pascal string, in section 5 | LABEL (`0x04`) |
+| 4 TRUE, FALSE or error | A flag byte (0 TRUE or FALSE, 1 error), then the value or error code, in the entry itself | BOOLERR (`0x05`): the value or error code, then the flag |
 | 5, 6 Formula | A formula record, in section 5 | FORMULA (`0x06`), with STRING (`0x07`) for a text result |
 
 Excel 1.x stores a typed whole number from 0 to 65535 as an integer and any other number, negative ones
 included, as a number (§9).
-| 4 TRUE, FALSE or error | A flag byte (0 TRUE or FALSE, 1 error) and the value or error code, in the entry itself | BOOLERR (`0x05`): the value or error code, then the same flag |
 
 **Formula results.** Both formats keep a formula's last value in 8 bytes, and both mark a value that is not a
 number by setting the high-order word of the double to `0xFFFF`, which makes it a NaN. In Excel 1.x that word

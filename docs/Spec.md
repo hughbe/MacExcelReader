@@ -298,8 +298,8 @@ Document kind:
 | Value | Kind |
 |---:|---|
 | `0x10` | Worksheet |
-| `0x40` | Macro sheet |
 | `0x20` | Chart: the in-memory kind only, since charts never reach this writer (§16) |
+| `0x40` | Macro sheet |
 
 Section 0 begins immediately after the extra header.
 
@@ -326,8 +326,8 @@ A raw dump of a contiguous run of application globals. Offsets are relative to t
 |-------:|-----:|---------|---------|
 | 0x000 | word | 100 | Maximum iterations (Calculation dialog; 1…32767) |
 | 0x002 | word | 1 | Calculation mode (values below; `CALCULATION(2)` saves −1, `CALCULATION(3)` saves 0). Like 0x006 it is a global setting: every sheet Excel saves gets the current one. |
-| 0x004 | word | 1 | Precision: 1 = full precision, 0 = precision as displayed (results are rounded through the cell format when 0) |
-| 0x006 | word | 1 | Reference style: 1 = A1, 0 = R1C1 (`A1.R1C1(FALSE)` saves 0). It is saved and restored around formula parsing, and is global like 0x002. |
+| 0x004 | word | 1 | Precision: 0 = precision as displayed (results are rounded through the cell format), 1 = full precision |
+| 0x006 | word | 1 | Reference style: 0 = R1C1 (`A1.R1C1(FALSE)` saves it), 1 = A1. It is saved and restored around formula parsing, and is global like 0x002. |
 | 0x008 | word | 0 | Unused: no code in the application reads or writes it |
 | 0x00A | double | 0.001 | Maximum change (iteration) |
 | 0x012 | word | 0 | Iteration enabled (0 / 1) |
@@ -337,7 +337,7 @@ A raw dump of a contiguous run of application globals. Offsets are relative to t
 | 0x01A | word | 0 | Pending-work flag. Excel 1.00 never sets it: a new sheet starts with 0 (`10.00`), so only a file can. When it is set, `22.03` runs the range routine `23.01` over the whole sheet (rows 0–16383, columns 0–255) with operation code `0xD01F` and clears the word. Operation 31 does nothing to a cell; the flag bits make the routine rescan each row (`23.02`), checking for each cell whether its neighbours are empty and whether they are Fill-aligned: what Excel needs to draw text that spills into the next cells. Excel 1.00 works that out as it draws anyway, so the word has no visible effect: sheets with overflowing text and with runs of Fill-aligned cells look the same saved with 0 or 1, and Excel saves them back with 0. |
 | 0x01C | word | 0 | Set to 1 by the formula compiler when a formula uses a function at or above the base function count. It selects which count Save writes at the start of the data area (§5). Cleared for a new sheet. |
 | 0x01E | word | 0 / 1 | **Document protected.** Selects the "Protect Document…" / "Unprotect Document…" menu text and is checked by ~50 editing routines. 1 only in `DB.FORM`. |
-| 0x020 | word | 0 / 1 | Which form 0x014 and 0x274 are in: 1 = last indices, 0 = counts (§6.1) |
+| 0x020 | word | 0 / 1 | Which form 0x014 and 0x274 are in: 0 = counts, 1 = last indices (§6.1) |
 | 0x022 | word | | Number of defined names that have a definition (0 for a new sheet, 6 in `REPLACE`). Define Name counts it up; Open and Save carry it through unchanged, so a file written with 0 keeps 0 when Excel re-saves it. Every sample has the true count. |
 | 0x024 | word | | Number of names whose definition is a reference (flag `0x04`, §11; 5 in `REPLACE`). Excel recomputes it when it saves. |
 | 0x026 | long | | Pointer, left over from memory |
@@ -371,9 +371,9 @@ Calculation mode (`0x002`):
 
 | Value | Meaning |
 |---:|---|
-| 1 | Automatic |
 | −1 | Automatic except tables |
 | 0 | Manual |
+| 1 | Automatic |
 
 Offsets 0x262–0x273 are all derived from the `Print_Area` and `Print_Titles` names by one routine, which is
 re-run whenever a name or a column width changes; a writer can leave them zero.
@@ -475,10 +475,9 @@ international character table at run time, so the ones shown are the US defaults
 | `01` | | `General` |
 | `02` | 1 byte `c` | Literal character `c`. A backslash is written before it unless it is one of the characters that may appear unescaped. |
 | `03` | 3 bytes `a b c` | Starts a number section; produces no text. `a` = number of integer digit positions (drives thousands-separator placement), `b` = decimal places, `c` a signed byte: `(c − b) / 2` = number of percent signs. Excel 1.5: when `c` is below `b`, `(b − c) / 3` is the number of trailing thousands separators, each dividing the number by 1000 (`#,##0,` is `03 04 00 FD`, `Format Scaling`). |
-| `1C` | 3 bytes | Same, for a scientific section |
 | `04` | 1 byte `n` | `n` × `#` |
-| `06` | 1 byte `n` | `n` × `0` |
 | `05` | | Decimal point; digit runs after it are written without separators |
+| `06` | 1 byte `n` | `n` × `0` |
 | `07` | | Turns on the thousands separator, inserted every three integer positions |
 | `08`, `1B` | | Reserved. The format compiler (`07.09` in 1.00, `05.09` in 1.03) never emits them and the routines that read formats skip them. |
 | `09` | 1 byte `n`, `n` chars | Quoted string `"…"` |
@@ -486,11 +485,12 @@ international character table at run time, so the ones shown are the US defaults
 | `0B`–`0E` | | `d`, `dd`, `ddd`, `dddd` |
 | `0F`–`12` | | `m`, `mm`, `mmm`, `mmmm` (month) |
 | `13`, `14` | | `h`, `hh` (24-hour) |
-| `1F`, `20` | | `h`, `hh` (12-hour; used when the section has an AM/PM token) |
 | `15`, `16` | | `m`, `mm` (minutes) |
 | `17`, `18` | | `s`, `ss` |
 | `19`, `1A` | | `yy`, `yyyy` |
+| `1C` | 3 bytes | Starts a scientific section, with the same operands as `03` |
 | `1D`, `1E` | 1 byte | Exponent sign `+` / `-`; the byte is the exponent digit count |
+| `1F`, `20` | | `h`, `hh` (12-hour; used when the section has an AM/PM token) |
 | `21` | 2 bytes `n1 n2`, `n1` chars, `n2` chars | AM/PM designator, written as the two strings joined by `/` (`AM/PM`, `A/P`) |
 | `22` | | Currency symbol |
 | `23` | | Excel 1.5: `@`, the text placeholder. The character is the 28th of the format-character string (below). |
@@ -860,9 +860,9 @@ appends replacements, in token order:
 
 | Token | Appended | Meaning |
 |-------|----------|---------|
-| `0x23` name | word | 1-based index of the name in section 4. Inside an external reference (between `1A` and `1B`) it is instead the 1-based index in that document's list in section 3. |
 | `0x1A` external sheet | word | 1-based index of the external document in §8. An entry named `\0` stands for the active sheet, written `!A1` (§8) |
 | `0x20` array constant | array block (below) | The constant's elements |
+| `0x23` name | word | 1-based index of the name in section 4. Inside an external reference (between `1A` and `1B`) it is instead the 1-based index in that document's list in section 3. |
 | `0x26` memory area | word `n`, then `n` × 6-byte areas (first row word, last row word, first column byte, last column byte) | The areas the wrapped union or intersection stands for, as the compiler worked them out (§15.4). |
 
 Array block: byte column count (0 means 256), word row count, then the `rows × cols` elements row by row, each

@@ -227,15 +227,15 @@ You can also build an expression yourself. The common tokens:
 
 | Token | Bytes | Meaning |
 |-------|-------|---------|
-| `0x44 rr rr cc` | 4 | Cell reference. Row word: bit 15 relative row, bit 14 relative column. |
-| `0x25 r1 r1 r2 r2 c1 c2` | 7 | Area |
+| `0x03`…`0x0E` | 1 | `+ - * / ^ & < <= = >= > <>` |
+| `0x17 len text` | 2+ | String constant |
 | `0x1E nn nn` | 3 | Integer constant |
 | `0x1F` + 8 bytes | 9 | Number constant (big-endian double) |
-| `0x17 len text` | 2+ | String constant |
-| `0x03`…`0x0E` | 1 | `+ - * / ^ & < <= = >= > <>` |
+| `0x23` + 7 bytes | 8 | Defined name; its 1-based index goes in the fix-ups |
+| `0x25 r1 r1 r2 r2 c1 c2` | 7 | Area |
 | `0x41 ff` | 2 | Function `ff` with its fixed argument count |
 | `0x42 nn ff` | 3 | Function `ff` with `nn` arguments |
-| `0x23` + 7 bytes | 8 | Defined name; its 1-based index goes in the fix-ups |
+| `0x44 rr rr cc` | 4 | Cell reference. Row word: bit 15 relative row, bit 14 relative column. |
 
 ```csharp
 // =AVERAGE($A$1:$A$5)*2: area rows 0–4 of column 0, AVERAGE (5) with 1 argument, integer 2, multiply.
