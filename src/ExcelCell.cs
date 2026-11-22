@@ -1,7 +1,7 @@
 namespace MacExcelReader;
 
 /// <summary>
-/// A cell: one entry of the cell table (spec §7) and, for numbers, text and formulas, its cell data (spec §8).
+/// A cell: one entry of the cell table (spec §9) and, for numbers, text and formulas, its cell data (spec §12).
 /// </summary>
 public sealed class ExcelCell
 {

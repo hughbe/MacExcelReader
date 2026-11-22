@@ -697,4 +697,20 @@ public class ExperimentTests
         Assert.Equal(292, document.FunctionCount);
         Assert.Empty(document.ExtraFunctionNames);
     }
+
+    [Fact]
+    public void Excel15_SavesDataDeleteDialogInTheFixedForm()
+    {
+        // formulas-1.5 sheet 5 re-entered in Excel 1.5: DATA.DELETE?() comes back as 41 82 (spec §15.4).
+        Assert.Equal([0x41, 0x82], Load("Formulas 1.5 Sheet 5").Cells["B38"].Formula!.Expression.ToArray());
+    }
+
+    [Fact]
+    public void Excel15_ArrayFormulaOperandsTakeArrayClassOnlyInsideArrayArguments()
+    {
+        // formulas-1.5 sheet 2 re-entered in Excel 1.5 with FORMULA.ARRAY (spec §15.4).
+        var document = Load("Formulas 1.5 Sheet 2");
+        Assert.Equal(0x45, document.Cells["B60"].Formula!.SharedExpression[0]);   // {=A1:A2*2}
+        Assert.Equal(0x65, document.Cells["B64"].Formula!.SharedExpression[0]);   // {=SUM(A1:A2*B1:B2)}
+    }
 }

@@ -5,7 +5,7 @@ using System.Text;
 namespace MacExcelReader;
 
 /// <summary>
-/// Converts parsed expressions (spec §9) to A1-style formula text.
+/// Converts parsed expressions (spec §15) to A1-style formula text.
 /// </summary>
 public static class FormulaDecompiler
 {
@@ -21,7 +21,7 @@ public static class FormulaDecompiler
 
     /// <summary>
     /// Converts a parsed expression to text, without the leading '=', rendering array constants from their
-    /// data blocks (spec §8.5), one per <c>0x20</c> token in order.
+    /// data blocks (spec §12.5), one per <c>0x20</c> token in order.
     /// </summary>
     public static string Decompile(ReadOnlySpan<byte> expression, IReadOnlyList<ushort> fixupWords, ExcelDocument? document, bool fixupsInPlace, IReadOnlyList<byte[]>? arrays)
     {

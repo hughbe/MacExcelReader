@@ -77,7 +77,8 @@ Seen in Excel 1.03. These look like mismatches but the formula is right:
 * A range of whole rows is shortened: `=A1:IV16384` becomes `=R[-20]:R[16363]`, and `=$A$1:$IV$16384` becomes
   `=R1:R16384`.
 * External documents get a leading colon inside the quotes: `=Budget!Rate*2` becomes `=':Budget'!Rate*2`.
-* Array formulas come back without braces: `{=A1:A2*2}` becomes `=R[-59]C[-1]:R[-58]C[-1]*2`.
+* Array formulas come back without braces, and every cell of the range gets the anchor's text, its offsets
+  counted from the anchor: `{=A1:A2*2}` in B60:B61 is `=R[-59]C[-1]:R[-58]C[-1]*2` in both cells.
 * Small numbers are written out in full: `1.5E-10` becomes `0.00000000015`.
 
 ## Loaded formulas keep their stored values (Excel 1.03)

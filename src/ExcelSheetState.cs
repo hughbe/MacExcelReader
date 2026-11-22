@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace MacExcelReader;
 
 /// <summary>
-/// The 630-byte sheet state block (spec §5): calculation settings, grid extent, column widths,
+/// The 630-byte sheet state block (spec §6): calculation settings, grid extent, column widths,
 /// protection and the standard font. The raw bytes are kept so unknown fields round-trip; the
 /// properties read and write the fields whose meaning is known.
 /// </summary>

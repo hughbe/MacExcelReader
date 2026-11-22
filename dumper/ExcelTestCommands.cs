@@ -380,8 +380,10 @@ sealed class CheckCommand : Command<CheckSettings>
                 continue;
             }
 
+            // GET.FORMULA gives every cell of an array formula the anchor's text, its offsets counted from the anchor.
             string text = value.Text!;
-            string back = R1C1.ToA1(text, r, c);
+            var origin = formula.IsArrayFormula && formula.SharedAnchor is { } anchor ? anchor : new ExcelCellAddress(r, c);
+            string back = R1C1.ToA1(text, origin.Row, origin.Column);
             if (!R1C1.Same(intended, back))
             {
                 AnsiConsole.MarkupLine($"  [yellow]{new ExcelCellAddress(r, c)}[/] {Markup.Escape(intended)} | Excel: {Markup.Escape(text)} | as A1: {Markup.Escape(back)}");

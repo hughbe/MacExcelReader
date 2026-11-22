@@ -35,7 +35,7 @@ public enum ExcelValueTypes : byte
 }
 
 /// <summary>
-/// Describes a worksheet function or macro command (spec §9.3), from Excel 1.03's function table.
+/// Describes a worksheet function or macro command (spec §15.3), from Excel 1.03's function table.
 /// </summary>
 /// <param name="Name">The function name.</param>
 /// <param name="MinArguments">The minimum number of arguments.</param>

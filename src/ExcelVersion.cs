@@ -1,7 +1,7 @@
 namespace MacExcelReader;
 
 /// <summary>
-/// Excel 1.x releases that differ in the formulas they can store or in how they encode them (spec §9).
+/// Excel 1.x releases that differ in the formulas they can store or in how they encode them (spec §2.1, §15).
 /// </summary>
 public enum ExcelVersion
 {

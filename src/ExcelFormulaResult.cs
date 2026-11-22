@@ -24,7 +24,7 @@ public enum ExcelFormulaResultKind
 }
 
 /// <summary>
-/// A formula's current value, decoded from the first 8 bytes of the formula record (spec §8.4).
+/// A formula's current value, decoded from the first 8 bytes of the formula record (spec §12.4).
 /// </summary>
 public readonly struct ExcelFormulaResult
 {

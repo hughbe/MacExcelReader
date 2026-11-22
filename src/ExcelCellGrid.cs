@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace MacExcelReader;
 
 /// <summary>
-/// The dense cell table of a sheet (spec §7). Every position inside the grid is a cell; empty cells may
+/// The dense cell table of a sheet (spec §9). Every position inside the grid is a cell; empty cells may
 /// still carry formatting.
 /// </summary>
 /// <remarks>

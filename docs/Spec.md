@@ -1202,9 +1202,12 @@ For a function call:
 * Reference class when it is an argument that accepts references and the function can return a reference.
 * Value class everywhere else.
 
-**Array formulas and name definitions.** In the shared expression of an array formula (§12.6) and in a name
-definition, operands of operators, and arguments that accept arrays (type bit `0x40`), take array class where
-the rules above give value class. The expression as a whole keeps the class the rules give.
+**Array formulas and name definitions.** In a name definition, operands of operators and arguments that accept
+arrays (type bit `0x40`) take array class where the rules above give value class. In the shared expression of
+an array formula (§12.6), arguments that accept arrays do too, and operands of operators only where the
+operator is itself inside such an argument: Excel 1.5 compiles `{=A1:A2*2}` with the area in value class (`45
+…`) but `{=SUM(A1:A2*B1:B2)}` with both areas in array class (`Formulas 1.5 Sheet 2`). The expression as a
+whole keeps the class the rules give.
 `{=AVERAGE(D4-B9:B18)}` is `64 C0 03 03  65 C0 08 C0 11 01 01  04  42 01 05` (both operands of the subtraction
 in array class, AVERAGE itself in value class); the definition `rads = PI()/180` is `61 13  1E 00 B4  06`.
 
@@ -1217,7 +1220,10 @@ arguments in the fixed-count form, so older releases can still read it. `FORMULA
 release and `FORMULA(A1,B1)` is `42 02 39`, readable only by 1.5 (Save warns, and records that in the function
 count, §5). Its Save also warns for DISPLAY with four or more arguments, PRINT with six or more, and OPEN with
 three or more (Excel 1.04 already accepts a third OPEN argument; 1.03 and earlier do not). The pre-release 1.5
-build in the samples lacks the exception (§2.3).
+build in the samples lacks the exception (§2.3). Excel 1.5's Save (`47.19`) also writes every call of a
+function whose minimum and maximum argument counts are equal in the fixed-count form, whatever its argument
+count byte holds, so it drops the dialog-box bit: `DATA.DELETE?()`, the only dialog-box function with a fixed
+count, is `42 80 82` from Excel 1.00 and `41 82` from 1.5 (`Formulas 1.5 Sheet 5`).
 
 **Dialog-box forms** *(code)*. A `?` directly after a function name, as in `RUN?()`, sets bit 7 of the
 argument count. That forces the `22` form: `RUN?()` is `42 80 91`. It is a syntax error unless the function

@@ -183,6 +183,7 @@ Things to know:
 | Nov 2026 | 1.5 | `SIMUL EQUATIONS` opened and saved by hand; FORMAT.NUMBER with a text section, a trailing comma and two plain sections | The released 1.5 saves `SIMUL EQUATIONS` as version 17; text sections and trailing-comma scaling make version 18 (spec §2.1, §7) |
 | Nov 2026 | 1.5 | Functions 256–291 from `formulas-1.5`, with `--recompile` | Excel 1.5's tokens match the library's; saved as the `Functions 256 And Up` sample (spec §15.2) |
 | Nov 2026 | 1.00 | `Literals` written by the library with function count 209 and one extra function name, and with 208 | 1.00 refuses a count above 208 ("File is not a saved worksheet") before reading the names; 208 opens (spec §5, §14) |
+| Nov 2026 | 1.5 | `formulas-1.5` sheets 2–6 with `--recompile`, and `BREAK CHART` and `PROFIT CHART` | Charts and sheets 3, 4 and 6 match. Array-formula operands take array class only inside array arguments, and 1.5's Save writes `DATA.DELETE?()` as `41 82`; both now in the parser (spec §15.4). GET.FORMULA gives every cell of an array range the anchor's text; the check now reads it from the anchor. |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

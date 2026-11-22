@@ -40,7 +40,7 @@ public sealed class ExcelDocument
     public byte[] HeaderReserved { get; private set; } = new byte[6];
 
     /// <summary>
-    /// Gets the two embedded p-code segments (spec §3.1). They are only used when another build of Excel links
+    /// Gets the two embedded p-code segments (spec §4.1). They are only used when another build of Excel links
     /// to this document while it is closed. Documents created with this library have empty segments. Excel
     /// reads the data offset from a fixed position in the 24-byte header, so there must be exactly two.
     /// </summary>
@@ -100,7 +100,7 @@ public sealed class ExcelDocument
 
 
     /// <summary>
-    /// Gets the per-row size hints of the recalculation dependency index (spec §6.2). Excel rebuilds the
+    /// Gets the per-row size hints of the recalculation dependency index (spec §8). Excel rebuilds the
     /// index on open; zeros are always valid.
     /// </summary>
     public List<ushort> RowIndex { get; } = [];
@@ -310,7 +310,7 @@ public sealed class ExcelDocument
         for (int i = 0; i < count; i++)
         {
             // Version 17: three section offsets, three lengths and a flag. Version 18 (Excel 1.5) adds a fourth
-            // section, for text, so four offsets and four lengths (spec §6.1).
+            // section, for text, so four offsets and four lengths (spec §7).
             int sections = Version >= Version18 ? 4 : 3;
             var descriptor = reader.ReadBytes(2 * sections + 1);
             int bodyLength = 0;
@@ -432,7 +432,7 @@ public sealed class ExcelDocument
     public string FinderType => Kind == ExcelDocumentKind.MacroSheet ? "XLPG" : "XLBN";
 
     /// <summary>
-    /// Enters an array formula, such as <c>=TREND(B1:B5)</c>, into a range of cells (spec §8.6). The top-left cell
+    /// Enters an array formula, such as <c>=TREND(B1:B5)</c>, into a range of cells (spec §12.6). The top-left cell
     /// holds the shared formula; the other cells refer to it. Braces around the text are optional.
     /// </summary>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>

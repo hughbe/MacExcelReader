@@ -37,6 +37,16 @@ public class VersionTests
     }
 
     [Fact]
+    public void Excel15_WritesFixedCountFunctionsWithoutTheDialogBit()
+    {
+        // DATA.DELETE takes no arguments: 1.00 keeps DATA.DELETE?() as 42 80 82, Excel 1.5's Save writes 41 82
+        // (47.19 in 1.5; formulas-1.5 sheet 5 re-entered in Excel 1.5).
+        Assert.Equal("428082", Convert.ToHexString(ExcelFormula.Parse("=DATA.DELETE?()").Expression));
+        Assert.Equal("4182", Convert.ToHexString(ExcelFormula.Parse("=DATA.DELETE?()", null, ExcelVersion.Excel150).Expression));
+        Assert.Equal("428091", Convert.ToHexString(ExcelFormula.Parse("=RUN?()", null, ExcelVersion.Excel150).Expression));
+    }
+
+    [Fact]
     public void FunctionsInsideIf_ChangeClassInExcel15()
     {
         // GOTO inside IF: reference class (21) in 1.00–1.03, value class (41) in 1.5.

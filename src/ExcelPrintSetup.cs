@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace MacExcelReader;
 
 /// <summary>
-/// The Page Setup record and its strings (spec §13).
+/// The Page Setup record and its strings (spec §14).
 /// </summary>
 public sealed class ExcelPrintSetup
 {
