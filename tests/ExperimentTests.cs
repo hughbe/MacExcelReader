@@ -686,4 +686,15 @@ public class ExperimentTests
         Assert.Equal("#VALUE!", document.Cells["C3"].Value);                   // MID("abc",,1): start 0
         Assert.Equal(ExcelCellType.Empty, document.Cells["C6"].Type);
     }
+
+    [Fact]
+    public void Excel15_FunctionsFrom256UseTheHighTokens()
+    {
+        // Every formula of functions 256–291 from tests/Data/formulas-1.5.txt, re-entered by Excel 1.5: LEFT (256)
+        // with one argument is 3A (value class 5A), 1, 00, and the count is the highest function used plus 1 (spec §5, §15.2).
+        var document = Load("Functions 256 And Up");
+        Assert.Equal([0x44, 0xC0, 0x00, 0x00, 0x5A, 0x01, 0x00], document.Cells["B4"].Formula!.Expression.ToArray());
+        Assert.Equal(292, document.FunctionCount);
+        Assert.Empty(document.ExtraFunctionNames);
+    }
 }

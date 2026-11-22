@@ -18,7 +18,7 @@ charts. It was reverse-engineered from the applications' code and checked agains
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 59 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 60 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
@@ -303,14 +303,16 @@ Document kind:
 
 Section 0 begins immediately after the extra header.
 
-**Function count.** Open refuses a file whose count is larger than the number of functions it knows (208 in
-1.00–1.03), since its formulas could use numbers the reader lacks. Excel 1.00's Save writes the length of its
-function table if a global flag is set, and otherwise a base count fixed at start-up (208); the formula
-compiler sets the flag when a formula uses a number at or above the base count. When the count is above 208,
-1.00 also writes the names of the extra functions at the start of section 7, so that Open can check them
-(§14). Excel 1.01 keeps the flag per document, in state word `0x01C` (§6), and drops the names; 1.03 does the
-same. Excel 1.04's Save (`45.0d` in 1.04 and 1.06) and 1.5's write 208, or one more than the highest function
-number any formula uses if that is higher. Every sample has 208 except `INVOICE MACROS`, which uses
+**Function count.** Open refuses a file whose count is larger than its function table (208 entries in
+1.00–1.03), since its formulas could use numbers the reader lacks: Excel 1.00 gives "File is not a saved
+worksheet" (alert `0x0159`, `46.06`). Excel 1.00 also has a base count fixed at start-up, and its Save writes
+the table length if a global flag is set, and otherwise the base count; the formula compiler sets the flag
+when a formula uses a number at or above the base count, and Open sets it after reading a file with extra
+functions. Between the base count and the count, 1.00's files hold the names of the extra functions at the
+start of section 7 (§14). In released 1.00 the base count and the table length are both 208, so it always
+writes 208 and never a name. Excel 1.01 keeps the flag per document, in state word `0x01C` (§6), and drops
+the names; 1.03 does the same. Excel 1.04's Save (`45.0d` in 1.04 and 1.06) and 1.5's write 208, or one more
+than the highest function number any formula uses if that is higher. Every sample has 208 except `INVOICE MACROS`, which uses
 GET.DOCUMENT (238) and has 239.
 
 ---
@@ -920,12 +922,15 @@ Three parts, each self-terminating. Only the `Page Breaks` experiment sample has
 Microsoft's samples have a print record (`MATRIX`, `BEARINGS`, `JAPAN`) and the rest a single `0x00` for it.
 
 **Excel 1.00: extra function names.** In a file without an extra header (§5, `n = 0`), when the function count
-is above 208, section 7 starts with one Pascal string per function from 208 up to the count: the names of the
-functions the saving build knows beyond the base set (`47.0b`). Excel 1.00's Open reads them before the page
-breaks and compares each with its own name for that number, refusing the file (alert `0x2038`) on any
-difference (`46.06`). This guards against a later build numbering new functions differently. Released 1.00
-knows exactly 208 functions, so it never writes the list, and no sample has one. Excel 1.01 dropped it in both
-Save and Open (`47.0b`, `46.07` in 1.01), and later files carry no names even when their count is higher.
+is above the reader's base count, section 7 starts with one Pascal string per function from the base count up
+to the function count. Excel 1.00's Save writes one name per table entry from its base count to the end of its
+table (`47.0b`), and Open reads them before the page breaks and compares each with its own table entry for
+that number, refusing the file ("File error", alert `0x2038`) on any difference (`46.06`). So a build
+whose table holds functions beyond its base set checks that a file numbers them the same way. Released
+1.00's base count and table length are both 208, so it never writes the list, and it refuses a file whose count
+is above 208 before reaching it (§5): a sheet the library wrote with count 209 and one name gets "File is not a
+saved worksheet", and the same sheet with count 208 opens. No sample has the list. Excel 1.01 dropped it in
+both Save and Open (`47.0b`, `46.07` in 1.01), and later files carry no names even when their count is higher.
 
 1. **Column page breaks**: a sequence of chunks, each a count byte `n` (1…5) followed by `n` bytes, one column
    number per byte. Terminated by `0x00`.

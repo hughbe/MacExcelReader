@@ -519,6 +519,11 @@ sealed class DumpCommand : Command<FileSettings>
         header.AddRow("Code segments", string.Join(", ", document.CodeSegments.Select(s => $"{s.Length} bytes")));
         header.AddRow("Function count", document.FunctionCount.ToString(CultureInfo.InvariantCulture));
         header.AddRow("Extra header", Program.Hex(document.ExtraHeader));
+        if (document.ExtraFunctionNames.Count > 0)
+        {
+            header.AddRow("Extra function names", Program.Escape(string.Join(", ", document.ExtraFunctionNames.Select((n, i) => $"{ExcelFunctions.Count + i} {n}"))));
+        }
+
         header.AddRow("Built-in formats", document.BuiltInFormatCount.ToString(CultureInfo.InvariantCulture));
         header.AddRow("User formats", document.NumberFormats.Count == 0 ? "(none)"
             : string.Join("; ", document.NumberFormats.Select(f => Program.Hex(f.Descriptor) + " " + Program.Hex(f.Body))));

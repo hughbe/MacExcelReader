@@ -363,7 +363,7 @@ public class DocumentWriterTests
     [Fact]
     public void Excel100FunctionNames_AreReadFromSection7AndWrittenBack()
     {
-        // Excel 1.00 writes the names of functions numbered 208 and up at the start of section 7 (spec §14).
+        // A file without an extra header names its functions numbered 208 and up at the start of section 7 (spec §14).
         var document = ExcelDocument.CreateWorksheet();
         document.ExtraHeader = [];
         document.FunctionCount = 210;
@@ -384,6 +384,22 @@ public class DocumentWriterTests
         var rereadLater = ExcelDocument.Read(later.ToArray());
         Assert.Empty(rereadLater.ExtraFunctionNames);
         Assert.Equal([(ushort)5], rereadLater.RowPageBreaks);
+    }
+
+    [Fact]
+    public void ExtraFunctionNames_MustMatchTheCountAndHeader()
+    {
+        // Open reads one name per function past 208 only when there is no extra header (spec §14), so any other
+        // combination would be misread.
+        var missing = ExcelDocument.CreateWorksheet();
+        missing.ExtraHeader = [];
+        missing.FunctionCount = 209;
+        Assert.Throws<InvalidOperationException>(() => missing.ToArray());
+
+        var withHeader = ExcelDocument.CreateWorksheet();
+        withHeader.FunctionCount = 209;
+        withHeader.ExtraFunctionNames.Add("EXTRA");
+        Assert.Throws<InvalidOperationException>(() => withHeader.ToArray());
     }
 
     [Fact]

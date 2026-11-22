@@ -57,10 +57,11 @@ public sealed class ExcelDocument
     public ushort FunctionCount { get; set; } = (ushort)ExcelFunctions.Count;
 
     /// <summary>
-    /// Gets the names of the functions numbered from 208 up to <see cref="FunctionCount"/>, which Excel 1.00 writes
-    /// at the start of section 7 when a formula uses one (spec §14), so that Open can check they mean the same
-    /// functions. Only files without an extra header (Excel 1.00 and earlier) have them; later releases dropped
-    /// the list. Released 1.00 knows no function past 207, so no known file has any.
+    /// Gets the names of the functions numbered from 208 up to <see cref="FunctionCount"/>, which a file without an
+    /// extra header carries at the start of section 7 when its count is above 208 (spec §14), so that Open can
+    /// check they mean the same functions. Excel 1.00's code supports the list for a build whose function table
+    /// is longer than its start-up count, but released 1.00 has 208 of each: it never writes a name and refuses
+    /// any file whose count is above 208. Excel 1.01 and later dropped the list, so no known file has one.
     /// </summary>
     public List<string> ExtraFunctionNames { get; } = [];
 
@@ -528,6 +529,7 @@ public sealed class ExcelDocument
             writer.WriteBytes(segment);
         }
 
+        ValidateExtraFunctionNames();
         writer.WriteUInt16(FunctionCount);
         writer.WriteBytes(State.RawData);
         writer.WriteByte((byte)Kind);
@@ -774,5 +776,17 @@ public sealed class ExcelDocument
         }
 
         writer.WriteByte(0);
+    }
+
+    private void ValidateExtraFunctionNames()
+    {
+        // Open reads one name per function from 208 up to the count, but only when there is no extra header (spec §14).
+        int expected = ExtraHeader.Length == 0 ? Math.Max(0, FunctionCount - ExcelFunctions.Count) : 0;
+        if (ExtraFunctionNames.Count != expected)
+        {
+            throw new InvalidOperationException(ExtraHeader.Length == 0
+                ? $"A file without an extra header needs one extra function name per function from {ExcelFunctions.Count} up to the function count ({expected}), not {ExtraFunctionNames.Count}. To save a document using later functions in the form Excel 1.01 and later read, set ExtraHeader to [0]."
+                : "Only a file without an extra header can hold extra function names.");
+        }
     }
 }

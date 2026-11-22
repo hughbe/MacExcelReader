@@ -99,7 +99,7 @@ public static class ExcelFormulaParser
         var parser = new Parser(lexer, document, version);
         var root = parser.ParseFormula(definition);
 
-        // A document that uses a function newer than Excel 1.03 records the highest number it needs (spec §4).
+        // A document that uses a function newer than Excel 1.03 records the highest number it needs (spec §5).
         if (document is not null && parser.HighestFunction >= document.FunctionCount)
         {
             document.FunctionCount = (ushort)(parser.HighestFunction + 1);
