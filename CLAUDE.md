@@ -15,7 +15,9 @@ specification it is built from. The library is unreleased, so its API can change
 - Work from Excel 1.00 first: decompile 1.00's p-code and run experiments in Excel 1.00, then describe what
   1.01, 1.03 and 1.5 changed. The only 1.01 is the French release (`Excel 1.01/` beside the other Excel
   folders); it keeps 1.00's procedure numbers except where it inserts procedures, so give its number only where
-  it differs ("`46.06` in 1.00, `46.07` in 1.01"). Cite code as `segment.procedure` with the release (`46.06` in 1.00), and say what the
+  it differs ("`46.06` in 1.00, `46.07` in 1.01").
+- Excel 1.04 (English, from WinWorld) sits between 1.03 and 1.5. It inserts segments `0x47` and `0x48`, so 1.03's
+  `0x47`–`0x73` are its `0x49`–`0x75`; compare it with 1.03. Cite code as `segment.procedure` with the release (`46.06` in 1.00), and say what the
   procedure is unless the sentence already does ("FREEZE.PANES, `0f.3e` in 1.5"). Where a fact was read from
   1.03 or 1.5, find the 1.00 counterpart (procedures keep their frame size and opcode sequence across releases,
   only the numbers move) and cite it first: "`47.0b` in 1.00, `45.0c` in 1.03".

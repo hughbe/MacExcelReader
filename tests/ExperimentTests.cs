@@ -241,6 +241,17 @@ public class ExperimentTests
         Assert.Equal(text, Load("Driver French").Cells[address].Value);
     }
 
+    [Theory]
+    [InlineData(ExcelVersion.Excel100, 2)]
+    [InlineData(ExcelVersion.Excel104, 3)]
+    [InlineData(ExcelVersion.Excel150, 3)]
+    public void Open_GainsItsThirdArgumentInExcel104(ExcelVersion version, int maxArguments)
+    {
+        // From the function tables of Excel 1.00, 1.04 and 1.5 (spec §2.1).
+        Assert.Equal(maxArguments, ExcelFunctions.Get(106, version)!.MaxArguments);
+        Assert.Equal(version >= ExcelVersion.Excel104, ExcelFunctions.Get(208, version) is not null);
+    }
+
     [Fact]
     public void PieExplodedAll_DefaultSeriesFormatHoldsTheExplosion()
     {

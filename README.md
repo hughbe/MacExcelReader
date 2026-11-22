@@ -2,7 +2,7 @@
 
 MacExcelReader is a fast, allocation-conscious .NET library for reading and writing Microsoft Excel 1.x for Macintosh documents (Excel 1.00 to 1.5): worksheets (Finder type `XLBN`), macro sheets (`XLPG`) and charts (`MCBN`).
 
-The file format was reverse-engineered from the code of Excel 1.00, 1.01, 1.03 and 1.5 and is documented in [docs/Spec.md](docs/Spec.md). The full API is described in the [usage guide](docs/Usage.md).
+The file format was reverse-engineered from the code of Excel 1.00, 1.01, 1.03, 1.04 and 1.5 and is documented in [docs/Spec.md](docs/Spec.md). The full API is described in the [usage guide](docs/Usage.md).
 
 ---
 
