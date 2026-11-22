@@ -14,11 +14,11 @@ charts. It was reverse-engineered from the applications' code and checked agains
 | Excel 1.03 | `Microsoft Excel 1.03.dsk` (800K HFS) | Save (`45.0c`), Open (`44.08`), the external-link reader (`72.01`), the formula compiler (`0f.00`), chart reader and writer (`5d`, `5c`), the counterparts of 1.00's `47.0b`, `46.06`, `73.01`, `11.00`, `5e` and `5d`. The spec cites 1.00's numbers first. |
 | Excel 1.04 | `Microsoft Excel 1.04.dsk` (800K HFS, from WinWorld) | Every procedure, matched to its 1.03 counterpart. 1.04 inserts two segments (`0x47`, `0x48`), so 1.03's `0x47`–`0x73` are `0x49`–`0x75` in 1.04 and lower numbers are unchanged apart from a few inserted procedures; the spec gives 1.04's numbers where it describes a 1.04 change. |
 | Excel 1.06 | `Microsoft Excel 1.06.dsk` (800K HFS) | Every procedure, matched to its 1.04 counterpart. 1.06 keeps 1.04's segment and procedure numbers apart from a few procedures it inserts or drops. |
-| Excel 1.5 (May 1988) | Excel 1.5 folder | Save (`47.0d`), format and token translation (`47.18`), function table and file-number table, version-18 rules |
+| Excel 1.5 (May 1988) | Excel 1.5 folder | Save (`47.0d`), format and token translation (`47.18`), function table and file-number table, version-18 rules. Each 1.5 change the spec names was checked against 1.06's code, the release before it. |
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 53 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 55 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
@@ -136,16 +136,17 @@ from memory (above), except in the cell table, where the writer replaces them wi
 | 1.03 | 17 | 0–207 | Writes a zero-length name for an external entry that refers to the document itself (§8), and makes its in-memory external entries 16 bytes (§8). Function table and tokens identical to 1.01's. |
 | 1.04 | 17 | 0–208 | Adds CHANGE.LINK (208, a command with up to two text arguments, carried out by `44.00` in 1.04) and a third argument to OPEN, matching the Read Only box its Open dialog gains (Appendix A). Its Save writes the function count as one more than the highest function number a formula uses (§5): 209 for a sheet calling CHANGE.LINK, and 208 for one that calls nothing newer even when the file it opened said 209 (`Changes 1.04`, `No New Functions 1.04` samples). It keeps a document's file reference between saves and flushes the volume after saving (`44.0c`, `44.0d` in 1.04), which does not change the bytes written. Embedded code identical to 1.03's apart from the import word (§2.3). Compiler and tokens identical to 1.03's. |
 | 1.06 (December 1987) | 17 | 0–208 | Writes the same files as 1.04, with byte-identical embedded code, so its files cannot be told from 1.04's (§2.3); compiler, function table and tokens unchanged (`Changes 1.06` and `No New Functions 1.06` samples). Its other changes are inside the application: a `SIZE` resource for MultiFinder, one routine (`01.1a` in 1.06) for all its checks for pending events, and no longer reserving master pointers around Open (1.04's `15.2b`, `15.2c`). |
-| 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of twelve functions (Appendix A) and the token class of function calls inside IF and CHOOSE (§15.4). Adds frozen panes and gridline colours to windows (§13) and text sections, `@` and colours to number formats (§7). |
+| 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of eleven more functions (Appendix A; OPEN's had changed in 1.04) and the token class of function calls inside IF and CHOOSE (§15.4). Marks charts with more than 102 categories as chart version 1, which earlier releases refuse (§16.2). Adds frozen panes and gridline colours to windows (§13) and text sections, `@` and colours to number formats (§7). |
 
 The format version is header word 2 (§4). Excel 1.00's Open accepts only version 17 (`46.06`), and so do
-1.01's (`46.07`), 1.03's and 1.04's (`44.0e` in 1.04). Excel 1.5 writes 17 unless the document needs something
-only it can read, then 18 and the warning "This file will only be readable by Excel 1.5 or greater" (`47.0d`).
-Its Save switches to 18 when a window has frozen panes or a gridline and heading colour other than automatic
-(state bytes 121 and 127, §13), or when the number-format check (`47.10` in 1.5) flags a format. That check
-decompiles each format and watches a flag the format decompiler sets (`0d.19`, `0d.1a`); a format using `@` or
-a colour sets it (§7). `SIMUL EQUATIONS`, the one version-18 file among Microsoft's samples, has neither
-window setting and no `@` or colour, so the check flags something else as well **(unknown)**.
+1.01's (`46.07`), 1.03's, 1.04's and 1.06's (`44.0e` in 1.04 and 1.06). Excel 1.5 writes 17 unless the
+document needs something only it can read, then 18 and the warning "This file will only be readable by Excel
+1.5 or greater" (`47.0d`). Its Save switches to 18 when a window has frozen panes or a gridline and heading
+colour other than automatic (state bytes 121 and 127, §13), or when the number-format check (`47.10` in 1.5)
+flags a format. That check decompiles each format and watches a flag the format decompiler sets (`0d.19`,
+`0d.1a`); a format using `@` or a colour sets it (§7). `SIMUL EQUATIONS`, the one version-18 file among
+Microsoft's samples, has neither window setting and no `@` or colour, so the check flags something else as
+well **(unknown)**.
 
 A version-17 document can also need a later release without changing its version, because it uses a function
 the reader lacks. The function count at the start of the data area (§5) records that, and Excel 1.5 warns
@@ -1331,7 +1332,7 @@ and Format > Patterns, and charts the library built and Excel 1.00 re-saved (`Li
 | Offset | Size | Value | Meaning |
 |-------:|-----:|-------|---------|
 | 0 | word | `0x018C` | Magic. Open rejects anything else. |
-| 2 | word | 3 or 12 | Format version. Excel 1.00, 1.03 and 1.5 all write 12 (`push 12` in 1.00's `5d.00` and 1.03's `5c.00`). `CLOCK.CH`, on the 1.00 data disk, has 3, so it was saved by a build before the release; Excel 1.00 opens it and saves it back as 12. Excel 1.00's and 1.03's Open both reject 1, treat 2 and 3 as 12, and use bit 2 and bit 3 to decide how to read fonts and series headers. |
+| 2 | word | 1, 3 or 12 | Format version. Excel 1.00 to 1.06 write 12 (`push 12` in 1.00's `5d.00` and 1.03's `5c.00`). Excel 1.5 writes 12, or 1 when either chart has more than 102 categories (the word at chart header offset 4, `64.00` in 1.5): `Chart 102 Categories` is saved as 12 and `Chart 103 Categories` as 1. The layout is the same; 1.5's reader treats 1 as 12 (internally 28, whose extra bit nothing tests), while every earlier release refuses it, so the number keeps such charts from older releases. `CLOCK.CH`, on the 1.00 data disk, has 3, so it was saved by a build before the release; Excel 1.00 opens it and saves it back as 12. Excel 1.00's to 1.06's Open reject 1, treat 2 and 3 as 12, and use bit 2 and bit 3 to decide how to read fonts and series headers. |
 | 4 | word | `0x13E8` | Code signature (§4.1) |
 | 6 | 6 bytes | 0 | |
 | 12 | word | 1 | Number of embedded code segments |
@@ -1492,7 +1493,7 @@ bit 10 set (one label per point) (§16.8).
 | 0 | Word of flags (below) |
 | 2 | Word: **chart type** (below) |
 | 4 | Byte: the number of categories, the largest point count of the chart's series, worked out when the chart is drawn (`37.13` in 1.00; 12 for `PROFIT CHART` once Excel has drawn it, 0 in overlays). The drawing code divides it by the categories between tick labels to place them (`37.2b`). |
-| 5 | Byte: not used. Excel 1.00 and 1.03 never write it, so it keeps whatever the file had (0 in a new chart, `0f.05` in 1.00). Excel 1.5 widens the category count to a word over bytes 4–5 (its `37.13` stores a word and `37.2b` reads one), so a chart Excel 1.5 saved last has 0 in byte 4 and the count here: `PROFIT CHART` has 0 and 12. Every main chart in the 1.00 and 1.03 samples that began as `PROFIT CHART` still has that 12; charts made by the library and saved by Excel 1.00 have 0. |
+| 5 | Byte: not used. Excel 1.00 to 1.06 never write it (1.06's `35.13` still stores a byte at offset 4), so it keeps whatever the file had (0 in a new chart, `0f.05` in 1.00). Excel 1.5 widens the category count to a word over bytes 4–5 (its `37.13` stores a word and `37.2b` reads one), so a chart Excel 1.5 saved last has 0 in byte 4 and the count here: `PROFIT CHART` has 0 and 12. Every main chart in the 1.00 and 1.03 samples that began as `PROFIT CHART` still has that 12; charts made by the library and saved by Excel 1.00 have 0. |
 | 6 | Word: how much narrower the plot became when Excel laid out the axis and tick labels, the width before layout less the width after (`37.03` in 1.00): 266 for `PROFIT CHART`'s column, line, area and scatter forms, 116 for its bar forms, 300 or 405 for its pie forms. |
 | 8 | Word: % overlap (column/bar). Negative means the "Overlapped" option is on; the magnitude is the percentage. |
 | 10 | Word: % cluster spacing (column/bar) |

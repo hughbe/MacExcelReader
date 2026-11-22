@@ -298,6 +298,19 @@ public class ExperimentTests
         }
     }
 
+    [Theory]
+    [InlineData("Chart 102 Categories", 12, 102)]
+    [InlineData("Chart 103 Categories", 1, 103)]
+    public void Excel15_MarksChartsWithMoreThan102CategoriesAsVersion1(string sample, int version, int categories)
+    {
+        // Library line charts with 102 and 103 points, opened and saved by Excel 1.5. It writes version 1, which
+        // releases before 1.5 refuse, when a chart has more than 102 categories (spec §16.2).
+        var document = ChartDocument.Load(SamplePath(sample));
+        Assert.Equal(version, document.Version);
+        Assert.Equal(categories, document.MainChart.Excel15CategoryCount);
+        Assert.Equal(File.ReadAllBytes(SamplePath(sample)), document.ToArray());
+    }
+
     [Fact]
     public void PieExplodedAll_DefaultSeriesFormatHoldsTheExplosion()
     {

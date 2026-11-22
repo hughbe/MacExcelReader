@@ -166,11 +166,12 @@ public class ChartDocumentTests
     }
 
     [Fact]
-    public void ChartDocument_RejectsUnsupportedVersionsAndChartCounts()
+    public void ChartDocument_ReadsVersion1AndRejectsBadChartCounts()
     {
+        // Version 1 is Excel 1.5's mark for a chart with more than 102 categories, laid out as version 12.
         var versionOne = ChartDocument.Create(ChartType.Line).ToArray();
         versionOne[3] = 1;
-        Assert.Throws<ExcelFormatException>(() => ChartDocument.Read(versionOne));
+        Assert.Equal(1, ChartDocument.Read(versionOne).Version);
 
         var noCharts = ChartDocument.Create(ChartType.Line);
         noCharts.Charts.Clear();

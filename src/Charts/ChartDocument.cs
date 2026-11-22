@@ -19,7 +19,10 @@ public sealed class ChartDocument
     private const int HeaderSize = 128;
     private const int PageSetupBodySize = 664;
 
-    /// <summary>Gets or sets the format version (12 for Excel; 2 and 3 are older Microsoft Chart files).</summary>
+    /// <summary>
+    /// Gets or sets the format version: 12 from Excel, 1 from Excel 1.5 for a chart with more than 102 categories
+    /// (same layout; earlier releases refuse it), and 2 or 3 for older Microsoft Chart files (spec §16.2).
+    /// </summary>
     public ushort Version { get; set; } = CurrentVersion;
 
     /// <summary>Gets or sets the code signature.</summary>
@@ -102,11 +105,6 @@ public sealed class ChartDocument
         }
 
         var document = new ChartDocument { Version = reader.ReadUInt16(), Signature = reader.ReadUInt16() };
-        if (document.Version == 1)
-        {
-            throw new ExcelFormatException("Chart format version 1 is not supported.");
-        }
-
         reader.Skip(6);
         int segmentCount = reader.ReadUInt16();
         int segmentLength = reader.ReadUInt16();
