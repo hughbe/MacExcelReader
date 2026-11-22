@@ -128,7 +128,7 @@ from memory (above), except in the cell table, where the writer replaces them wi
 | Release | Format versions it writes | Functions | What changed |
 |---------|--------------------------|-----------|--------------|
 | 1.00 (September 1985) | 17 | 0–207 | — |
-| 1.01 | 17 | 0–207 | Adds a one-byte extra header (§5) and drops the extra function names (§14), keeping the function-count flag in state word `0x01C` instead (§5, §6). Takes the argument separator and other characters from the system's international settings (§15.4), and moves its words into resources so that it can be translated: function names (§15.3), the built-in names of a new sheet (§11), built-in number formats and format letters (§7), and the workspace file's name (Appendix B). Function table and tokens identical to 1.00's. |
+| 1.01 | 17 | 0–207 | Adds a one-byte extra header (§5) and drops the extra function names (§14), keeping the function-count flag in state word `0x01C` instead (§5, §6). Takes the argument separator and other characters from the system's international settings (§15.4), and moves its words into resources so that it can be translated: function names (§15.3), the built-in names of a new sheet (§11), built-in number formats and format letters (§7), and the workspace file's name (Appendix B). Its code asks for a string by number (`0d.0d` in 1.01): below `0x2000` the `STR` resource with that ID, from `0x2000` up item number − `0x2000`, counting from 0, of `STR#` 256. Function table and tokens identical to 1.00's. |
 | 1.03 | 17 | 0–207 | Writes a zero-length name for an external entry that refers to the document itself (§8), and makes its in-memory external entries 16 bytes (§8). Function table and tokens identical to 1.01's. |
 | 1.04 | 17 | 0–208 | Adds CHANGE.LINK (208), known only from Excel 1.5's messages. No 1.04 sample or code is available; its encoding is **(assumed)** to be 1.03's. |
 | 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of twelve functions (Appendix A) and the token class of function calls inside IF and CHOOSE (§15.4). Adds frozen panes and gridline colours to windows (§13) and text sections, `@` and colours to number formats (§7). |
@@ -654,8 +654,8 @@ Definitions differ from cell formulas:
 * Token classes follow the rules for array formulas (§15.4).
 
 A new worksheet always has five names with empty definitions: `Criteria`, `Database`, `Print_Area`,
-`Print_Titles`, `Recorder`. From 1.01 on they come from the string list `STR#` 256, so a translated Excel
-gives its own: the French 1.01's are `Critères`, `Base_de_données`, `Zone_d_impression`,
+`Print_Titles`, `Recorder`. From 1.01 on they are items 30–34 of the string list `STR#` 256, so a translated
+Excel gives its own: the French 1.01's are `Critères`, `Base_de_données`, `Zone_d_impression`,
 `Impression_des_titres` and `Enregistrement` (`New Sheet French` sample). Excel adds its five names to any
 sheet it opens that lacks them, so a sheet with English names saved by the French Excel has both sets
 (`Formulas French`).
@@ -2299,10 +2299,10 @@ Numbers marked unused are never assigned. Function 255 is not in the table: it c
 ## Appendix B. Workspace files
 
 A workspace file (Finder type `XLIN`, creator `XCEL`; on the 1.00 program disk it is called `Resume Excel`;
-1.01 takes the name from its strings, `Reprendre Excel` in French) records what Excel had open, so that
-opening it reopens the same documents in the same windows with the same calculation settings. It holds no cell
-data. Written by `64.00` and read by `64.01` in Excel 1.00 (`63.00`, `63.01` in 1.03, which build the folder
-string differently but write the same fields).
+1.01 takes the name from item 113 of its string list `STR#` 256, `Reprendre Excel` in French) records what
+Excel had open, so that opening it reopens the same documents in the same windows with the same calculation
+settings. It holds no cell data. Written by `64.00` and read by `64.01` in Excel 1.00 (`63.00`, `63.01` in
+1.03, which build the folder string differently but write the same fields).
 
 | Size | Meaning |
 |-----:|---------|
