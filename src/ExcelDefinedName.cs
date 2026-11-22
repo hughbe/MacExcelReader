@@ -85,13 +85,18 @@ public sealed class ExcelDefinedName
     /// one row up and one column left of each cell that uses it.
     /// </summary>
     public string GetDefinitionText(ExcelDocument? document, ExcelCellAddress relativeTo)
-        => FormulaDecompiler.Decompile(Definition, [], document, fixupsInPlace: true, ArrayConstants, relativeTo);
+        => FormulaDecompiler.Decompile(Definition, [], document, fixupsInPlace: true, _arrayConstants, relativeTo);
 
     /// <summary>
     /// Gets the data of the array constants (<c>0x20</c> tokens) in the definition, one block per token in order
     /// (spec §12.5). They are stored after the list of names (spec §11).
     /// </summary>
-    public List<byte[]> ArrayConstants { get; } = [];
+    public List<byte[]> ArrayConstants => _arrayConstants ??= [];
+
+    internal bool HasArrayConstants => _arrayConstants is { Count: > 0 };
+
+    // Created on first use: most names have no array constants.
+    private List<byte[]>? _arrayConstants;
 
     /// <summary>
     /// Sets the definition from formula text, such as <c>=$A$1:$B$5</c> or <c>={1,2,3}</c>, and sets or clears
@@ -185,19 +190,19 @@ public sealed class ExcelDefinedName
             throw new ExcelFormatException("A defined name's two definition lengths disagree.");
         }
 
-        var name = MacRoman.GetString(reader.ReadBytes(nameLength));
+        var name = MacRoman.GetString(reader.ReadSpan(nameLength));
         return new ExcelDefinedName(name, definition, flags) { ShortcutKey = key, MacroKind = extra };
     }
 
     internal void Write(BigEndianWriter writer)
     {
-        var nameBytes = MacRoman.GetBytes(Name);
-        if (nameBytes.Length is 0 or > 255 || Definition.Length > 255)
+        // Mac OS Roman has one byte per character.
+        if (Name.Length is 0 or > 255 || Definition.Length > 255)
         {
             throw new InvalidOperationException($"Name '{Name}' or its definition is too long.");
         }
 
-        writer.WriteByte((byte)nameBytes.Length);
+        writer.WriteByte((byte)Name.Length);
         writer.WriteByte((byte)Definition.Length);
         writer.WriteByte(Flags);
         if ((Flags & MacroFlag) != 0)
@@ -208,7 +213,7 @@ public sealed class ExcelDefinedName
 
         writer.WriteBytes(Definition);
         writer.WriteByte((byte)Definition.Length);
-        writer.WriteBytes(nameBytes);
+        writer.WriteMacRoman(Name);
     }
 
     /// <inheritdoc/>

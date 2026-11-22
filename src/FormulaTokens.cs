@@ -349,7 +349,7 @@ public static class FormulaTokens
         }
     }
 
-    private static void SkipArrayBlock(ReadOnlySpan<byte> data, ref int position)
+    internal static void SkipArrayBlock(ReadOnlySpan<byte> data, ref int position)
     {
         Require(data, position, 1);
         int columns = data[position++];
@@ -383,13 +383,13 @@ public static class FormulaTokens
         }
     }
 
-    private static void Skip(ReadOnlySpan<byte> data, ref int position, int count)
+    internal static void Skip(ReadOnlySpan<byte> data, ref int position, int count)
     {
         Require(data, position, count);
         position += count;
     }
 
-    private static ushort ReadWord(ReadOnlySpan<byte> data, ref int position)
+    internal static ushort ReadWord(ReadOnlySpan<byte> data, ref int position)
     {
         Require(data, position, 2);
         ushort value = BinaryPrimitives.ReadUInt16BigEndian(data.Slice(position));

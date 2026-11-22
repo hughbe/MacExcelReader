@@ -14,13 +14,15 @@ internal sealed class BigEndianWriter
         _buffer = new byte[Math.Max(16, capacity)];
     }
 
+    public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, Position);
+
     public int Position { get; private set; }
 
     private Span<byte> Reserve(int count)
     {
         if (Position + count > _buffer.Length)
         {
-            Array.Resize(ref _buffer, Math.Max(_buffer.Length * 2, Position + count));
+            Array.Resize(ref _buffer, Math.Max(_buffer.Length + _buffer.Length / 2, Position + count));
         }
 
         var span = _buffer.AsSpan(Position, count);
@@ -56,7 +58,24 @@ internal sealed class BigEndianWriter
         WriteBytes(bytes);
     }
 
-    public void WritePascalString(string value) => WritePascalBytes(MacRoman.GetBytes(value));
+    /// <summary>
+    /// Writes a Pascal string, encoding the text as Mac OS Roman (one byte per character) straight into the buffer.
+    /// </summary>
+    public void WritePascalString(string value)
+    {
+        if (value.Length > 255)
+        {
+            throw new ArgumentException("A Pascal string cannot be longer than 255 bytes.", nameof(value));
+        }
+
+        WriteByte((byte)value.Length);
+        WriteMacRoman(value);
+    }
+
+    /// <summary>
+    /// Writes text as Mac OS Roman, one byte per character, with no length.
+    /// </summary>
+    public void WriteMacRoman(string value) => MacRoman.GetBytes(value, Reserve(value.Length));
 
     /// <summary>
     /// Overwrites a big-endian word at an earlier position.
@@ -67,5 +86,9 @@ internal sealed class BigEndianWriter
     public void PatchUInt32(int position, uint value)
         => BinaryPrimitives.WriteUInt32BigEndian(_buffer.AsSpan(position, 4), value);
 
-    public byte[] ToArray() => _buffer.AsSpan(0, Position).ToArray();
+    /// <summary>
+    /// Gets the bytes written. When they fill the buffer exactly, the buffer itself is returned and the writer must
+    /// not be used again.
+    /// </summary>
+    public byte[] ToArray() => Position == _buffer.Length ? _buffer : _buffer.AsSpan(0, Position).ToArray();
 }

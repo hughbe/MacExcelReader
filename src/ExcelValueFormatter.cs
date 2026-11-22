@@ -157,6 +157,38 @@ public static class ExcelValueFormatter
             return (string.Empty, 1);
         }
 
+        // .NET gives the first 41 significant digits correctly rounded: d.dddd…E±x. They settle the 14 Excel keeps,
+        // unless the 15th starts an apparent exact tie, 5 and then zeros, which the exact conversion has to decide.
+        Span<char> text = stackalloc char[64];
+        magnitude.TryFormat(text, out int length, "E40", System.Globalization.CultureInfo.InvariantCulture);
+        Span<char> digits = stackalloc char[41];
+        digits[0] = text[0];
+        text.Slice(2, 40).CopyTo(digits[1..]);
+        if (digits[14] == '5' && !digits[15..].ContainsAnyExcept('0'))
+        {
+            return Num2StrExact(magnitude);
+        }
+
+        int exponent = int.Parse(text[43..length], System.Globalization.CultureInfo.InvariantCulture) + 1;
+        long kept = long.Parse(digits[..14], System.Globalization.CultureInfo.InvariantCulture);
+        if (digits[14] >= '5')
+        {
+            kept++;
+            if (kept == 100_000_000_000_000)
+            {
+                kept = 10_000_000_000_000;
+                exponent++;
+            }
+        }
+
+        Span<char> result = stackalloc char[14];
+        kept.TryFormat(result, out _, default, System.Globalization.CultureInfo.InvariantCulture);
+        return (new string(result.TrimEnd('0')), exponent);
+    }
+
+    // The same conversion done exactly, for a value whose 15th digit may be an exact tie.
+    private static (string Digits, int Exponent) Num2StrExact(double magnitude)
+    {
         long bits = BitConverter.DoubleToInt64Bits(magnitude);
         int binaryExponent = (int)((bits >> 52) & 0x7FF);
         long mantissa = bits & 0xFFFFFFFFFFFFFL;
@@ -286,16 +318,33 @@ public static class ExcelValueFormatter
             return cell.IsError ? cell.Error.ToText() : BooleanText.Of(cell.BooleanValue);
         }
 
-        if (cell.Formula?.Result is { Kind: ExcelFormulaResultKind.Error } result)
+        string? text;
+        if (cell.Formula is { } formula)
         {
-            return result.Error.ToText();
+            var result = formula.Result;
+            switch (result.Kind)
+            {
+                case ExcelFormulaResultKind.Error:
+                    return result.Error.ToText();
+                case ExcelFormulaResultKind.Boolean:
+                    return BooleanText.Of(result.Boolean);
+                case ExcelFormulaResultKind.Text:
+                    text = result.Text;
+                    break;
+                default:
+                    return string.Empty;
+            }
+        }
+        else if (cell.Type == ExcelCellType.Text)
+        {
+            text = cell.TextValue;
+        }
+        else
+        {
+            return string.Empty;
         }
 
-        return cell.Value switch
-        {
-            bool b => BooleanText.Of(b),
-            string s => document?.GetNumberFormat(cell.NumberFormat)?.Format(s) ?? s,
-            _ => string.Empty,
-        };
+        text ??= string.Empty;
+        return document?.GetNumberFormat(cell.NumberFormat)?.Format(text) ?? text;
     }
 }

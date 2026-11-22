@@ -136,7 +136,7 @@ public sealed class ExcelFormula
             return SharedText(document);
         }
 
-        return "=" + FormulaDecompiler.Decompile(Expression, GetFixupWords(), document, fixupsInPlace: false, FormulaTokens.ReadArrayBlocks(Expression, Fixups));
+        return FormulaDecompiler.Decompile(Expression, Fixups, document, "=", string.Empty);
     }
 
     /// <summary>Gets whether the cell is part of an array formula (spec §12.6).</summary>
@@ -287,7 +287,7 @@ public sealed class ExcelFormula
 
         var expression = Fixups.Slice(13, length);
         var fixups = Fixups.Slice(13 + length);
-        return "{=" + FormulaDecompiler.Decompile(expression, FormulaTokens.ReadFixupWords(expression, fixups), document, fixupsInPlace: false, FormulaTokens.ReadArrayBlocks(expression, fixups)) + "}";
+        return FormulaDecompiler.Decompile(expression, fixups, document, "{=", "}");
     }
 
     /// <summary>

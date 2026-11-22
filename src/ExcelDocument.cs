@@ -127,7 +127,24 @@ public sealed class ExcelDocument
     /// Gets the per-row size hints of the recalculation dependency index (spec §8). Excel rebuilds the
     /// index on open; zeros are always valid.
     /// </summary>
-    public List<ushort> RowIndex { get; } = [];
+    public List<ushort> RowIndex => _rowIndex ??= ReadRowIndex();
+
+    // Read from the file when first used: Excel ignores it, so most callers never do.
+    private List<ushort>? _rowIndex;
+    private byte[]? _rowIndexSource;
+    private int _rowIndexOffset;
+    private int _rowIndexCount;
+
+    private List<ushort> ReadRowIndex()
+    {
+        var index = new List<ushort>(_rowIndexCount);
+        for (int r = 0; r < _rowIndexCount; r++)
+        {
+            index.Add(BinaryPrimitives.ReadUInt16BigEndian(_rowIndexSource.AsSpan(_rowIndexOffset + 2 * r)));
+        }
+
+        return index;
+    }
 
     /// <summary>Gets the cells.</summary>
     public ExcelCellGrid Cells { get; } = new();
@@ -307,7 +324,7 @@ public sealed class ExcelDocument
             {
                 for (byte length; (length = namesReader.ReadByte()) != 0;)
                 {
-                    external.Names.Add(MacRoman.GetString(namesReader.ReadBytes(length)));
+                    external.Names.Add(MacRoman.GetString(namesReader.ReadSpan(length)));
                 }
             }
         }
@@ -361,10 +378,10 @@ public sealed class ExcelDocument
             }
         }
 
-        for (int r = 0; r < rows; r++)
-        {
-            RowIndex.Add(reader.ReadUInt16());
-        }
+        _rowIndexSource = reader.Data;
+        _rowIndexOffset = reader.Position;
+        _rowIndexCount = rows;
+        reader.Skip(2 * rows);
     }
 
     private void ReadNames(BigEndianReader reader)
@@ -431,15 +448,19 @@ public sealed class ExcelDocument
 
     private static string? ReadOptionalString(BigEndianReader reader)
     {
-        var bytes = reader.ReadPascalBytes();
-        return bytes.Length == 0 ? null : MacRoman.GetString(bytes);
+        var bytes = reader.ReadPascalSpan();
+        return bytes.IsEmpty ? null : MacRoman.GetString(bytes);
     }
 
     /// <summary>
     /// Writes the document to a file (the data fork). Set the Finder type to XLBN for a worksheet or
     /// XLPG for a macro sheet, and the creator to XCEL.
     /// </summary>
-    public void Save(string path) => File.WriteAllBytes(path, ToArray());
+    public void Save(string path)
+    {
+        using var stream = File.Create(path);
+        Write(stream);
+    }
 
     /// <summary>
     /// Writes the document to a stream.
@@ -447,7 +468,7 @@ public sealed class ExcelDocument
     public void Write(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        stream.Write(ToArray());
+        stream.Write(Serialize().WrittenSpan);
     }
 
     /// <summary>
@@ -505,7 +526,9 @@ public sealed class ExcelDocument
     /// <summary>
     /// Serialises the document.
     /// </summary>
-    public byte[] ToArray()
+    public byte[] ToArray() => Serialize().ToArray();
+
+    private BigEndianWriter Serialize()
     {
         int rows = Cells.ColumnCount == 0 ? 0 : Cells.RowCount;
         int columns = rows == 0 ? 0 : Cells.ColumnCount;
@@ -531,12 +554,10 @@ public sealed class ExcelDocument
         State.SetNameCounts(
             Names.Count(n => n.Definition.Length > 0 && (n.Flags & ExcelDefinedName.ReferenceFlag) != 0),
             ExternalDocuments.FindIndex(d => d.Name == "\0") + 1);
-        while (RowIndex.Count < rows)
-        {
-            RowIndex.Add(0);
-        }
 
-        var writer = new BigEndianWriter(Math.Max(4096, _sourceLength + 1024));
+        // A document read from a file usually saves to the same size, so a buffer of that size is returned without
+        // a copy.
+        var writer = new BigEndianWriter(_sourceLength > 0 ? _sourceLength : 4096);
         writer.WriteUInt16(Magic);
         writer.WriteUInt16(Version);
         writer.WriteUInt16(Signature);
@@ -618,10 +639,23 @@ public sealed class ExcelDocument
             writer.WriteUInt16(0);
         }
 
-        for (int r = 0; r < rows; r++)
+        // Untouched, the file's words are copied; rows beyond them get 0.
+        int known = 0;
+        if (_rowIndex is null && _rowIndexSource is not null)
         {
-            writer.WriteUInt16(RowIndex[r]);
+            known = Math.Min(rows, _rowIndexCount);
+            writer.WriteBytes(_rowIndexSource.AsSpan(_rowIndexOffset, 2 * known));
         }
+        else if (_rowIndex is not null)
+        {
+            known = Math.Min(rows, _rowIndex.Count);
+            for (int r = 0; r < known; r++)
+            {
+                writer.WriteUInt16(_rowIndex[r]);
+            }
+        }
+
+        writer.WriteZeros(2 * (rows - known));
 
         // Section 2: cell table. It is reserved here and filled in as the cell data is written.
         sections[2] = writer.Position;
@@ -651,9 +685,12 @@ public sealed class ExcelDocument
         writer.WriteByte(0);
         foreach (var name in Names)
         {
-            foreach (var block in name.ArrayConstants)
+            if (name.HasArrayConstants)
             {
-                writer.WriteBytes(block);
+                foreach (var block in name.ArrayConstants)
+                {
+                    writer.WriteBytes(block);
+                }
             }
         }
 
@@ -706,7 +743,7 @@ public sealed class ExcelDocument
             writer.PatchUInt32(sectionTable + 4 * i, (uint)((block << 16) | offset));
         }
 
-        return writer.ToArray();
+        return writer;
     }
 
     private bool IsBlankRow(int row, int columns)

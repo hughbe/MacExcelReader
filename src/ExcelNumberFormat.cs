@@ -342,7 +342,8 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
 
     private static List<Token> Tokenize(ReadOnlySpan<byte> section)
     {
-        var tokens = new List<Token>();
+        // A section has at most one token per byte, so one array of that size never grows.
+        var tokens = new List<Token>(section.Length);
         int i = 0;
         while (i < section.Length)
         {

@@ -246,7 +246,7 @@ public sealed class ExcelCell
     public void SetText(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        if (MacRoman.GetBytes(value).Length > 255)
+        if (value.Length > 255)   // Mac OS Roman has one byte per character
         {
             throw new ArgumentException("Cell text cannot be longer than 255 characters.", nameof(value));
         }
