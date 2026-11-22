@@ -726,7 +726,7 @@ public class ExperimentTests
     }
 
     [Theory]
-    [InlineData("B5", 0x41)]    // =IF(A1,NOW()): NOW in value class
+    [InlineData("B8", 0x41)]    // =IF(A1,NOW()): NOW in value class
     [InlineData("B21", 0x41)]   // =IF(ISERROR(A1),1), typed: ISERROR in value class
     [InlineData("B22", 0x41)]   // =IF(A1,GOTO(B1)), typed: GOTO in value class
     public void IfArguments_FollowTheArgumentRules(string address, byte expected)
