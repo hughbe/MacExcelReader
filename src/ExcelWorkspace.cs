@@ -61,11 +61,11 @@ public sealed class ExcelWorkspace
         set => BinaryPrimitives.WriteUInt16BigEndian(Settings, value);
     }
 
-    /// <summary>Gets or sets the calculation mode word (1 = automatic; spec §6).</summary>
-    public short CalculationMode
+    /// <summary>Gets or sets the calculation mode (spec §6, 0x002).</summary>
+    public ExcelCalculationMode CalculationMode
     {
-        get => BinaryPrimitives.ReadInt16BigEndian(Settings.AsSpan(2));
-        set => BinaryPrimitives.WriteInt16BigEndian(Settings.AsSpan(2), value);
+        get => (ExcelCalculationMode)BinaryPrimitives.ReadInt16BigEndian(Settings.AsSpan(2));
+        set => BinaryPrimitives.WriteInt16BigEndian(Settings.AsSpan(2), (short)value);
     }
 
     /// <summary>Gets or sets whether calculation uses full precision.</summary>

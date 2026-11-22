@@ -77,13 +77,12 @@ public sealed class Program
 
     internal static string Escape(string? text) => Markup.Escape(text ?? string.Empty);
 
-    // Spec §6, 0x002, confirmed with Excel 1.03's CALCULATION command.
-    internal static string CalculationModeText(short mode) => mode switch
+    internal static string CalculationModeText(ExcelCalculationMode mode) => mode switch
     {
-        1 => "automatic",
-        -1 => "automatic except tables",
-        0 => "manual",
-        _ => mode.ToString(CultureInfo.InvariantCulture),
+        ExcelCalculationMode.Automatic => "automatic",
+        ExcelCalculationMode.AutomaticExceptTables => "automatic except tables",
+        ExcelCalculationMode.Manual => "manual",
+        _ => ((short)mode).ToString(CultureInfo.InvariantCulture),
     };
 
     internal static string Hex(ReadOnlySpan<byte> bytes) => bytes.IsEmpty ? "(none)" : Convert.ToHexString(bytes);
@@ -529,8 +528,13 @@ sealed class DumpCommand : Command<FileSettings>
         settingsTable.AddRow("Calculation mode", Program.CalculationModeText(state.CalculationMode));
         settingsTable.AddRow("Precision", state.FullPrecision ? "full" : "as displayed");
         settingsTable.AddRow("Iteration", $"{Program.YesNo(state.Iteration)}, max {state.MaxIterations}, max change {state.MaxChange.ToString(CultureInfo.InvariantCulture)}");
-        settingsTable.AddRow("Reference style word", state.ReferenceStyle.ToString(CultureInfo.InvariantCulture));
-        settingsTable.AddRow("Recalculation state", state.RecalculationState.ToString(CultureInfo.InvariantCulture));
+        settingsTable.AddRow("Reference style", state.ReferenceStyle.ToString());
+        settingsTable.AddRow("Recalculation state", state.RecalculationState switch
+        {
+            0 => "0 (clean)",
+            1 => "1 (needs recalculation)",
+            var other => $"{other} (pending)",
+        });
         settingsTable.AddRow("Protected", $"{Program.YesNo(state.IsProtected)}, password hash 0x{state.PasswordHash:X4}");
         settingsTable.AddRow("Standard font", $"font {state.StandardFont}, {state.StandardFontSize} pt");
         settingsTable.AddRow("Last non-hidden column", state.LastVisibleColumn.ToString(CultureInfo.InvariantCulture));
@@ -540,7 +544,11 @@ sealed class DumpCommand : Command<FileSettings>
         settingsTable.AddRow("Column widths", "75 except " + (string.Join(", ", widths) is { Length: > 0 } w ? w : "(none)"));
         AnsiConsole.Write(settingsTable);
 
-        if (document.HasExternalDocumentTable)
+        if (document.HasExternalDocumentTable && document.ExternalDocuments.Count == 0)
+        {
+            AnsiConsole.WriteLine("External documents: an empty table");
+        }
+        else if (document.HasExternalDocumentTable)
         {
             var external = new Table().Title("[bold]External documents[/]").AddColumn("#").AddColumn("Name").AddColumn("Names used");
             for (int i = 0; i < document.ExternalDocuments.Count; i++)
@@ -642,7 +650,9 @@ sealed class ChartCommand : Command<FileSettings>
             }
 
             table.AddRow("Category crossing", $"at category {chart.ValueAxisCrossesAtCategory}, between categories {Program.YesNo(chart.ValueAxisCrossesBetweenCategories)}, at maximum {Program.YesNo(chart.ValueAxisCrossesAtMaximumCategory)}, reverse {Program.YesNo(chart.CategoriesInReverseOrder)}, labels every {chart.CategoriesBetweenTickLabels}");
-            table.AddRow("Categories", $"{chart.CategoryCount} (as Excel 1.5's word over bytes 4–5: {chart.Excel15CategoryCount})");
+            table.AddRow("Categories", chart.CategoryCount == 0 && chart.Excel15CategoryCount != 0
+                ? $"{chart.Excel15CategoryCount} (Excel 1.5's word)"
+                : chart.CategoryCount.ToString(CultureInfo.InvariantCulture));
             if (chart != document.MainChart)
             {
                 table.AddRow("Shares main chart's scale", $"value axis {Program.YesNo(chart.SharesValueAxisScale)}, X axis {Program.YesNo(chart.SharesXAxisScale)}");
@@ -662,11 +672,21 @@ sealed class ChartCommand : Command<FileSettings>
                 var texts = new Table().Title("[bold]Text objects[/]").AddColumn("Kind").AddColumn("Text").AddColumn("Attached to").AddColumn("Options");
                 foreach (var text in chart.Texts)
                 {
-                    texts.AddRow(text.Kind.ToString(), Program.Escape(text.IsArrow ? "(arrow)" : text.Text ?? "(automatic)"),
+                    string kind = text.IsArrow ? "Arrow" : text.Kind switch
+                    {
+                        ChartTextKind.ChartTitle => "Chart title",
+                        ChartTextKind.CategoryAxisTitle => "Category-axis title",
+                        ChartTextKind.ValueAxisTitle => "Value-axis title",
+                        ChartTextKind.DataLabel => "Data label",
+                        ChartTextKind.FreeText => "Free text",
+                        _ => text.Kind.ToString(),
+                    };
+                    texts.AddRow(kind, Program.Escape(text.IsArrow ? string.Empty : text.Text ?? "(automatic)"),
                         text.Kind == ChartTextKind.DataLabel ? $"series {text.SeriesNumber}, point {(text.PointNumber == 255 ? "all" : text.PointNumber)}" : string.Empty,
                         text.IsArrow
-                            ? $"pattern {text.ArrowLine.Pattern}, shaft {text.ArrowLine.Weight}, head {text.HeadStyle}, width {text.HeadWidth}, length {text.HeadLength}"
-                            : $"{(text.IsVertical ? "vertical" : "horizontal")}, show key {Program.YesNo(text.ShowKey)}, show value {Program.YesNo(text.ShowValue)}");
+                            ? $"pattern {text.ArrowLine.Pattern}, shaft {text.ArrowLine.Weight}, "
+                              + (text.HeadStyle == ArrowHeadStyle.None ? "no head" : $"{text.HeadStyle.ToString().ToLowerInvariant()} head, {text.HeadWidth.ToString().ToLowerInvariant()} width, {text.HeadLength.ToString().ToLowerInvariant()} length")
+                            : $"{(text.IsVertical ? "vertical" : "horizontal")}, aligned {text.HorizontalAlignment.ToString().ToLowerInvariant()} {text.VerticalAlignment.ToString().ToLowerInvariant()}, show key {Program.YesNo(text.ShowKey)}, show value {Program.YesNo(text.ShowValue)}");
                 }
 
                 AnsiConsole.Write(texts);
@@ -685,7 +705,7 @@ sealed class ChartCommand : Command<FileSettings>
                     i < series.SecondValues.Count ? series.SecondValues[i].ToString() : string.Empty);
             }
 
-            table.Caption($"type {series.SeriesType}, references {Program.Escape(series.FirstReference)} / {Program.Escape(series.SecondReference)}{(series.SourceDocument.Length > 0 ? ", from " + Program.Escape(series.SourceDocument) : string.Empty)}");
+            table.Caption($"{series.SeriesType switch { 0 => "dates", 3 => "text categories", _ => "numbers" }}, references {Program.Escape(series.FirstReference)} / {Program.Escape(series.SecondReference)}{(series.SourceDocument.Length > 0 ? ", from " + Program.Escape(series.SourceDocument) : string.Empty)}");
             AnsiConsole.Write(table);
         }
 
@@ -703,7 +723,7 @@ sealed class ChartCommand : Command<FileSettings>
         => $"ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition} (drawn at {axis.TickLabelsAt}); line {(axis.Line.Pattern == ChartPattern.None ? "hidden" : $"{axis.Line.Pattern} {axis.Line.Weight} at {axis.LineAt}")}; gridlines major {axis.MajorGridlines.Pattern}, minor {axis.MinorGridlines.Pattern}";
 
     private static string Scale(ChartScale scale)
-        => $"min {(scale.AutoMinimum ? "auto" : scale.Minimum)}, max {(scale.AutoMaximum ? "auto" : scale.Maximum)}, major {(scale.AutoMajorUnit ? "auto" : scale.MajorUnit)}, minor {(scale.AutoMinorUnit ? "auto" : scale.MinorUnit)}, crosses {(scale.AutoCrossesAt ? "auto" : scale.CrossesAt)}{(scale.Logarithmic ? ", log" : string.Empty)}{(scale.ReverseOrder ? ", reversed" : string.Empty)}";
+        => $"min {(scale.AutomaticMinimum ? "auto" : scale.Minimum)}, max {(scale.AutomaticMaximum ? "auto" : scale.Maximum)}, major {(scale.AutomaticMajorUnit ? "auto" : scale.MajorUnit)}, minor {(scale.AutomaticMinorUnit ? "auto" : scale.MinorUnit)}, crosses {(scale.AutomaticCrossesAt ? "auto" : scale.CrossesAt)}{(scale.IsLogarithmic ? ", log" : string.Empty)}{(scale.ValuesInReverseOrder ? ", reversed" : string.Empty)}";
 }
 
 static class RangeParser
@@ -834,7 +854,7 @@ sealed class JsonCommand : Command<JsonSettings>
             columns = document.Cells.ColumnCount,
             settings = new
             {
-                calculationMode = state.CalculationMode,
+                calculationMode = state.CalculationMode.ToString(),
                 fullPrecision = state.FullPrecision,
                 iteration = state.Iteration,
                 maxIterations = state.MaxIterations,
@@ -882,7 +902,7 @@ sealed class JsonCommand : Command<JsonSettings>
             stacked = c.IsStacked,
             percent = c.IsPercent,
             legend = c.LegendPosition.ToString(),
-            valueScale = new { c.ValueScale.AutoMinimum, c.ValueScale.Minimum, c.ValueScale.AutoMaximum, c.ValueScale.Maximum, c.ValueScale.Logarithmic },
+            valueScale = new { c.ValueScale.AutomaticMinimum, c.ValueScale.Minimum, c.ValueScale.AutomaticMaximum, c.ValueScale.Maximum, c.ValueScale.IsLogarithmic },
             texts = c.Texts.Select(t => new { kind = t.Kind.ToString(), text = t.Text, automatic = t.IsAutomaticText }),
         }),
         series = document.Series.Select(s => new
@@ -909,8 +929,9 @@ sealed class WorkspaceCommand : Command<FileSettings>
         summary.AddRow("A window zoomed", Program.YesNo(workspace.Zoomed));
         summary.AddRow("Preferred chart format", workspace.PreferredChartFormat.Length == 0
             ? "(none)"
-            : $"{workspace.PreferredChartFormat.Length:N0} bytes; charts at "
-              + string.Join(", ", workspace.PreferredChartOffsets.Zip(workspace.PreferredChartTypes, (o, t) => $"{o} ({t})")));
+            : $"{workspace.PreferredChartFormat.Length:N0} bytes; "
+              + string.Join(", ", workspace.PreferredChartOffsets.Zip(workspace.PreferredChartTypes, (o, t) => (o, t))
+                  .Select((c, i) => $"{(i == 0 ? "main" : "overlay")} {c.t} chart at offset {c.o}")));
         string[] bauds = ["300", "600", "1200", "2400", "4800", "9600"];
         summary.AddRow("Printer setup", workspace.PrinterType == 0 ? "Macintosh"
             : $"TTY, {(workspace.PrinterPort == 0 ? "printer" : "modem")} port, {(workspace.PrinterBaud < bauds.Length ? bauds[workspace.PrinterBaud] : workspace.PrinterBaud.ToString(CultureInfo.InvariantCulture))} baud");

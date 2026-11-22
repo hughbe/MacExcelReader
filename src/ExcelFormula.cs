@@ -58,7 +58,7 @@ public sealed class ExcelFormula
     /// <summary>Gets the raw fix-up bytes that follow the expression (and the text result, if any).</summary>
     public ReadOnlySpan<byte> Fixups => _record.AsSpan(_fixupsOffset);
 
-    /// <summary>Gets bytes 8–10 of the record: two unidentified bytes and a recalculation scratch byte.</summary>
+    /// <summary>Gets bytes 8–10 of the record: two bytes left over from memory and a recalculation scratch byte.</summary>
     public ReadOnlySpan<byte> Reserved => _record.AsSpan(8, 3);
 
     /// <summary>Gets the column stored in the record (the writer replaces it with the cell's column).</summary>

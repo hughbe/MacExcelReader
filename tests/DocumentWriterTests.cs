@@ -187,7 +187,7 @@ public class DocumentWriterTests
         var document = ExcelDocument.CreateWorksheet();
         var state = document.State;
         state.MaxIterations = 7;
-        state.CalculationMode = -1;
+        state.CalculationMode = ExcelCalculationMode.AutomaticExceptTables;
         state.FullPrecision = false;
         state.Iteration = true;
         state.MaxChange = 0.5;
@@ -198,7 +198,7 @@ public class DocumentWriterTests
 
         var reread = RoundTrip(document).State;
         Assert.Equal(7, reread.MaxIterations);
-        Assert.Equal(-1, reread.CalculationMode);
+        Assert.Equal(ExcelCalculationMode.AutomaticExceptTables, reread.CalculationMode);
         Assert.False(reread.FullPrecision);
         Assert.True(reread.Iteration);
         Assert.Equal(0.5, reread.MaxChange);

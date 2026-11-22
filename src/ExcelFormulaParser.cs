@@ -546,7 +546,7 @@ public static class ExcelFormulaParser
                 var operand = ParseUnary();
 
                 // Excel folds a minus sign on a number constant into the constant, and drops a plus sign on one
-                // (confirmed by Excel 1.03 compiling =+1 to 1E 00 01).
+                // (Excel compiles =+1 to 1E 00 01).
                 if (op.Text == "-" && operand is NumberNode number)
                 {
                     return new NumberNode(op.Position, -number.Value, ForceDouble: true);

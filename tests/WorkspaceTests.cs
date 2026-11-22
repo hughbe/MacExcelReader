@@ -13,7 +13,7 @@ public class WorkspaceTests
         var workspace = ExcelWorkspace.Read(bytes);
 
         Assert.Equal(100, workspace.MaxIterations);
-        Assert.Equal(1, workspace.CalculationMode);
+        Assert.Equal(ExcelCalculationMode.Automatic, workspace.CalculationMode);
         Assert.True(workspace.FullPrecision);
         Assert.False(workspace.Iteration);
         Assert.Equal(0.001, workspace.MaxChange);

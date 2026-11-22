@@ -23,7 +23,7 @@ public enum ChartTextKind
     DataLabel = 4,
 
     /// <summary>Free text placed anywhere on the chart, or an arrow (see <see cref="ChartText.IsArrow"/>).</summary>
-    Free = 6,
+    FreeText = 6,
 }
 
 /// <summary>
@@ -141,18 +141,18 @@ public sealed class ChartText
     /// <summary>Gets or sets vertical orientation.</summary>
     public bool IsVertical { get => (Flags & 0x1000) != 0; set => SetFlag(12, value); }
 
-    /// <summary>Gets or sets the horizontal alignment: 0 centre, 1 left, 2 right.</summary>
-    public int HorizontalAlignment
+    /// <summary>Gets or sets the horizontal alignment (text options bits 11–9).</summary>
+    public ChartHorizontalAlignment HorizontalAlignment
     {
-        get => (Flags >> 9) & 7;
-        set => Flags = (ushort)((Flags & ~0x0E00) | ((value & 7) << 9));
+        get => (ChartHorizontalAlignment)((Flags >> 9) & 7);
+        set => Flags = (ushort)((Flags & ~0x0E00) | (((int)value & 7) << 9));
     }
 
-    /// <summary>Gets or sets the vertical alignment: 0 bottom, 1 centre, 2 top.</summary>
-    public int VerticalAlignment
+    /// <summary>Gets or sets the vertical alignment (text options bits 8–6).</summary>
+    public ChartVerticalAlignment VerticalAlignment
     {
-        get => (Flags >> 6) & 7;
-        set => Flags = (ushort)((Flags & ~0x01C0) | ((value & 7) << 6));
+        get => (ChartVerticalAlignment)((Flags >> 6) & 7);
+        set => Flags = (ushort)((Flags & ~0x01C0) | (((int)value & 7) << 6));
     }
 
     /// <summary>Gets or sets "show key".</summary>

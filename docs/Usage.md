@@ -252,7 +252,7 @@ records.
 
 ```csharp
 var state = document.State;
-state.CalculationMode;    // 1 automatic, -1 manual
+state.CalculationMode;    // ExcelCalculationMode.Automatic, AutomaticExceptTables or Manual
 state.FullPrecision;      // false = precision as displayed
 state.Iteration; state.MaxIterations; state.MaxChange;
 state.GetColumnWidth(0); state.SetColumnWidth(0, 100);   // 0 hides a column
@@ -293,7 +293,7 @@ var chart = ChartDocument.Load("Chart1");
 var main = chart.MainChart;
 Console.WriteLine($"{main.Type}, stacked: {main.IsStacked}, legend: {main.LegendPosition}");
 var scale = main.ValueScale;
-Console.WriteLine(scale.AutoMaximum ? "auto" : scale.Maximum.ToString());
+Console.WriteLine(scale.AutomaticMaximum ? "auto" : scale.Maximum.ToString());
 
 foreach (var series in chart.Series)
 {

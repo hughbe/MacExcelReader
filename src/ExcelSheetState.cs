@@ -70,14 +70,11 @@ public sealed class ExcelSheetState
         set => SetWord(MaxIterationsOffset, value);
     }
 
-    /// <summary>
-    /// Gets or sets the raw calculation-mode word: 1 automatic, −1 automatic except tables, 0 manual (confirmed with
-    /// Excel 1.03's CALCULATION command).
-    /// </summary>
-    public short CalculationMode
+    /// <summary>Gets or sets the calculation mode (spec §6, 0x002).</summary>
+    public ExcelCalculationMode CalculationMode
     {
-        get => unchecked((short)GetWord(CalculationModeOffset));
-        set => SetWord(CalculationModeOffset, unchecked((ushort)value));
+        get => (ExcelCalculationMode)unchecked((short)GetWord(CalculationModeOffset));
+        set => SetWord(CalculationModeOffset, unchecked((ushort)(short)value));
     }
 
     /// <summary>
@@ -89,13 +86,11 @@ public sealed class ExcelSheetState
         set => SetWord(PrecisionOffset, (ushort)(value ? 1 : 0));
     }
 
-    /// <summary>
-    /// Gets or sets the reference-style word; believed to be 1 for A1 and 0 for R1C1.
-    /// </summary>
-    public ushort ReferenceStyle
+    /// <summary>Gets or sets the reference style formulas are shown in (spec §6, 0x006).</summary>
+    public ExcelReferenceStyle ReferenceStyle
     {
-        get => GetWord(ReferenceStyleOffset);
-        set => SetWord(ReferenceStyleOffset, value);
+        get => (ExcelReferenceStyle)GetWord(ReferenceStyleOffset);
+        set => SetWord(ReferenceStyleOffset, (ushort)value);
     }
 
     /// <summary>
@@ -253,9 +248,9 @@ public sealed class ExcelSheetState
         var data = new byte[Size];
         var state = new ExcelSheetState(data);
         state.MaxIterations = 100;
-        state.CalculationMode = 1;
+        state.CalculationMode = ExcelCalculationMode.Automatic;
         state.FullPrecision = true;
-        state.ReferenceStyle = 1;
+        state.ReferenceStyle = ExcelReferenceStyle.A1;
         state.MaxChange = 0.001;
         state.LastVisibleColumn = 255;
 
@@ -284,4 +279,27 @@ public sealed class ExcelSheetState
         state.SetWord(0x254, 7);
         return state;
     }
+}
+
+/// <summary>The calculation mode: state word 0x002 (spec §6).</summary>
+public enum ExcelCalculationMode : short
+{
+    /// <summary>Automatic except tables (CALCULATION(2)).</summary>
+    AutomaticExceptTables = -1,
+
+    /// <summary>Manual (CALCULATION(3)).</summary>
+    Manual = 0,
+
+    /// <summary>Automatic.</summary>
+    Automatic = 1,
+}
+
+/// <summary>The reference style: state word 0x006 (spec §6).</summary>
+public enum ExcelReferenceStyle : ushort
+{
+    /// <summary>R1C1 references.</summary>
+    R1C1 = 0,
+
+    /// <summary>A1 references.</summary>
+    A1 = 1,
 }

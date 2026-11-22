@@ -72,13 +72,13 @@ public class ChartDocumentTests
         scale.MajorUnit = 5;
         scale.MinorUnit = 1;
         scale.CrossesAt = 2;
-        scale.AutoMinimum = false;
-        scale.AutoMaximum = false;
-        scale.AutoMajorUnit = false;
-        scale.AutoMinorUnit = false;
-        scale.AutoCrossesAt = false;
-        scale.Logarithmic = true;
-        scale.ReverseOrder = true;
+        scale.AutomaticMinimum = false;
+        scale.AutomaticMaximum = false;
+        scale.AutomaticMajorUnit = false;
+        scale.AutomaticMinorUnit = false;
+        scale.AutomaticCrossesAt = false;
+        scale.IsLogarithmic = true;
+        scale.ValuesInReverseOrder = true;
 
         var reread = ChartDocument.Read(document.ToArray()).MainChart;
         Assert.True(reread.IsBar && reread.IsStacked && reread.IsPercent);
@@ -100,7 +100,7 @@ public class ChartDocumentTests
         Assert.Equal(5, reread.ValueScale.MajorUnit);
         Assert.Equal(1, reread.ValueScale.MinorUnit);
         Assert.Equal(2, reread.ValueScale.CrossesAt);
-        Assert.True(reread.ValueScale.Logarithmic && reread.ValueScale.ReverseOrder);
+        Assert.True(reread.ValueScale.IsLogarithmic && reread.ValueScale.ValuesInReverseOrder);
         Assert.Equal(4, reread.CategoryAxis.Font.Length);
     }
 
@@ -112,8 +112,8 @@ public class ChartDocumentTests
         text.SeriesNumber = 2;
         text.PointNumber = 255;
         text.IsVertical = true;
-        text.HorizontalAlignment = 2;
-        text.VerticalAlignment = 1;
+        text.HorizontalAlignment = ChartHorizontalAlignment.Right;
+        text.VerticalAlignment = ChartVerticalAlignment.Center;
         text.ShowKey = true;
         text.ShowValue = true;
         document.MainChart.Texts.Add(text);
@@ -123,8 +123,8 @@ public class ChartDocumentTests
         Assert.Equal(2, reread.SeriesNumber);
         Assert.Equal(255, reread.PointNumber);
         Assert.True(reread.IsVertical);
-        Assert.Equal(2, reread.HorizontalAlignment);
-        Assert.Equal(1, reread.VerticalAlignment);
+        Assert.Equal(ChartHorizontalAlignment.Right, reread.HorizontalAlignment);
+        Assert.Equal(ChartVerticalAlignment.Center, reread.VerticalAlignment);
         Assert.True(reread.ShowKey && reread.ShowValue);
         Assert.Equal("DataLabel: Sales", reread.ToString());
         Assert.Throws<ArgumentException>(() => new ChartText(new byte[45]));
@@ -228,7 +228,7 @@ public class ChartDocumentTests
         var chart = document.MainChart;
         chart.IsStacked = true;
         chart.LegendPosition = LegendPosition.Vertical;
-        chart.ValueScale.AutoMaximum = false;
+        chart.ValueScale.AutomaticMaximum = false;
         chart.ValueScale.Maximum = 250;
         chart.Texts.Add(ChartText.Create(ChartTextKind.ChartTitle, "Sales"));
         var label = ChartText.Create(ChartTextKind.DataLabel, string.Empty);
@@ -264,7 +264,7 @@ public class ChartDocumentTests
         var bytes = ChartDocument.Create(ChartType.Scatter).ToArray();
         var reread = ChartDocument.Read(bytes);
         Assert.NotNull(reread.MainChart.XScale);
-        Assert.True(reread.MainChart.XScale!.AutoMinimum);
+        Assert.True(reread.MainChart.XScale!.AutomaticMinimum);
     }
 
     [Fact]

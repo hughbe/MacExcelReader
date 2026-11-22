@@ -301,12 +301,12 @@ public sealed class Chart
         // Without it the series are invisible (spec §16.8).
         Convert.FromHexString("00010C00000000" + "02B0000000").CopyTo(chart.Record, 366);
         var scale = chart.ValueScale;
-        scale.AutoMinimum = scale.AutoMaximum = scale.AutoMajorUnit = scale.AutoMinorUnit = scale.AutoCrossesAt = true;
+        scale.AutomaticMinimum = scale.AutomaticMaximum = scale.AutomaticMajorUnit = scale.AutomaticMinorUnit = scale.AutomaticCrossesAt = true;
         if (type == ChartType.Scatter)
         {
             chart.XAxisScale = new byte[ScaleSize];
             var x = chart.XScale!;
-            x.AutoMinimum = x.AutoMaximum = x.AutoMajorUnit = x.AutoMinorUnit = x.AutoCrossesAt = true;
+            x.AutomaticMinimum = x.AutomaticMaximum = x.AutomaticMajorUnit = x.AutomaticMinorUnit = x.AutomaticCrossesAt = true;
         }
 
         return chart;
@@ -540,23 +540,23 @@ public sealed class ChartScale
     public double CrossesAt { get => Get(4); set => Set(4, value); }
 
     /// <summary>Gets or sets automatic minimum.</summary>
-    public bool AutoMinimum { get => GetFlag(15); set => SetFlag(15, value); }
+    public bool AutomaticMinimum { get => GetFlag(15); set => SetFlag(15, value); }
 
     /// <summary>Gets or sets automatic maximum.</summary>
-    public bool AutoMaximum { get => GetFlag(14); set => SetFlag(14, value); }
+    public bool AutomaticMaximum { get => GetFlag(14); set => SetFlag(14, value); }
 
     /// <summary>Gets or sets automatic major unit.</summary>
-    public bool AutoMajorUnit { get => GetFlag(13); set => SetFlag(13, value); }
+    public bool AutomaticMajorUnit { get => GetFlag(13); set => SetFlag(13, value); }
 
     /// <summary>Gets or sets automatic minor unit.</summary>
-    public bool AutoMinorUnit { get => GetFlag(12); set => SetFlag(12, value); }
+    public bool AutomaticMinorUnit { get => GetFlag(12); set => SetFlag(12, value); }
 
     /// <summary>Gets or sets automatic crossing point.</summary>
-    public bool AutoCrossesAt { get => GetFlag(11); set => SetFlag(11, value); }
+    public bool AutomaticCrossesAt { get => GetFlag(11); set => SetFlag(11, value); }
 
     /// <summary>Gets or sets a logarithmic scale.</summary>
-    public bool Logarithmic { get => GetFlag(10); set => SetFlag(10, value); }
+    public bool IsLogarithmic { get => GetFlag(10); set => SetFlag(10, value); }
 
     /// <summary>Gets or sets values in reverse order.</summary>
-    public bool ReverseOrder { get => GetFlag(9); set => SetFlag(9, value); }
+    public bool ValuesInReverseOrder { get => GetFlag(9); set => SetFlag(9, value); }
 }

@@ -103,9 +103,9 @@ public class ExperimentTests
     }
 
     [Theory]
-    [InlineData("Calculation No Tables", -1)]
-    [InlineData("Calculation Manual", 0)]
-    public void CalculationMode_Values(string name, short mode)
+    [InlineData("Calculation No Tables", ExcelCalculationMode.AutomaticExceptTables)]
+    [InlineData("Calculation Manual", ExcelCalculationMode.Manual)]
+    public void CalculationMode_Values(string name, ExcelCalculationMode mode)
     {
         // CALCULATION(2) is automatic except tables, CALCULATION(3) manual (spec §6, 0x002).
         Assert.Equal(mode, Load(name).State.CalculationMode);
@@ -264,7 +264,7 @@ public class ExperimentTests
     public void LineLogScale_SetsTheLogarithmicFlag()
     {
         // GALLERY.LINE(6).
-        Assert.True(ChartDocument.Load(SamplePath("Line Log Scale")).MainChart.ValueScale.Logarithmic);
+        Assert.True(ChartDocument.Load(SamplePath("Line Log Scale")).MainChart.ValueScale.IsLogarithmic);
     }
 
     [Fact]
@@ -423,7 +423,7 @@ public class ExperimentTests
         Assert.All(texts.Skip(4), t =>
         {
             Assert.True(t.IsArrow);
-            Assert.Equal(ChartTextKind.Free, t.Kind);
+            Assert.Equal(ChartTextKind.FreeText, t.Kind);
             Assert.True(t.IsAutomaticText);
             Assert.Null(t.Text);
         });

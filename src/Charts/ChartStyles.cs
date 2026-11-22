@@ -145,3 +145,29 @@ public enum ArrowHeadStyle
     /// <summary>An open head: bit 7 set.</summary>
     Open = 2,
 }
+
+/// <summary>The horizontal alignment of a chart text object (spec §16.7).</summary>
+public enum ChartHorizontalAlignment
+{
+    /// <summary>Centred.</summary>
+    Center = 0,
+
+    /// <summary>Left.</summary>
+    Left = 1,
+
+    /// <summary>Right.</summary>
+    Right = 2,
+}
+
+/// <summary>The vertical alignment of a chart text object (spec §16.7).</summary>
+public enum ChartVerticalAlignment
+{
+    /// <summary>Bottom.</summary>
+    Bottom = 0,
+
+    /// <summary>Centred.</summary>
+    Center = 1,
+
+    /// <summary>Top.</summary>
+    Top = 2,
+}
