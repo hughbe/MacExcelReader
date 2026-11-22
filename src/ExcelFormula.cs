@@ -149,7 +149,7 @@ public sealed class ExcelFormula
     /// Gets whether this cell holds the shared record of its array formula or table (the top-left cell);
     /// other cells of the range refer to it.
     /// </summary>
-    public bool IsSharedAnchor => (IsArrayFormula || IsTable) && Fixups.Length >= 2 && Fixups[0] == 0x40 && Fixups[1] == 0x00;
+    public bool IsSharedAnchor => (IsArrayFormula || IsTable) && Fixups.Length >= 2 && BinaryPrimitives.ReadUInt16BigEndian(Fixups) == FormulaTokens.SharedAnchorMarker;
 
     /// <summary>
     /// Gets the cell that holds the shared record, for a cell of an array formula or table.
@@ -166,10 +166,10 @@ public sealed class ExcelFormula
             if (IsSharedAnchor)
             {
                 // The anchor's shared header starts with the range: first row word, last row word, first column.
-                return Fixups.Length >= 13 ? new ExcelCellAddress(BinaryPrimitives.ReadUInt16BigEndian(Fixups.Slice(3)) & 0x3FFF, Fixups[7]) : null;
+                return Fixups.Length >= 13 ? new ExcelCellAddress(RowWord.Row(BinaryPrimitives.ReadUInt16BigEndian(Fixups.Slice(3))), Fixups[7]) : null;
             }
 
-            return new ExcelCellAddress(BinaryPrimitives.ReadUInt16BigEndian(Fixups) & 0x3FFF, Fixups[2]);
+            return new ExcelCellAddress(RowWord.Row(BinaryPrimitives.ReadUInt16BigEndian(Fixups)), Fixups[2]);
         }
     }
 
@@ -261,20 +261,20 @@ public sealed class ExcelFormula
                 return shared.SharedText(document);
             }
 
-            return IsTable ? "{=TABLE()}" : "{array formula}";
+            return IsTable ? TablePlaceholder : ArrayFormulaPlaceholder;
         }
 
         if (IsTable)
         {
             // The inputs are fixed cells: Excel's GET.FORMULA gives them as absolute references (R7C25).
             return TableInputs is var (row, column)
-                ? $"{{=TABLE({(RowInputDeleted ? "#REF!" : Absolute(row))},{(ColumnInputDeleted ? "#REF!" : Absolute(column))})}}"
-                : "{=TABLE()}";
+                ? $"{{=TABLE({(RowInputDeleted ? ExcelError.Reference.ToText() : Absolute(row))},{(ColumnInputDeleted ? ExcelError.Reference.ToText() : Absolute(column))})}}"
+                : TablePlaceholder;
         }
 
         if (Fixups.Length < 13)
         {
-            return "{array formula}";
+            return ArrayFormulaPlaceholder;
         }
 
         // Anchor: 0x4000, 0, a 10-byte header whose last byte is the shared expression's length, the shared
@@ -282,7 +282,7 @@ public sealed class ExcelFormula
         int length = Fixups[12];
         if (Fixups.Length < 13 + length)
         {
-            return "{array formula}";
+            return ArrayFormulaPlaceholder;
         }
 
         var expression = Fixups.Slice(13, length);
@@ -359,11 +359,15 @@ public sealed class ExcelFormula
         return new ExcelFormula(tail.Slice(0, length).ToArray(), fixupsOffset, rawTextOffset);
     }
 
+    // The text of an array formula or table whose shared record cannot be read.
+    internal const string ArrayFormulaPlaceholder = "{array formula}";
+    internal const string TablePlaceholder = "{=TABLE()}";
+
     internal void Write(BigEndianWriter writer, int row, int column)
     {
         writer.WriteBytes(_record.AsSpan(0, 11));
         writer.WriteByte((byte)column);
-        writer.WriteUInt16((ushort)((StoredRowWord & 0xC000) | (row & 0x3FFF)));
+        writer.WriteUInt16((ushort)((StoredRowWord & RowWord.Flags) | RowWord.Row((ushort)row)));
         writer.WriteBytes(_record.AsSpan(14, 1 + _record[14]));
         if (IsTextResult)
         {

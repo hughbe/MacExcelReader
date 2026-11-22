@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using MacExcelReader.Internal;
 
 namespace MacExcelReader;
@@ -143,18 +144,10 @@ public sealed class ExcelDefinedName
 
     private static void RebaseCell(byte[] definition, int rowOffset, int columnOffset, ExcelCellAddress relativeTo)
     {
-        int rowWord = (definition[rowOffset] << 8) | definition[rowOffset + 1];
-        if ((rowWord & 0x8000) != 0)
-        {
-            rowWord = (rowWord & 0xC000) | ((rowWord - relativeTo.Row) & 0x3FFF);
-            definition[rowOffset] = (byte)(rowWord >> 8);
-            definition[rowOffset + 1] = (byte)rowWord;
-        }
-
-        if ((rowWord & 0x4000) != 0)
-        {
-            definition[columnOffset] = (byte)(definition[columnOffset] - relativeTo.Column);
-        }
+        var (rowWord, column) = RowWord.Move(
+            BinaryPrimitives.ReadUInt16BigEndian(definition.AsSpan(rowOffset)), definition[columnOffset], -relativeTo.Row, -relativeTo.Column);
+        BinaryPrimitives.WriteUInt16BigEndian(definition.AsSpan(rowOffset), rowWord);
+        definition[columnOffset] = column;
     }
 
     // A single cell or area token (2C, 2D in any class), or a union in its definition form (2E n ...).

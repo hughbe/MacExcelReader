@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using MacExcelReader.Internal;
 
 namespace MacExcelReader;
 
@@ -46,13 +47,13 @@ public readonly struct ExcelCellRef
     public ExcelCellAddress Address => new(Row, Column);
 
     /// <summary>Gets the cell type.</summary>
-    public ExcelCellType Type => (ExcelCellType)((_word1 >> 9) & 7);
+    public ExcelCellType Type => CellWords.Type(_word1);
 
     /// <summary>Gets the number format index.</summary>
-    public int NumberFormat => _word1 & 0x3F;
+    public int NumberFormat => CellWords.NumberFormat(_word1);
 
     /// <summary>Gets the alignment.</summary>
-    public ExcelAlignment Alignment => (ExcelAlignment)((_word1 >> 6) & 7);
+    public ExcelAlignment Alignment => CellWords.Alignment(_word1);
 
     /// <summary>Gets the raw attribute word (bold, italic, borders, protection).</summary>
     public ushort RawAttributes => _word2;

@@ -1,3 +1,5 @@
+using MacExcelReader.Internal;
+
 namespace MacExcelReader;
 
 /// <summary>
@@ -36,8 +38,8 @@ public sealed class ExcelCell
     /// </summary>
     public ExcelCellType Type
     {
-        get => (ExcelCellType)((Word1 >> 9) & 7);
-        private set => Word1 = (ushort)((Word1 & ~0x0E00) | ((int)value << 9));
+        get => CellWords.Type(Word1);
+        private set => Word1 = CellWords.WithType(Word1, value);
     }
 
     /// <summary>
@@ -297,12 +299,12 @@ public sealed class ExcelCell
     /// </summary>
     public int NumberFormat
     {
-        get => Word1 & 0x3F;
+        get => CellWords.NumberFormat(Word1);
         set
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
             ArgumentOutOfRangeException.ThrowIfGreaterThan(value, 63);
-            Word1 = (ushort)((Word1 & ~0x3F) | value);
+            Word1 = CellWords.WithNumberFormat(Word1, value);
         }
     }
 
@@ -311,8 +313,8 @@ public sealed class ExcelCell
     /// </summary>
     public ExcelAlignment Alignment
     {
-        get => (ExcelAlignment)((Word1 >> 6) & 7);
-        set => Word1 = (ushort)((Word1 & ~0x01C0) | (((int)value & 7) << 6));
+        get => CellWords.Alignment(Word1);
+        set => Word1 = CellWords.WithAlignment(Word1, value);
     }
 
     private bool GetFlag(int bit) => (Word2 & (1 << bit)) != 0;
@@ -358,7 +360,7 @@ public sealed class ExcelCell
         ExcelCellType.Empty => string.Empty,
         _ => Value switch
         {
-            bool b => b ? "TRUE" : "FALSE",
+            bool b => BooleanText.Of(b),
             ExcelError e => e.ToText(),
             var other => other?.ToString() ?? string.Empty,
         },

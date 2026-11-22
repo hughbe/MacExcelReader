@@ -127,6 +127,15 @@ public class CellTests
     public void ErrorText(ExcelError error, string expected)
     {
         Assert.Equal(expected, error.ToText());
+        if (Enum.IsDefined(error))
+        {
+            Assert.True(ExcelErrorExtensions.TryParse(expected.ToLowerInvariant(), out var parsed));
+            Assert.Equal(error, parsed);
+        }
+        else
+        {
+            Assert.False(ExcelErrorExtensions.TryParse(expected, out _));
+        }
     }
 
     [Fact]

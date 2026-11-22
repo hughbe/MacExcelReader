@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
+using MacExcelReader.Internal;
 
 namespace MacExcelReader;
 
@@ -46,13 +47,13 @@ public static class FormulaDecompiler
             {
                 case 0x01:
                 case 0x02:
-                    stack.Push(token.Code == 0x01 ? "{array formula}" : "TABLE()");
+                    stack.Push(token.Code == 0x01 ? ExcelFormula.ArrayFormulaPlaceholder : ExcelFormula.TablePlaceholder);
                     break;
                 case >= 0x03 and <= 0x11:
                 {
                     string right = Pop(stack);
                     string left = Pop(stack);
-                    stack.Push(string.Concat(left, BinaryOperator(token.Code), right));
+                    stack.Push(string.Concat(left, FormulaTokens.BinaryOperatorText(token.Code), right));
                     break;
                 }
 
@@ -100,7 +101,7 @@ public static class FormulaDecompiler
                     stack.Push(((ExcelError)expression[p]).ToText());
                     break;
                 case 0x1D:
-                    stack.Push(expression[p] != 0 ? "TRUE" : "FALSE");
+                    stack.Push(BooleanText.Of(expression[p] != 0));
                     break;
                 case 0x1E:
                     stack.Push(BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p)).ToString(CultureInfo.InvariantCulture));
@@ -169,7 +170,7 @@ public static class FormulaDecompiler
 
                 case 0x2A:
                 case 0x2B:
-                    stack.Push(WithPrefix(ref externalPrefix, "#REF!"));
+                    stack.Push(WithPrefix(ref externalPrefix, ExcelError.Reference.ToText()));
                     break;
                 default:
                     // Memory tokens (0x26–0x29, 0x2E, 0x2F, 0x33–0x36) carry no text of their own.
@@ -221,7 +222,7 @@ public static class FormulaDecompiler
                     builder.Append(type switch
                     {
                         1 => BinaryPrimitives.ReadDoubleBigEndian(block.Slice(p)).ToString("R", CultureInfo.InvariantCulture),
-                        4 => block[p + 1] != 0 ? "TRUE" : "FALSE",
+                        4 => BooleanText.Of(block[p + 1] != 0),
                         16 => ((ExcelError)block[p + 1]).ToText(),
                         _ => $"?{type}",
                     });
@@ -277,26 +278,6 @@ public static class FormulaDecompiler
         return name + "(" + string.Join(",", arguments) + ")";
     }
 
-    private static string BinaryOperator(byte code) => code switch
-    {
-        0x03 => "+",
-        0x04 => "-",
-        0x05 => "*",
-        0x06 => "/",
-        0x07 => "^",
-        0x08 => "&",
-        0x09 => "<",
-        0x0A => "<=",
-        0x0B => "=",
-        0x0C => ">=",
-        0x0D => ">",
-        0x0E => "<>",
-        0x0F => " ",
-        0x10 => ",",
-        0x11 => ":",
-        _ => "?",
-    };
-
     /// <summary>
     /// Formats a cell reference from a row word (bit 15 = relative row, bit 14 = relative column) and a column.
     /// </summary>
@@ -308,24 +289,15 @@ public static class FormulaDecompiler
     // edge of the sheet round to the other side, so B1's R[-3] is row 16382.
     private static string CellText(ushort rowWord, byte column, ExcelCellAddress relativeTo)
     {
-        if ((rowWord & 0x8000) != 0)
-        {
-            rowWord = (ushort)((rowWord & 0xC000) | ((rowWord + relativeTo.Row) & 0x3FFF));
-        }
-
-        if ((rowWord & 0x4000) != 0)
-        {
-            column = (byte)(column + relativeTo.Column);
-        }
-
+        (rowWord, column) = RowWord.Move(rowWord, column, relativeTo.Row, relativeTo.Column);
         return CellTextCore(rowWord, column);
     }
 
     private static string CellTextCore(ushort rowWord, byte column)
     {
-        bool rowRelative = (rowWord & 0x8000) != 0;
-        bool columnRelative = (rowWord & 0x4000) != 0;
-        int row = rowWord & 0x3FFF;
+        bool rowRelative = RowWord.IsRowRelative(rowWord);
+        bool columnRelative = RowWord.IsColumnRelative(rowWord);
+        int row = RowWord.Row(rowWord);
         var builder = new StringBuilder();
         if (!columnRelative)
         {

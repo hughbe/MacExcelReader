@@ -134,7 +134,7 @@ public static class ExcelFormulaParser
 
     private sealed record BoolNode(int Position, bool Value) : Node(Position);
 
-    private sealed record ErrorNode(int Position, byte Code) : Node(Position);
+    private sealed record ErrorNode(int Position, ExcelError Error) : Node(Position);
 
     private sealed record MissingNode(int Position) : Node(Position);
 
@@ -174,13 +174,15 @@ public static class ExcelFormulaParser
 
     private readonly record struct Token(TokenKind Kind, string Text, int Position, double Number = 0)
     {
+        /// <summary>Gets the error of an error token.</summary>
+        public ExcelError Error { get; init; }
+
         /// <summary>Gets whether white space came before the token: between two references, the intersection operator.</summary>
         public bool SpaceBefore { get; init; }
     }
 
     private sealed class Lexer
     {
-        private static readonly string[] s_errors = ["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A"];
         private readonly string _text;
         private int _position;
 
@@ -247,13 +249,10 @@ public static class ExcelFormulaParser
                 case '\'':
                     return ReadQuotedName(start);
                 case '#':
-                    foreach (var error in s_errors)
+                    if (ExcelErrorExtensions.TryMatch(_text.AsSpan(_position), out var error, out int length))
                     {
-                        if (string.Compare(_text, _position, error, 0, error.Length, StringComparison.OrdinalIgnoreCase) == 0)
-                        {
-                            _position += error.Length;
-                            return new Token(TokenKind.Error, error, start);
-                        }
+                        _position += length;
+                        return new Token(TokenKind.Error, error.ToText(), start) { Error = error };
                     }
 
                     throw new ExcelFormulaSyntaxException("Unknown error value", start);
@@ -440,7 +439,7 @@ public static class ExcelFormulaParser
             {
                 int position = _current.Position;
                 Advance();
-                node = new BinaryNode(position, 0x10, node, ParseComparison());
+                node = new BinaryNode(position, FormulaTokens.BinaryOperatorCode(","), node, ParseComparison());
             }
 
             if (_current.Kind != TokenKind.End)
@@ -458,16 +457,7 @@ public static class ExcelFormulaParser
             {
                 var op = _current;
                 Advance();
-                byte code = op.Text switch
-                {
-                    "<" => 0x09,
-                    "<=" => 0x0A,
-                    "=" => 0x0B,
-                    ">=" => 0x0C,
-                    ">" => 0x0D,
-                    _ => 0x0E,
-                };
-                left = new BinaryNode(op.Position, code, left, ParseConcatenation());
+                left = new BinaryNode(op.Position, FormulaTokens.BinaryOperatorCode(op.Text), left, ParseConcatenation());
             }
 
             return left;
@@ -480,7 +470,7 @@ public static class ExcelFormulaParser
             {
                 int position = _current.Position;
                 Advance();
-                left = new BinaryNode(position, 0x08, left, ParseAdditive());
+                left = new BinaryNode(position, FormulaTokens.BinaryOperatorCode("&"), left, ParseAdditive());
             }
 
             return left;
@@ -493,7 +483,7 @@ public static class ExcelFormulaParser
             {
                 var op = _current;
                 Advance();
-                left = new BinaryNode(op.Position, op.Text == "+" ? (byte)0x03 : (byte)0x04, left, ParseMultiplicative());
+                left = new BinaryNode(op.Position, FormulaTokens.BinaryOperatorCode(op.Text), left, ParseMultiplicative());
             }
 
             return left;
@@ -506,7 +496,7 @@ public static class ExcelFormulaParser
             {
                 var op = _current;
                 Advance();
-                left = new BinaryNode(op.Position, op.Text == "*" ? (byte)0x05 : (byte)0x06, left, ParsePower());
+                left = new BinaryNode(op.Position, FormulaTokens.BinaryOperatorCode(op.Text), left, ParsePower());
             }
 
             return left;
@@ -519,7 +509,7 @@ public static class ExcelFormulaParser
             {
                 int position = _current.Position;
                 Advance();
-                left = new BinaryNode(position, 0x07, left, ParsePercent());
+                left = new BinaryNode(position, FormulaTokens.BinaryOperatorCode("^"), left, ParsePercent());
             }
 
             return left;
@@ -572,7 +562,7 @@ public static class ExcelFormulaParser
                 && _current.Kind is TokenKind.Identifier or TokenKind.QuotedName or TokenKind.Bang or TokenKind.OpenParen)
             {
                 int position = _current.Position;
-                left = new BinaryNode(position, 0x0F, left, ParseRange());
+                left = new BinaryNode(position, FormulaTokens.BinaryOperatorCode(" "), left, ParseRange());
             }
 
             return left;
@@ -596,7 +586,7 @@ public static class ExcelFormulaParser
                 var right = ParsePrimary();
                 left = left is RefNode a && right is RefNode b && a.External == b.External
                     ? new AreaNode(a.Position, a.RowWord, b.RowWord, a.Column, b.Column, a.External)
-                    : new BinaryNode(position, 0x11, left, right);
+                    : new BinaryNode(position, FormulaTokens.BinaryOperatorCode(":"), left, right);
             }
 
             return left;
@@ -624,7 +614,7 @@ public static class ExcelFormulaParser
 
                 case TokenKind.Error:
                     Advance();
-                    return new ErrorNode(token.Position, ErrorCode(token.Text));
+                    return new ErrorNode(token.Position, token.Error);
                 case TokenKind.OpenParen:
                 {
                     Advance();
@@ -633,7 +623,7 @@ public static class ExcelFormulaParser
                     {
                         int position = _current.Position;
                         Advance();
-                        inner = new BinaryNode(position, 0x10, inner, ParseComparison());
+                        inner = new BinaryNode(position, FormulaTokens.BinaryOperatorCode(","), inner, ParseComparison());
                     }
 
                     Expect(TokenKind.CloseParen, ")");
@@ -666,19 +656,8 @@ public static class ExcelFormulaParser
             throw new ExcelFormulaSyntaxException(token.Kind == TokenKind.End ? "Unexpected end of formula" : $"Unexpected '{token.Text}'", token.Position);
         }
 
-        private static byte ErrorCode(string text) => text.ToUpperInvariant() switch
-        {
-            "#NULL!" => 0,
-            "#DIV/0!" => 7,
-            "#VALUE!" => 15,
-            "#REF!" => 23,
-            "#NAME?" => 29,
-            "#NUM!" => 36,
-            _ => 42,
-        };
-
         // An error element of an array constant.
-        private sealed record ArrayError(byte Code);
+        private sealed record ArrayError(ExcelError Error);
 
         // {1,2;3,4}: rows separated by ';', columns by ','. Elements are numbers (optionally negative), strings,
         // TRUE, FALSE and errors (spec §12.5).
@@ -711,15 +690,13 @@ public static class ExcelFormulaParser
 
                     row.Add(bytes);
                 }
-                else if (_current.Kind == TokenKind.Identifier && !negative
-                    && (string.Equals(_current.Text, "TRUE", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(_current.Text, "FALSE", StringComparison.OrdinalIgnoreCase)))
+                else if (_current.Kind == TokenKind.Identifier && !negative && BooleanText.TryParse(_current.Text, out bool logical))
                 {
-                    row.Add(string.Equals(_current.Text, "TRUE", StringComparison.OrdinalIgnoreCase));
+                    row.Add(logical);
                 }
                 else if (_current.Kind == TokenKind.Error && !negative)
                 {
-                    row.Add(new ArrayError(ErrorCode(_current.Text)));
+                    row.Add(new ArrayError(_current.Error));
                 }
                 else
                 {
@@ -781,7 +758,7 @@ public static class ExcelFormulaParser
                     {
                         block.Add(element is bool ? (byte)4 : (byte)16);
                         block.Add(0);
-                        block.Add(element is bool value ? (byte)(value ? 1 : 0) : ((ArrayError)element).Code);
+                        block.Add(element is bool value ? (byte)(value ? 1 : 0) : (byte)((ArrayError)element).Error);
                         block.AddRange(new byte[6]);
                     }
                 }
@@ -822,14 +799,9 @@ public static class ExcelFormulaParser
                 return external is { } sheet ? ParseExternalMacroCall(token, sheet) : ParseCall(token);
             }
 
-            if (external is null && string.Equals(token.Text, "TRUE", StringComparison.OrdinalIgnoreCase))
+            if (external is null && BooleanText.TryParse(token.Text, out bool logical))
             {
-                return new BoolNode(token.Position, true);
-            }
-
-            if (external is null && string.Equals(token.Text, "FALSE", StringComparison.OrdinalIgnoreCase))
-            {
-                return new BoolNode(token.Position, false);
+                return new BoolNode(token.Position, logical);
             }
 
             if (TryParseReference(token.Text, out ushort rowWord, out byte column))
@@ -1052,7 +1024,7 @@ public static class ExcelFormulaParser
                 return false;
             }
 
-            rowWord = (ushort)((row - 1) | (rowRelative ? 0x8000 : 0) | (columnRelative ? 0x4000 : 0));
+            rowWord = RowWord.Create(row - 1, rowRelative, columnRelative);
             column = (byte)(col - 1);
             return true;
         }
@@ -1190,7 +1162,7 @@ public static class ExcelFormulaParser
                     Add(0x1D);
                     Add((byte)(logical.Value ? 1 : 0));
                     break;
-                case ErrorNode error when error.Code == 0x17:
+                case ErrorNode error when error.Error == ExcelError.Reference:
                     // #REF! refers to deleted cells: a deleted-reference token, whose row and column bytes are no
                     // longer meaningful. Excel 1.03 compiles a typed =#REF! to 4A 00 00 00, not an error constant.
                     Add(WithClass(0x2A, OperandClass(context)));
@@ -1200,7 +1172,7 @@ public static class ExcelFormulaParser
                     break;
                 case ErrorNode error:
                     Add(0x1C);
-                    Add(error.Code);
+                    Add((byte)error.Error);
                     break;
                 case MissingNode:
                     Add(0x16);
@@ -1357,9 +1329,9 @@ public static class ExcelFormulaParser
             switch (node)
             {
                 case RefNode r when r.External is null:
-                    return [((ushort)(r.RowWord & 0x3FFF), (ushort)(r.RowWord & 0x3FFF), r.Column, r.Column)];
+                    return [((ushort)RowWord.Row(r.RowWord), (ushort)RowWord.Row(r.RowWord), r.Column, r.Column)];
                 case AreaNode a when a.External is null:
-                    return [((ushort)(a.FirstRowWord & 0x3FFF), (ushort)(a.LastRowWord & 0x3FFF), a.FirstColumn, a.LastColumn)];
+                    return [((ushort)RowWord.Row(a.FirstRowWord), (ushort)RowWord.Row(a.LastRowWord), a.FirstColumn, a.LastColumn)];
                 case ParenNode paren:
                     return Areas(paren.Inner);
                 case BinaryNode binary when binary.Operator is 0x0F or 0x10 or 0x11:

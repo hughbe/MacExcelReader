@@ -134,8 +134,8 @@ public class FormulaDecompilerTests
     [Fact]
     public void PrivateFallbacksRemainDefined()
     {
-        var method = typeof(FormulaDecompiler).GetMethod(
-            "BinaryOperator", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var method = typeof(FormulaTokens).GetMethod(
+            "BinaryOperatorText", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
         Assert.Equal("?", method.Invoke(null, [(byte)0]));
         Assert.Equal(" ", method.Invoke(null, [(byte)0x0F]));
         Assert.Equal(",", method.Invoke(null, [(byte)0x10]));

@@ -47,4 +47,35 @@ public static class ExcelErrorExtensions
         ExcelError.NotAvailable => "#N/A",
         _ => $"#ERR{(byte)error}",
     };
+
+    private static readonly ExcelError[] s_errors = Enum.GetValues<ExcelError>();
+
+    /// <summary>
+    /// Parses the text Excel shows for an error, such as <c>#N/A</c>, ignoring case.
+    /// </summary>
+    /// <returns>True if <paramref name="text"/> is one of Excel's errors.</returns>
+    public static bool TryParse(string text, out ExcelError error)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return TryMatch(text, out error, out int length) && length == text.Length;
+    }
+
+    // Matches an error's text at the start of `text`, ignoring case.
+    internal static bool TryMatch(ReadOnlySpan<char> text, out ExcelError error, out int length)
+    {
+        foreach (var candidate in s_errors)
+        {
+            var errorText = candidate.ToText();
+            if (text.StartsWith(errorText, StringComparison.OrdinalIgnoreCase))
+            {
+                error = candidate;
+                length = errorText.Length;
+                return true;
+            }
+        }
+
+        error = default;
+        length = 0;
+        return false;
+    }
 }

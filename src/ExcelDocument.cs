@@ -479,7 +479,7 @@ public sealed class ExcelDocument
         // Anchor trailer: 0x4000 and 0, a 10-byte header (range, three unused bytes, expression length), the
         // shared expression and its fix-ups.
         var anchor = new byte[13 + expression.Length + fixups.Length];
-        anchor[0] = 0x40;
+        BinaryPrimitives.WriteUInt16BigEndian(anchor, FormulaTokens.SharedAnchorMarker);
         BinaryPrimitives.WriteUInt16BigEndian(anchor.AsSpan(3), range.FirstRow);
         BinaryPrimitives.WriteUInt16BigEndian(anchor.AsSpan(5), range.LastRow);
         anchor[7] = range.FirstColumn;
@@ -772,7 +772,7 @@ public sealed class ExcelDocument
                     writer.WriteBytes(raw);
                 }
 
-                if (ExcelCellGrid.HasCellData((ExcelCellType)((word1 >> 9) & 7)))
+                if (ExcelCellGrid.HasCellData(CellWords.Type(word1)))
                 {
                     if (offset > 0xFFFFF)
                     {
