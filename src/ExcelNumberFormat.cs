@@ -138,24 +138,46 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             return ExcelValueFormatter.FormatGeneral(value);
         }
 
-        if (value == 0)
+        // Excel picks the section by sign, and uses the zero section for a value that rounds to zero in the
+        // section it would otherwise use: 0.001234 in 0.0" N";0.0" S";0 shows 0.
+        var section = value > 0 ? ExcelNumberFormatSection.Positive
+            : value < 0 && !IsSingleSection ? ExcelNumberFormatSection.Negative
+            : value < 0 ? ExcelNumberFormatSection.Positive
+            : ExcelNumberFormatSection.Zero;
+        double magnitude = Math.Abs(value);
+        if (section != ExcelNumberFormatSection.Zero && RoundsToZero(GetSection(section), magnitude))
         {
-            return FormatSection(GetSection(ExcelNumberFormatSection.Zero), 0, value);
+            section = ExcelNumberFormatSection.Zero;
+            magnitude = 0;
         }
 
-        if (value > 0)
+        string? shown = FormatSection(GetSection(section), magnitude);
+        if (shown is null)
         {
-            return FormatSection(GetSection(ExcelNumberFormatSection.Positive), value, value);
+            return ExcelValueFormatter.FormatGeneral(value);
         }
 
-        if (IsSingleSection)
-        {
-            string shown = FormatSection(GetSection(ExcelNumberFormatSection.Positive), -value, value);
-            return shown.Length == 0 || shown == ExcelValueFormatter.FormatGeneral(value) ? shown : "-" + shown;
-        }
-
-        return FormatSection(GetSection(ExcelNumberFormatSection.Negative), -value, value);
+        // A single-section format shows a negative number as a minus sign and the format of its magnitude, dates
+        // included: -1234.567 in m/d/yy is -5/19/07.
+        return value < 0 && section == ExcelNumberFormatSection.Positive && shown.Length > 0 ? "-" + shown : shown;
     }
+
+    private static bool RoundsToZero(ReadOnlySpan<byte> section, double magnitude)
+    {
+        var tokens = Tokenize(section);
+        int header = tokens.FindIndex(t => t.Code == 0x03);
+        if (header < 0 || tokens.Exists(IsDateToken))
+        {
+            return false;
+        }
+
+        byte[] h = tokens[header].Operands;
+        int extra = (sbyte)h[2] - h[1];
+        double scaled = magnitude * Math.Pow(100, extra > 0 ? extra / 2 : 0) / Math.Pow(1000, extra < 0 ? -extra / 3 : 0);
+        return Math.Round(scaled, h[1], MidpointRounding.AwayFromZero) == 0;
+    }
+
+    private static bool IsDateToken(Token token) => token.Code is (>= 0x0B and <= 0x1A) or 0x1F or 0x20 or 0x21;
 
     /// <summary>
     /// Formats text with this format: through Excel 1.5's text section when the format has one of its own (where
@@ -358,9 +380,8 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         }
     }
 
-    // Formats a non-negative magnitude with one section; original is the signed value, used where the section is
-    // General or a date.
-    private static string FormatSection(ReadOnlySpan<byte> section, double magnitude, double original)
+    // Formats a non-negative magnitude with one section, or returns null for a date Excel cannot show.
+    private static string? FormatSection(ReadOnlySpan<byte> section, double magnitude)
     {
         var tokens = Tokenize(section);
         if (tokens.Count == 0)
@@ -368,10 +389,9 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             return string.Empty;
         }
 
-        bool isDate = tokens.Exists(t => t.Code is (>= 0x0B and <= 0x1A) or 0x1F or 0x20 or 0x21);
-        if (isDate)
+        if (tokens.Exists(IsDateToken))
         {
-            return FormatDate(tokens, original);
+            return FormatDate(tokens, magnitude);
         }
 
         int header = tokens.FindIndex(t => t.Code is 0x03 or 0x1C);
@@ -562,14 +582,17 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         }
     }
 
-    private static string FormatDate(List<Token> tokens, double serial)
+    // Excel converts the serial to seconds since 1904, rounded, and gives up past the Macintosh clock's last second,
+    // 2^32 - 1 (6 February 2040, serial 49710.27): TEXT gives #VALUE! there (Excel 1.00, "Dates" run).
+    private static string? FormatDate(List<Token> tokens, double serial)
     {
-        if (serial < 0 || serial > 2_958_465)
+        double seconds = Math.Round(serial * 86400, MidpointRounding.AwayFromZero);
+        if (seconds > uint.MaxValue)
         {
-            return ExcelValueFormatter.FormatGeneral(serial);
+            return null;
         }
 
-        var date = ExcelValueFormatter.ToDateTime(Math.Round(serial * 86400, MidpointRounding.AwayFromZero) / 86400);
+        var date = new DateTime(1904, 1, 1).AddSeconds(seconds);
         bool twelveHour = tokens.Exists(t => t.Code == 0x21);
         var invariant = CultureInfo.InvariantCulture;
         var text = new StringBuilder();

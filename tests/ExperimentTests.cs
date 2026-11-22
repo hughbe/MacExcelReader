@@ -736,4 +736,70 @@ public class ExperimentTests
         Assert.Contains(expected, expression.Where(b => (b & 0x9F) is 0x01 or 0x02));
         Assert.DoesNotContain(expression, b => b is 0x21 or 0x22);
     }
+
+    // Every number format the library knows, by the text Excel's TEXT function was given for it.
+    private static Dictionary<string, ExcelNumberFormat> FormatsByText()
+    {
+        var formats = new Dictionary<string, ExcelNumberFormat>();
+        foreach (var format in ExcelNumberFormat.BuiltIn.Concat(TestData.AllSamples()
+            .Select(s => File.ReadAllBytes(TestData.SampleFile(s))).Where(b => b[0] == 0x53)
+            .SelectMany(b => ExcelDocument.Read(b).NumberFormats)))
+        {
+            formats.TryAdd(format.ToText(), format);
+        }
+
+        // The date-limit run's format, which no sample stores: m/d/yy h:mm:ss in tokens.
+        var dateTime = new ExcelNumberFormat(
+            [0, 0, 0, 16, 16, 16, 1], Convert.FromHexString("0F022F0B022F190220130 23A16023A18".Replace(" ", "")));
+        formats.TryAdd(dateTime.ToText(), dateTime);
+        return formats;
+    }
+
+    [Theory]
+    [InlineData("TEXT Formats 1")]
+    [InlineData("TEXT Formats 2")]
+    [InlineData("TEXT Date Limits")]
+    [InlineData("TEXT Formats 1.5")]
+    public void NumberFormats_MatchExcelsText(string name)
+    {
+        // Each row: a format's text, a value and =TEXT(value,format), recalculated by Excel 1.00 or 1.5. TEXT gives
+        // #VALUE! for General and fills, and for dates past 6 February 2040, where the library shows General.
+        var formats = FormatsByText();
+        var document = Load(name);
+        int compared = 0;
+        for (int row = 0; row < document.Cells.RowCount; row++)
+        {
+            if (document.Cells.Find(row, 2)?.Formula?.Result is not { Kind: ExcelFormulaResultKind.Text } result)
+            {
+                continue;
+            }
+
+            var format = formats[document.Cells[row, 0].TextValue!];
+            Assert.Equal(result.Text, format.Format(document.Cells[row, 1].NumberValue));
+            compared++;
+        }
+
+        Assert.NotEqual(0, compared);
+    }
+
+    [Theory]
+    [InlineData("General As Text")]
+    [InlineData("General As Text 2")]
+    [InlineData("General As Text 1.5")]
+    [InlineData("General As Text 2 1.5")]
+    public void General_MatchesExcelsNumberToText(string name)
+    {
+        // =""&B1 in Excel 1.00 and 1.5: 14 significant digits, written in full from 1E-18 to below 1E+20 (spec §7). The exact
+        // half 99999999999999.5 is the one value Excel rounds down.
+        var document = Load(name);
+        for (int row = 0; row < document.Cells.RowCount; row++)
+        {
+            if (document.Cells.Find(row, 2)?.Formula is not { } formula || document.Cells[row, 1].NumberValue == 99999999999999.5)
+            {
+                continue;
+            }
+
+            Assert.Equal(formula.Result.Text, ExcelValueFormatter.FormatGeneral(document.Cells[row, 1].NumberValue));
+        }
+    }
 }

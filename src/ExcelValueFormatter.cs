@@ -45,18 +45,37 @@ public static class ExcelValueFormatter
     }
 
     /// <summary>
-    /// Formats a number the way the General format does: up to 11 significant characters.
+    /// Formats a number the way the General format does when Excel turns a number into text (as <c>""&amp;A1</c>
+    /// does): rounded to 14 significant digits, written out in full from 1E-18 up to just below 1E+20 and with an
+    /// exponent outside that range (spec §7). On screen Excel also fits General into the column, which this does
+    /// not.
     /// </summary>
     public static string FormatGeneral(double value)
     {
-        var invariant = System.Globalization.CultureInfo.InvariantCulture;
-        string text = value.ToString("G11", invariant);
-        if (text.Contains('E'))
+        if (value == 0 || double.IsNaN(value) || double.IsInfinity(value))
         {
-            text = value.ToString("0.#####E+00", invariant);
+            return value == 0 ? "0" : value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        return text;
+        // Thirteen decimals in scientific form is 14 significant digits.
+        string scientific = Math.Abs(value).ToString("E13", System.Globalization.CultureInfo.InvariantCulture);
+        string digits = (scientific[0] + scientific[2..15]).TrimEnd('0');
+        int exponent = int.Parse(scientific[16..], System.Globalization.CultureInfo.InvariantCulture);
+        string sign = value < 0 ? "-" : string.Empty;
+        if (exponent is < -18 or > 19)
+        {
+            string mantissa = digits.Length > 1 ? digits[0] + "." + digits[1..] : digits;
+            return $"{sign}{mantissa}E{(exponent < 0 ? '-' : '+')}{Math.Abs(exponent)}";
+        }
+
+        if (exponent < 0)
+        {
+            return $"{sign}0.{new string('0', -exponent - 1)}{digits}";
+        }
+
+        return digits.Length <= exponent + 1
+            ? sign + digits + new string('0', exponent + 1 - digits.Length)
+            : $"{sign}{digits[..(exponent + 1)]}.{digits[(exponent + 1)..]}";
     }
 
     /// <summary>

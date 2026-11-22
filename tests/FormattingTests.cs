@@ -65,7 +65,7 @@ public class FormattingTests
     [Theory]
     [InlineData(0.5, 15, "12:00:00 PM")]
     [InlineData(0.75, 17, "18:00:00")]
-    [InlineData(-1, 10, "-1")]
+    [InlineData(-1, 10, "-1/2/04")]
     [InlineData(3_000_000, 10, "3000000")]
     [InlineData(1E+30, 0, "1E+30")]
     [InlineData(1.25, 19, "1.25")]

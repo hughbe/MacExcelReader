@@ -18,7 +18,7 @@ charts. It was reverse-engineered from the applications' code and checked agains
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 70 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 78 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
@@ -512,6 +512,25 @@ The compiler shows what the header bytes are: it writes the integer-position cou
 decimals plus twice the number of percent signs. It also shows how the hour tokens are chosen: `h`/`hh`
 compile to `13`/`14`, and are bumped by 12 to `1F`/`20` when an AM/PM designator follows. And it shows that
 `m` is compiled as minutes rather than month when it directly follows an hour token.
+
+**How a format shows a number.** Excel's TEXT function, given each sample format and a range of values, shows
+these rules (`TEXT Formats 1`, `TEXT Formats 2`, `TEXT Date Limits` in Excel 1.00; `TEXT Formats 1.5`):
+
+* The section follows the sign, but a value that rounds to zero in its section's decimals uses the zero
+  section: 0.001234 in `0.0" N";0.0" S";0` shows `0`.
+* A single-section format shows a negative number as `-` and the format of its magnitude, dates included:
+  -1234.567 in `m/d/yy` is `-5/19/07`.
+* Dates and times round to the second (13:36:28.8 shows `13:36:29`). Excel converts the serial to seconds since
+  1904 with the Macintosh's date routines, so the last date it shows is 6 February 2040 (serial 49710.27); TEXT
+  gives #VALUE! after that.
+* Strings and literals show without their quotes, and digits fill the placeholders around literals:
+  1234.5 in `00-00-000` is `00-01-235`.
+
+TEXT will not take `General` or a fill (`*-0`). General is how Excel turns a number into text (`=""&A1`, in
+1.00 and 1.5 alike, `General As Text`): 14 significant digits with trailing zeros dropped, written out in full
+from 1E-18 to below 1E+20 (`0.00000000015`, `99900000000000000000`) and with an exponent outside that
+(`1E+20`, `1.2345678901234E+20`). The exact half 99999999999999.5 gives `99999999999999` **(unknown why)**. On
+screen, General also fits the number into its column.
 
 ---
 
