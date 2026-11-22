@@ -19,7 +19,7 @@ sealed class SheetSettings : CommandSettings
     public int Split { get; init; }
 
     [CommandOption("--excel <VERSION>")]
-    [Description("Compile for Excel 1.0 (1.00–1.04, the default) or 1.5.")]
+    [Description("Compile for Excel 1.0 (1.00–1.03, the default), 1.04 (CHANGE.LINK and a third OPEN argument) or 1.5.")]
     public string Excel { get; init; } = "1.0";
 
     [CommandOption("--worksheet")]
@@ -38,7 +38,7 @@ sealed class SheetCommand : Command<SheetSettings>
 {
     public override int Execute(CommandContext context, SheetSettings settings, CancellationToken cancellationToken)
     {
-        var version = settings.Excel == "1.5" ? ExcelVersion.Excel150 : ExcelVersion.Excel100;
+        var version = settings.Excel switch { "1.5" => ExcelVersion.Excel150, "1.04" => ExcelVersion.Excel104, _ => ExcelVersion.Excel100 };
         var list = FormulaList.Load(settings.List);
         var parts = new List<(ExcelDocument Document, int Formulas)>();
         var skipped = new List<string>();

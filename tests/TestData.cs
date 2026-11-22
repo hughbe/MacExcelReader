@@ -41,9 +41,19 @@ internal static class TestData
     /// </summary>
     public static ExcelVersion SavedBy(byte[] file) => ((file[14] << 8) | file[15]) switch
     {
+        // Excel 1.04's segment has the same length as 1.00's but imports its host as 0x740A (spec §2.3).
+        0x326 when ImportWord(file) == 0x740A => ExcelVersion.Excel104,
         0x326 or 0x38A => ExcelVersion.Excel100,
         _ => ExcelVersion.Excel150,
     };
+
+    // Segment 1 starts at offset 24: a word, a word, the procedure count, one offset per procedure, then the import.
+    private static int ImportWord(byte[] file)
+    {
+        int procedures = (file[28] << 8) | file[29];
+        int at = 24 + 6 + 2 * procedures;
+        return (file[at] << 8) | file[at + 1];
+    }
 
     /// <summary>
     /// Gets whether a sample was saved by the pre-release Excel 1.5 build (spec §2.3), recognised by a hash of its

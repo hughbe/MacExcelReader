@@ -253,6 +253,28 @@ public class ExperimentTests
     }
 
     [Fact]
+    public void Excel104_SavesItsChanges()
+    {
+        // CHANGE.LINK and a three-argument OPEN, re-entered with FORMULA and saved by Excel 1.04 (spec §2.1, §2.3, §5).
+        var bytes = Sample("Changes 1.04");
+        var document = ExcelDocument.Read(bytes);
+        Assert.Equal(ExcelVersion.Excel104, SavedBy(bytes));
+        Assert.Equal(209, document.FunctionCount);               // one more than CHANGE.LINK (208)
+        Assert.Equal([0], document.ExtraHeader);
+        Assert.Equal([0x42, 0x02, 0xD0], document.Cells["B4"].Formula!.Expression[^3..].ToArray()); // CHANGE.LINK (208) with 2 arguments
+        Assert.Equal([0x42, 0x03, 0x6A], document.Cells["B6"].Formula!.Expression[^3..].ToArray()); // OPEN with 3 arguments
+    }
+
+    [Fact]
+    public void Excel104_WritesTheFunctionCountFromTheFormulas()
+    {
+        // The library wrote 209 with no function above 207; Excel 1.04 saved it back with 208 (spec §5).
+        var bytes = Sample("No New Functions 1.04");
+        Assert.Equal(ExcelVersion.Excel104, SavedBy(bytes));
+        Assert.Equal(208, ExcelDocument.Read(bytes).FunctionCount);
+    }
+
+    [Fact]
     public void PieExplodedAll_DefaultSeriesFormatHoldsTheExplosion()
     {
         // GALLERY.PIE(4): every slice pulled out by 20%.
