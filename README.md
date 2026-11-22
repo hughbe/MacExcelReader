@@ -151,10 +151,11 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
 
 ## Limitations
 
-- New documents carry empty embedded p-code segments. Excel 1.03 never uses a file's own copy, but a different build of Excel linking to the document while it is closed would; copy the segments from an existing document if that matters.
+- New documents carry empty embedded p-code segments. No released Excel reads them: every release writes code signature `0xAB27`, which each treats as its own build, so each uses its own copy of the code (spec §4.1). Only a build with another signature would load them, to read a closed document through a link; copy the segments from an existing document if that matters.
 - The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`, and Excel keeps it until something the formula depends on changes. Set `document.State.RecalculationState = ExcelRecalculationState.Needed` to have Excel recalculate the sheet when it opens it.
-- The parser's rules come from Excel's code and tables and were checked against every sample formula; formulas unlike any in the samples could still encode differently. Excel 1.5's functions numbered above 255 match Excel 1.5's own encoding (the `Functions 256 And Up` sample).
-- Files written by the library have been checked in Excel 1.00, 1.03 and 1.5 under Mini vMac: every formula in `tests/Data` in 1.03, part of the 1.5 list including functions above 255, and the experiments listed in [Testing in a real Excel](docs/Testing.md), including charts the library builds from scratch, which Excel 1.00 draws and re-saves with no change to their content.
+- The parser's rules come from Excel's code and tables and reproduce every formula in the samples. Excel itself has re-entered and saved (with the harness's `--recompile`) sheet 1 of `tests/Data/formulas-1.0.txt` in Excel 1.03 and all of `formulas-1.5.txt` except sheet 1 in Excel 1.5, and the library's tokens match. The other sheets of `formulas-1.0.txt` were only read back with GET.FORMULA in 1.03, which checks the text but not the tokens. Formulas unlike any of these could still encode differently.
+- `ExcelValueFormatter` and `ExcelNumberFormat.Format` show values as text, not as a cell on screen: a fill (`*-`) shows nothing, since it needs the column width, colours are dropped, and numbers too wide for their column are not turned into `###`. Format text uses the US letters and separators; a translated Excel shows its own (spec §7).
+- Files written by the library have been checked in Excel 1.00, 1.03 and 1.5 under Mini vMac, in the runs listed in [Testing in a real Excel](docs/Testing.md), including charts the library builds from scratch, which Excel 1.00 draws and re-saves with no change to their content.
 
 ---
 
