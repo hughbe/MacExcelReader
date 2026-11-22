@@ -187,6 +187,23 @@ public sealed class ExcelSheetState
     }
 
     /// <summary>
+    /// Gets or sets the cached width in pixels of the digit 0 in the standard font (spec §6, 0x254), which Excel
+    /// recomputes from the font.
+    /// </summary>
+    public ushort DigitWidth
+    {
+        get => GetWord(0x254);
+        set => SetWord(0x254, value);
+    }
+
+    /// <summary>Gets or sets the cached width in pixels of a bold 0 in the standard font (spec §6, 0x252).</summary>
+    public ushort BoldDigitWidth
+    {
+        get => GetWord(0x252);
+        set => SetWord(0x252, value);
+    }
+
+    /// <summary>
     /// Gets the width of a column (0–255). A width of 0 hides the column.
     /// </summary>
     public ushort GetColumnWidth(int column)

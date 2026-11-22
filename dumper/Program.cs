@@ -307,6 +307,8 @@ sealed class CellCommand : Command<CellSettings>
         var table = new Table().Title($"[bold]{address}[/]").AddColumn("Field").AddColumn("Value");
         table.AddRow("Type", cell.Type.ToString());
         table.AddRow("Display", Program.Escape(ExcelValueFormatter.FormatCell(cell, document)));
+        table.AddRow("In its column", Program.Escape(ExcelValueFormatter.FormatCell(cell, document, address.Column))
+            + $" ({document.State.GetColumnWidth(address.Column)} px, about {document.State.GetColumnWidth(address.Column) / Math.Max(1, (int)(cell.Bold ? document.State.BoldDigitWidth : document.State.DigitWidth))} digits)");
         table.AddRow("Value", Program.Escape(cell.Value switch
         {
             null => "(empty)",
@@ -314,7 +316,7 @@ sealed class CellCommand : Command<CellSettings>
             double d => d.ToString("R", CultureInfo.InvariantCulture),
             var other => Convert.ToString(other, CultureInfo.InvariantCulture),
         }));
-        if (cell.TryGetNumber(out double number) && document.GetNumberFormat(cell.NumberFormat)?.IsDate == true)
+        if (cell.TryGetNumber(out double number) && ExcelValueFormatter.IsDateFormat(cell.NumberFormat, document))
         {
             table.AddRow("As date", ExcelValueFormatter.ToDateTime(number).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
         }

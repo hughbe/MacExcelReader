@@ -187,6 +187,7 @@ Things to know:
 | Nov 2026 | 1.00 | Six array formulas re-entered with `--recompile` | An operator at the top of an array formula leaves its operands in value class, as in 1.5 (spec §15.4) |
 | Nov 2026 | 1.00 | `formulas-1.0` sheets 2–6 with `--recompile`, and IF and CHOOSE probes, some typed | Sheets 3–6 match. Function calls inside IF and CHOOSE follow the ordinary argument rules, typed or through FORMULA; the 1.00 disk's macro sheets carry an earlier compiler's reference classes (spec §15.4) |
 | Nov 2026 | 1.5 | `formulas-1.5` sheet 1 with `--recompile` | Matches, apart from GET.FORMULA's whole-row text for `=A1:IV16384` |
+| Nov 2026 | 1.00, 1.5 | TEXT of every sample format for ten values; dates around 2040; `=""&A1` for General | The library matches every result after fixes: the zero section for values that round to zero, `-` before single-section dates, rounding to the second, the 2040 date limit, and General's 14 digits and range (spec §7). TEXT will not take General or fills. |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

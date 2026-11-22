@@ -66,14 +66,17 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     /// <summary>Gets whether the format has a single section: every slot is the same bytes at offset 0.</summary>
     public bool IsSingleSection => Descriptor[^1] != 0;
 
-    /// <summary>Gets whether the format shows a date or time (its positive section has a date or time token).</summary>
+    /// <summary>
+    /// Gets whether the format shows a date: its positive section has a day, month or year token. Hours, minutes,
+    /// seconds and AM/PM do not count, as in Excel's own test (<c>07.18</c> in 1.00; spec §7).
+    /// </summary>
     public bool IsDate
     {
         get
         {
             foreach (var token in Tokenize(GetSection(ExcelNumberFormatSection.Positive)))
             {
-                if (token.Code is (>= 0x0B and <= 0x1A) or 0x1F or 0x20 or 0x21)
+                if (token.Code is (>= 0x0B and <= 0x12) or 0x19 or 0x1A)
                 {
                     return true;
                 }
@@ -131,31 +134,116 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     }
 
     /// <summary>Formats a number with this format.</summary>
-    public string Format(double value)
+    public string Format(double value) => Format(value, null);
+
+    /// <summary>
+    /// Formats a number as Excel shows it in a column with room for <paramref name="width"/> characters (spec §7,
+    /// <c>19.0d</c> and <c>19.0e</c> in Excel 1.00): General gets the characters the rest of the text leaves, a fill
+    /// repeats into the room left, and text that does not fit becomes a row of <c>#</c>. Excel measures in pixels;
+    /// counting every character as one digit width, as this does, is an approximation.
+    /// </summary>
+    public string Format(double value, int width) => Format(value, (int?)width);
+
+    private string Format(double value, int? width)
     {
+        if (width <= 0)
+        {
+            return string.Empty;
+        }
+
         if (double.IsNaN(value) || double.IsInfinity(value))
         {
             return ExcelValueFormatter.FormatGeneral(value);
         }
 
-        if (value == 0)
+        // Excel picks the section by sign, and uses the zero section for a value that rounds to zero in the
+        // section it would otherwise use: 0.001234 in 0.0" N";0.0" S";0 shows 0.
+        var section = value > 0 ? ExcelNumberFormatSection.Positive
+            : value < 0 && !IsSingleSection ? ExcelNumberFormatSection.Negative
+            : value < 0 ? ExcelNumberFormatSection.Positive
+            : ExcelNumberFormatSection.Zero;
+        double magnitude = Math.Abs(value);
+        if (section != ExcelNumberFormatSection.Zero && RoundsToZero(GetSection(section), magnitude))
         {
-            return FormatSection(GetSection(ExcelNumberFormatSection.Zero), 0, value);
+            section = ExcelNumberFormatSection.Zero;
+            magnitude = 0;
         }
 
-        if (value > 0)
+        string? shown = FormatSection(GetSection(section), magnitude);
+        if (shown is null)
         {
-            return FormatSection(GetSection(ExcelNumberFormatSection.Positive), value, value);
+            // A date Excel cannot show: TEXT gives #VALUE!, and a cell a row of #.
+            return width is { } columns ? new string('#', columns) : ExcelValueFormatter.FormatGeneral(value);
         }
 
-        if (IsSingleSection)
+        // A single-section format shows a negative number as a minus sign and the format of its magnitude, dates
+        // included: -1234.567 in m/d/yy is -5/19/07.
+        if (value < 0 && section == ExcelNumberFormatSection.Positive && shown.Length > 0)
         {
-            string shown = FormatSection(GetSection(ExcelNumberFormatSection.Positive), -value, value);
-            return shown.Length == 0 || shown == ExcelValueFormatter.FormatGeneral(value) ? shown : "-" + shown;
+            shown = "-" + shown;
         }
 
-        return FormatSection(GetSection(ExcelNumberFormatSection.Negative), -value, value);
+        return Resolve(shown, magnitude, width);
     }
+
+    // Stand-ins for a General token and a fill, resolved once the rest of the text is known.
+    private const char GeneralMark = '\uE000';
+    private const char FillMark = '\uE001';
+
+    private static string Resolve(string text, double magnitude, int? width)
+    {
+        int fill = text.IndexOf(FillMark);
+        char fillChar = fill >= 0 && fill + 1 < text.Length ? text[fill + 1] : ' ';
+        if (fill >= 0)
+        {
+            text = text.Remove(fill, Math.Min(2, text.Length - fill));
+        }
+
+        int general = text.IndexOf(GeneralMark);
+        if (general >= 0)
+        {
+            // General gets the room the rest of the text leaves (19.0d).
+            int left = width is { } columns ? Math.Max(1, columns - (text.Length - 1)) : 20;
+            string shown = ExcelValueFormatter.FormatGeneral(magnitude, left);
+            text = text.Remove(general, 1).Insert(general, shown);
+            if (fill > general)
+            {
+                fill += shown.Length - 1;
+            }
+        }
+
+        if (width is not { } room)
+        {
+            return text;
+        }
+
+        if (fill >= 0)
+        {
+            // The fill repeats into what is left, less a pixel (19.0d): one character fewer here.
+            int count = Math.Max(0, room - text.Length - 1);
+            text = text.Insert(Math.Min(fill, text.Length), new string(fillChar, count));
+        }
+
+        // Text wider than the column shows as #s (19.0e).
+        return text.Length > room ? new string('#', room) : text;
+    }
+
+    private static bool RoundsToZero(ReadOnlySpan<byte> section, double magnitude)
+    {
+        var tokens = Tokenize(section);
+        int header = tokens.FindIndex(t => t.Code == 0x03);
+        if (header < 0 || tokens.Exists(IsDateToken))
+        {
+            return false;
+        }
+
+        byte[] h = tokens[header].Operands;
+        int extra = (sbyte)h[2] - h[1];
+        double scaled = magnitude * Math.Pow(100, extra > 0 ? extra / 2 : 0) / Math.Pow(1000, extra < 0 ? -extra / 3 : 0);
+        return Math.Round(scaled, h[1], MidpointRounding.AwayFromZero) == 0;
+    }
+
+    private static bool IsDateToken(Token token) => token.Code is (>= 0x0B and <= 0x1A) or 0x1F or 0x20 or 0x21;
 
     /// <summary>
     /// Formats text with this format: through Excel 1.5's text section when the format has one of its own (where
@@ -358,9 +446,8 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         }
     }
 
-    // Formats a non-negative magnitude with one section; original is the signed value, used where the section is
-    // General or a date.
-    private static string FormatSection(ReadOnlySpan<byte> section, double magnitude, double original)
+    // Formats a non-negative magnitude with one section, or returns null for a date Excel cannot show.
+    private static string? FormatSection(ReadOnlySpan<byte> section, double magnitude)
     {
         var tokens = Tokenize(section);
         if (tokens.Count == 0)
@@ -368,10 +455,9 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             return string.Empty;
         }
 
-        bool isDate = tokens.Exists(t => t.Code is (>= 0x0B and <= 0x1A) or 0x1F or 0x20 or 0x21);
-        if (isDate)
+        if (tokens.Exists(IsDateToken))
         {
-            return FormatDate(tokens, original);
+            return FormatDate(tokens, magnitude);
         }
 
         int header = tokens.FindIndex(t => t.Code is 0x03 or 0x1C);
@@ -382,7 +468,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             {
                 if (token.Code == 0x01)
                 {
-                    text.Append(ExcelValueFormatter.FormatGeneral(magnitude));
+                    text.Append(GeneralMark);
                 }
                 else
                 {
@@ -559,17 +645,23 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             case 0x22:
                 text.Append('$');
                 break;
+            case 0x0A when op.Length == 1:
+                text.Append(FillMark).Append(MacRoman.GetString([op[0]]));
+                break;
         }
     }
 
-    private static string FormatDate(List<Token> tokens, double serial)
+    // Excel converts the serial to seconds since 1904, rounded, and gives up past the Macintosh clock's last second,
+    // 2^32 - 1 (6 February 2040, serial 49710.27): TEXT gives #VALUE! there (Excel 1.00, "Dates" run).
+    private static string? FormatDate(List<Token> tokens, double serial)
     {
-        if (serial < 0 || serial > 2_958_465)
+        double seconds = Math.Round(serial * 86400, MidpointRounding.AwayFromZero);
+        if (seconds > uint.MaxValue)
         {
-            return ExcelValueFormatter.FormatGeneral(serial);
+            return null;
         }
 
-        var date = ExcelValueFormatter.ToDateTime(Math.Round(serial * 86400, MidpointRounding.AwayFromZero) / 86400);
+        var date = new DateTime(1904, 1, 1).AddSeconds(seconds);
         bool twelveHour = tokens.Exists(t => t.Code == 0x21);
         var invariant = CultureInfo.InvariantCulture;
         var text = new StringBuilder();

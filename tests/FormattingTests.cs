@@ -65,7 +65,7 @@ public class FormattingTests
     [Theory]
     [InlineData(0.5, 15, "12:00:00 PM")]
     [InlineData(0.75, 17, "18:00:00")]
-    [InlineData(-1, 10, "-1")]
+    [InlineData(-1, 10, "-1/2/04")]
     [InlineData(3_000_000, 10, "3000000")]
     [InlineData(1E+30, 0, "1E+30")]
     [InlineData(1.25, 19, "1.25")]
@@ -229,5 +229,61 @@ public class FormattingTests
         }
 
         Assert.All(document.NumberFormats, f => Assert.False(string.IsNullOrEmpty(f.ToText())));
+    }
+
+    [Theory]
+    [InlineData(1234567, 5, "1E+06")]          // too many integer digits: one mantissa digit up to 6 characters
+    [InlineData(1234567, 9, "1234567")]
+    [InlineData(123.456, 5, "123.5")]          // rounded to the digits that fit, less one for the point
+    [InlineData(0.5, 3, "0.5")]
+    [InlineData(0.000012345, 8, "1.23E-05")]   // a tiny number that does not fit: 8 - 6 + 1 mantissa digits
+    [InlineData(0.000012345, 12, "0.000012345")]
+    [InlineData(-2.5, 3, "-2.5")]              // the minus sign is not counted
+    public void General_FitsTheColumn(double value, int width, string expected)
+    {
+        // Excel 1.00's General (19.0c): spec §7.
+        Assert.Equal(expected, ExcelValueFormatter.FormatGeneral(value, width));
+    }
+
+    [Fact]
+    public void DateFormats_AreDecidedAsExcelDoes()
+    {
+        // 07.18 counts day, month and year tokens only; 34.04 adds the built-in formats 10–18 (spec §7).
+        Assert.True(ExcelNumberFormat.BuiltIn[10].IsDate);    // m/d/yy
+        Assert.False(ExcelNumberFormat.BuiltIn[16].IsDate);   // h:mm
+        Assert.True(ExcelValueFormatter.IsDateFormat(16));
+        Assert.False(ExcelValueFormatter.IsDateFormat(9));
+        var document = TestData.Load("INVOICE TEMPLATE");
+        int dayMonthYear = document.NumberFormats.FindIndex(f => f.ToText() == "dd mmm yy") + ExcelValueFormatter.BuiltInFormatCount;
+        Assert.True(ExcelValueFormatter.IsDateFormat(dayMonthYear, document));
+        Assert.False(ExcelValueFormatter.IsDateFormat(dayMonthYear));
+    }
+
+    [Fact]
+    public void Formats_FitTheirColumn()
+    {
+        // Excel 1.00's display (19.0d, 19.0e; spec §7), counting the column in digit widths.
+        var general = ExcelNumberFormat.BuiltIn[0];
+        Assert.Equal("1.235E+12", general.Format(1234567891234, 9));      // General switches to an exponent
+        Assert.Equal("-123", general.Format(-123.456, 5));                 // the minus sign takes a character
+        Assert.Equal("######", ExcelNumberFormat.BuiltIn[2].Format(1234567.891, 6));   // 0.00 too wide
+        Assert.Equal("######", ExcelNumberFormat.BuiltIn[10].Format(100000, 6));       // a date Excel cannot show
+        Assert.Equal(string.Empty, general.Format(1, 0));                  // a hidden column
+
+        var fill = Assert.Single(TestData.Load("Fill Format").NumberFormats, f => f.ToText() == "*-0");
+        Assert.Equal("12", fill.Format(12));
+        Assert.Equal("-------12", fill.Format(12, 10));                    // fills what is left, less a pixel
+    }
+
+    [Fact]
+    public void FormatCell_UsesTheColumnWidth()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.Cells["A1"].SetNumber(123456789);
+        document.State.SetColumnWidth(0, 40);                              // about 5 digits of 7 pixels
+        Assert.Equal("1E+08", ExcelValueFormatter.FormatCell(document.Cells["A1"], document, 0));
+        Assert.Equal("123456789", ExcelValueFormatter.FormatCell(document.Cells["A1"], document));
+        document.Cells["A1"].NumberFormat = 3;                             // #,##0
+        Assert.Equal("#####", ExcelValueFormatter.FormatCell(document.Cells["A1"], document, 0));
     }
 }
