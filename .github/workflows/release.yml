@@ -1,13 +1,16 @@
 name: Release
 
 # Publishes MacExcelReader to NuGet when a version tag such as v1.0.0 is pushed. The package version is the tag
-# without its "v". Needs the repository secret NUGET_API_KEY.
+# without its "v". It uses NuGet Trusted Publishing: nuget.org trusts this workflow file through a policy on the
+# account, and NuGet/login swaps the workflow's GitHub identity for a short-lived API key, so no key is stored.
+# Needs the repository secret NUGET_USER, the nuget.org account name the policy belongs to.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+*']
 
 permissions:
   contents: read
+  id-token: write   # lets NuGet/login ask GitHub for the workflow's identity token
 
 jobs:
   publish:
@@ -37,16 +40,15 @@ jobs:
       - name: Pack
         run: dotnet pack src --configuration Release --no-build --output packages -p:Version=${{ steps.version.outputs.version }}
 
+      - name: Log in to NuGet with Trusted Publishing
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
       - name: Publish to NuGet
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: |
-          if [ -z "$NUGET_API_KEY" ]; then
-            echo "::error::The repository secret NUGET_API_KEY is not set."
-            exit 1
-          fi
-          # Pushing the .nupkg also pushes the .snupkg beside it to the symbol server.
-          dotnet nuget push "packages/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        # Pushing the .nupkg also pushes the .snupkg beside it to the symbol server.
+        run: dotnet nuget push "packages/*.nupkg" --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Upload package
         uses: actions/upload-artifact@v4

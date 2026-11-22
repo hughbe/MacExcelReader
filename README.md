@@ -178,8 +178,9 @@ git push origin v1.0.0
 ```
 
 The Release workflow builds and tests the tagged commit, packs it with the tag as the version (`v1.0.0` gives
-1.0.0) and pushes the package and its symbols to nuget.org. It needs a NuGet API key in the repository secret
-`NUGET_API_KEY`.
+1.0.0) and pushes the package and its symbols to nuget.org with NuGet Trusted Publishing, so no API key is
+stored. It needs a Trusted Publishing policy on nuget.org for this repository and the workflow file
+`release.yml`, and the nuget.org account name in the repository secret `NUGET_USER`.
 
 ---
 
