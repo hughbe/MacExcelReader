@@ -104,6 +104,9 @@ public class FuzzTests
 
         try
         {
+            // The SYLK export reads untouched cells from the file's bytes, so try it before any cell is created.
+            ExcelDocument.Read(bytes).ExportSylk(new System.Buffers.ArrayBufferWriter<byte>());
+
             var document = ExcelDocument.Read(bytes);
             foreach (var entry in document.Cells.NonEmptyCells)
             {

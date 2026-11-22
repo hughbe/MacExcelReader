@@ -212,8 +212,8 @@ public class FormattingTests
     [Fact]
     public void TextSection_FormatsText()
     {
-        // Excel 1.5's General;@ shows text through @, and 0;-0;0;"t" replaces it with t (spec §7).
-        Assert.Equal("abc", Assert.Single(TestData.Load("Colour Formats").NumberFormats, f => f.ToText() == "General;@").Format("abc"));
+        // Excel 1.5's @ shows text through @, and 0;-0;0;"t" replaces it with t (spec §7).
+        Assert.Equal("abc", Assert.Single(TestData.Load("Colour Formats").NumberFormats, f => f.ToText() == "@").Format("abc"));
         Assert.Equal("t", Assert.Single(TestData.Load("Format Text Section").NumberFormats).Format("abc"));
         Assert.Equal("abc", ExcelNumberFormat.BuiltIn[2].Format("abc"));
     }

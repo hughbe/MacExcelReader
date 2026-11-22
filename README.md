@@ -46,6 +46,8 @@ The library targets .NET 9 and has no dependencies.
 - **Charts.** Type and options, axes and scales, legend, titles, data labels, free text and arrows, point
   formats, overlay charts and the series data, in Microsoft Chart's 8-byte decimal numbers.
 - **Workspaces.** Read and write "Resume Excel" files: the settings and the windows Excel reopens.
+- **SYLK export.** `ExportSylk` writes a sheet as SYLK, byte for byte as Excel 1.00's or 1.5's Save As does,
+  checked against 178 files the two exported. It allocates nothing per cell.
 - **Robust.** Malformed input only ever raises `ExcelFormatException`, checked by fuzzing the samples with
   hundreds of thousands of random corruptions.
 
@@ -179,6 +181,7 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `names <file>` | Defined names, command shortcuts and definitions |
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |
+| `sylk <file> [-o out.slk] [--excel 1.5]` | The sheet as SYLK, as Excel 1.00 (or 1.5) exports it |
 | `dump <file>` | Everything: header, settings, column widths, external references, names, windows, page breaks, print setup and cells |
 | `workspace <file>` | A workspace ("Resume Excel", type XLIN) file: settings and the windows it reopens |
 | `layout <file>` | Where each part of the file lies: header, code segments, state block and all eight sections |

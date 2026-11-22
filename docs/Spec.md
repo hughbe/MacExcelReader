@@ -3,6 +3,38 @@
 This describes the files Microsoft Excel 1.00 to 1.5 for the Macintosh save: worksheets, macro sheets and
 charts. It was reverse-engineered from the applications' code and checked against every sample file available.
 
+## Background: how Excel 1.x runs
+
+Most of the format follows from how Excel 1.x was built, and the spec cites Excel's code throughout, so this is
+worth knowing first.
+
+**P-code.** Excel 1.x is mostly not 68000 machine code. Microsoft compiled it to **p-code** ("pseudo-code"), a
+compact byte code for an imaginary stack machine, which let a large program fit a 512K Macintosh. A 68000
+interpreter in the application runs it. An instruction pushes a constant, loads a variable, does arithmetic or
+calls a procedure; a procedure can also drop into 68000 code for speed or to call the Macintosh Toolbox. The
+machine's pointers are 8086-style segment:offset pairs (§1.3), so it was most likely shared with Microsoft's
+software for the IBM PC **(inferred)**.
+
+**Segments and procedures.** The p-code is divided into numbered **segments** (118 in Excel 1.00), each of
+numbered **procedures** (from one to over a hundred). In Excel 1.00 the application's `PCOD` 2 resource holds
+every segment, and `PCOD` 0 holds the table of where each starts together with Excel's global data: the function
+table, built-in names, operator and pattern tables and so on. The interpreter loads a segment from disk when one
+of its procedures is called and unloads the least recently used ones when memory runs short. The spec cites code
+by these numbers: `47.0b` is procedure `0x0B` of segment `0x47`, Excel 1.00's Save, in hexadecimal. Procedures
+change number between releases when one is inserted, so the spec says which release a number is from where it
+matters (Sources, below). A name like `g0812` is a global variable, named by its offset in Excel's global data.
+
+**Memory and the file.** Excel keeps a document in memory as a handful of blocks: the cell table, the cell data,
+the names, the windows and so on. Save mostly writes each block out as it is in memory, one section after another
+(§3), and Open reads them back. That is why a file holds things that only made sense in memory: pointers, the
+interpreter's housekeeping, bytes that were never cleared (all "left over from memory", §1), and even two of
+Excel's own code segments (§4.1). Excel writes through its own 512-byte buffered file stream and records where
+each section starts as a position in that stream (§1.2).
+
+**Where the rules come from.** Each rule in the spec comes from reading the procedure that writes or reads the
+bytes (Save, Open, the formula compiler and so on), from the samples, or from having Excel itself change a file
+and comparing the bytes ([Testing in a real Excel](Testing.md)).
+
 ## Sources
 
 **Code.** The p-code and 68000 code in the applications' `PCOD` resources, disassembled:
@@ -16,7 +48,7 @@ charts. It was reverse-engineered from the applications' code and checked agains
 | Excel 1.06 | `Microsoft Excel 1.06.dsk` (800K HFS) | Every procedure, matched to its 1.04 counterpart. 1.06 keeps 1.04's segment and procedure numbers apart from a few procedures it inserts or drops. |
 | Excel 1.5 (May 1988) | Excel 1.5 folder | Save (`47.0d`), format and token translation (`47.18`), function table and file-number table, version-18 rules. Each 1.5 change the spec names was checked against 1.06's code, the release before it. |
 
-Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
+Code is cited as `segment.procedure` in hexadecimal, for example `0f.00` (see Background).
 
 **Samples.** 37 documents and one workspace file from Microsoft's disks, and 85 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
@@ -69,6 +101,7 @@ misbehaves, for example with a file that breaks a rule given here.
 18. [Open questions](#18-open-questions)
 * [Appendix A. Functions](#appendix-a-functions)
 * [Appendix B. Workspace files](#appendix-b-workspace-files)
+* [Appendix C. SYLK export](#appendix-c-sylk-export)
 
 ---
 
@@ -103,8 +136,10 @@ the document kind byte (§5) is `0x40`, else `XLBN`.
 
 ### 1.2 Stream positions
 
-The writer is a 512-byte buffered stream. A stream position is stored as a long made of two words, **(block
-number, offset within block)**:
+Several fields say where something starts in the file: the section table (§5) above all. Excel's Save does not
+write straight to the disk but through its own buffer of 512 bytes, the size of a Macintosh disk block, and
+records each position as its stream knows it. A stream position is stored as a long made of two words,
+**(block number, offset within block)**:
 
 ```
 absolute offset = hi_word * 512 + lo_word
@@ -118,14 +153,22 @@ Panes` starts at 0x600 and is stored as `00 02 02 00`, not `00 03 00 00`. Only p
 
 ### 1.3 Packed pointers ("seg:off")
 
-Excel 1.x's p-code uses 8086-style 20-bit pointers: `address = seg * 16 + off` with `off` in 0…15 once
-normalised. Several structures were dumped from memory with such pointers still in them. They are left over
+Excel's p-code machine follows the 8086 (see Background), so its pointers are 8086-style
+**segment:offset** pairs of words, which the interpreter turns into Macintosh addresses: `address = seg * 16 +
+off`, with `off` in 0…15 once normalised. Here "segment" means a 16-byte unit of memory, not a code segment.
+Several structures were saved from memory with such pointers still in them. They are left over
 from memory (above), except in the cell table, where the writer replaces them with section-relative offsets
 (§9).
 
 ---
 
 ## 2. Versions
+
+Six releases of Excel 1.x are covered, from 1.00 in 1985 to 1.5 in 1988. All of them read and write
+essentially the same format. Two numbers in a file tell them apart: the **format version** (header word 2),
+which changes only when old releases could not read a file, and the code embedded in each document, which
+identifies the exact build that saved it (§2.3). Between them the releases mostly added functions, which a
+file records with the function count (§5).
 
 ### 2.1 Releases
 
@@ -197,6 +240,12 @@ one argument in the variable-count form (`42 01 39`), where the released 1.5 kee
 
 ## 3. Overall layout
 
+A document file has three parts. A short header says where the data starts. Two segments of Excel's own code
+follow it, which a reader can skip (§4.1). The data area comes last: a fixed preamble with the sheet's settings
+(§5, §6), then eight **sections**. Each section is one of Excel's in-memory structures, written out in turn by
+Save: number formats, external documents, the cell table, external names, defined names, cell data, windows,
+and page breaks with print settings. A chart is written in a different format (§16).
+
 ```
 +0x00  File header                     24 bytes
 +0x18  Embedded p-code segment 1       header.len1 bytes
@@ -222,6 +271,8 @@ Sections are contiguous and in this order; the section table gives the start of 
 ---
 
 ## 4. File header (24 bytes)
+
+The header identifies the file as an Excel 1.x document and gives where the data area starts.
 
 | Offset | Size | Value in samples | Meaning |
 |-------:|-----:|------------------|---------|
@@ -282,7 +333,9 @@ same code signature `0xAB27`. Chart files carry signature `0x13E8` (§16.2).
 
 ## 5. Data area preamble
 
-At `header.dataOffset`:
+The data area opens with the fields Open needs before it can read the sections: the function count, which says
+whether this Excel knows every function the formulas use; the sheet's settings (§6); whether the document is a
+worksheet or a macro sheet; and where each section starts. At `header.dataOffset`:
 
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
@@ -320,7 +373,10 @@ than the highest function number any formula uses if that is higher. Every sampl
 
 ## 6. Sheet state block (630 bytes)
 
-A raw dump of a contiguous run of application globals. Offsets are relative to the start of the block.
+The document's settings: calculation options, the grid size, column widths, the protection password, the
+standard font and print titles, together with values Excel works out from them. In memory these are a run of
+consecutive global variables for the active document, and Save writes the whole run as it is, so some fields
+are only pointers left over from memory. Offsets are relative to the start of the block.
 
 | Offset | Size | Samples | Meaning |
 |-------:|-----:|---------|---------|
@@ -383,6 +439,9 @@ The cached font values at 0x248–0x254 are recomputed from the font number and 
 
 ### 6.1 Grid dimensions
 
+The cell table (§9) is a full rectangle of entries, so its size has to be known before it can be read. It is
+not stored directly; it comes from three state words:
+
 ```
 nRows = word[0x014] + word[0x020]
 nCols = word[0x274] + word[0x020]
@@ -400,7 +459,8 @@ column index from then on. Most samples are in the second form; `CLOCK.WS`, `CLO
 
 ### 6.2 Password hash
 
-From the password dialog's handler (`24.01` in 1.00, `22.01` in 1.03). For a password of `n` characters
+A protected document stores a 16-bit hash of its password, not the password, in state word `0x242`. The
+algorithm is from the password dialog's handler (`24.01` in 1.00, `22.01` in 1.03). For a password of `n` characters
 `c[1…n]`:
 
 ```
@@ -417,6 +477,10 @@ An empty password gives 0. This is the same hash later Excel versions use for sh
 ---
 
 ## 7. Section 0 — number formats
+
+A number format, such as `#,##0.00` or `d-mmm-yy`, controls how a cell's value is shown. Excel has 19 built in,
+and a document stores any others its cells use, compiled from the text the user typed into a list of tokens.
+A cell refers to its format by number (§9). The section starts:
 
 | Size | Meaning |
 |-----:|---------|
@@ -442,6 +506,24 @@ zero and positive both use the 12 bytes at offset 0 and negative the 14 at offse
 displays nothing (`INVOICE LIST`: `$#,##0.00 ;($#,##0.00);` hides zeros). A format given without a text section
 gets `01` (General) there, as in Microsoft's version-18 sample; `0;-0;0;"t"` stores `09 01 74` (`Format Text
 Section`). Excel 1.5 writes the 3-slot form to version-17 files (`47.11`).
+
+**Format text.** The Format Number dialog, SYLK export and the version check turn a format back into text: the
+positive section first, then the others after `;`. Which sections are written differs by release:
+
+* Excel 1.00–1.06 (`07.16` in 1.00) write the negative section unless the single-section byte is 1, and the
+  zero section unless its offset and length equal the positive section's, even when both are empty. So `;;`,
+  whose three sections are empty at offset 0, comes back as `;`, while `0.0;;` keeps both separators.
+* Excel 1.5 (`0d.19`) leaves out a negative or zero section only when it repeats a non-empty positive section
+  (a zero section is written only after a negative one), and writes the text section unless it is the General
+  the compiler appended. `;;` comes back as `;;`. A format whose text section comes before its number sections,
+  `@` alone or `"pre"@"post"`, is written as the text section alone (unless Save is recompiling it, `47.11`).
+
+Excel 1.5 also marks literals (`0d.1a`). A literal character (`02`) gets a backslash unless it is one of
+characters 6–14 of the format-character string, `, : / space - + ( ) .`, or the `E` before an exponent's sign:
+`#,##0.00\_)`. In its export form, which the converters use (`79.14` sets the flag `g3100` for SYLK), every
+literal gets a backslash and the currency symbol is quoted: `"$"#,##0\ ;\("$"#,##0\)`, `m\/d\/yy`.
+
+Excel 1.00's and 1.5's SYLK exports of `Format Compiler` and `Format Compiler 1.5` give every format this way.
 
 Built-in formats are not stored in documents; they live in the application's `FRMT` 256 resource in the same
 descriptor-plus-body form. Total formats are capped at 64. The 19 built-ins, by index, in Excel 1.00. A file
@@ -546,7 +628,7 @@ checks the keywords `General`, `AM/PM`, `A/P` and the currency symbol first. It 
 * `@` gives `23`, in a section without numbers or dates. That section is the text section and must be the last.
   A positive section that is only General (and a colour) doubles as the text section. Otherwise General (`01`)
   is appended as the text section: every version-18 format has one. A format of only a text section, such as
-  `@`, gets General appended as its number sections, so Excel shows it as `General;@`.
+  `@`, gets General appended as its number sections, after the text section.
 * For a version-17 file, Save recompiles each format and keeps the first three slots (`47.11`).
 
 Every format in the samples and in the test lists compiles to Excel's own bytes (`Format Compiler` in Excel 1.00,
@@ -604,6 +686,10 @@ and with an exponent outside that (`1E+20`, `1.2345678901234E+20`).
 ---
 
 ## 8. Section 1 — external documents and row index
+
+This section holds two unrelated things. The external-document table lists the other documents this sheet's
+formulas refer to (links such as `=Budget!A1`). The row index is a size hint for Excel's recalculation
+structures.
 
 **External document table**
 
@@ -686,6 +772,7 @@ Cell types:
 | 4 | TRUE, FALSE or an error | word 0: high byte 0 for TRUE or FALSE, 1 for an error; low byte the value (1 TRUE, 0 FALSE) or the error code (§12.4). No cell data; bits 15–12 of word 1 are not meaningful. |
 | 5 | Formula, numeric result | Formula record in cell data (§12) |
 | 6 | Formula, non-numeric result | Formula record in cell data (§12) |
+| 7 | Not used | No Excel 1.00 code writes it. All 14 switches on the cell type handle 0–6 only; Open (`46.06`) reads cell data for types 2–6 and Save (`47.0b`) treats 0, 1 and 4 as having none. A reader can reject it. |
 
 Excel picks the type when a constant is typed or entered with FORMULA (Excel 1.00 and 1.5 alike, `Constant
 Cells` and `Constant Cells 1.5` samples). A whole number from 0 to 65535 is an integer: 40000 is `9C 40`, and
@@ -800,6 +887,10 @@ memory), and its block, `01 00 06` followed by six elements, follows the names.
 
 ## 12. Section 5 — cell data
 
+The cell table (§9) holds integers, TRUE, FALSE and errors itself. Every other value lives here: numbers,
+text and formulas, one record per cell, in the order of the cell table. A cell's entry gives the offset of
+its record (§9). Records carry no type of their own; the cell type says how to read each one.
+
 ### 12.1 Number (type 2)
 
 8 bytes, IEEE double.
@@ -809,6 +900,9 @@ memory), and its block, `01 00 06` followed by six elements, follows the names.
 Pascal string (up to 255 characters).
 
 ### 12.3 Formula record (types 5 and 6)
+
+A formula is stored compiled, as the tokens of §15, with the value it last calculated so that Excel can show
+the sheet without recalculating it. Formula text is not stored; Excel decompiles the tokens to show it.
 
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
@@ -831,6 +925,9 @@ Row word (offset 12):
 | 13–0 | Row |
 
 ### 12.4 Current value
+
+The first 8 bytes of a formula record hold its last result: a number, or a marker followed by text, a logical
+value or an error.
 
 * If bytes 0–1 are **not** `FF FF`: an IEEE double (cell type 5).
 * If bytes 0–1 are `FF FF` (cell type 6), byte 2 selects:
@@ -946,7 +1043,9 @@ expression follows the array-formula class rules of §15.4.
 
 ## 13. Section 6 — windows
 
-One record per open window on the document, front to back, terminated by a `0x00` byte.
+Excel saves the windows that were open on a document, so that opening it brings them back with the same
+position, scrolling, selection and display options. A document can have several windows. One record per
+open window on the document, front to back, terminated by a `0x00` byte.
 
 | Size | Meaning |
 |-----:|---------|
@@ -1080,8 +1179,13 @@ The file ends after this section.
 
 ## 15. Parsed expressions
 
-Reverse-Polish token stream. This is the direct ancestor of the BIFF2 `ptg` encoding: token numbers and
-operand sizes coincide wherever they could be checked ([Excel 1.x and BIFF2](Biff2.md#6-formulas) compares them).
+Excel compiles every formula, and every name's definition, into a sequence of tokens it can evaluate directly,
+and stores only that (§11, §12.3). The tokens are in reverse Polish order, operands before their operator:
+`=A1+2` is a reference to A1, the number 2, then the addition token. Recalculation runs the tokens on a
+stack. To show a formula, Excel turns the tokens back into text, so a reader that wants the text must do the
+same. §15.4 covers the other direction, compiling text as Excel does.
+
+The token stream is the direct ancestor of the BIFF2 `ptg` encoding: token numbers and operand sizes coincide wherever they could be checked ([Excel 1.x and BIFF2](Biff2.md#6-formulas) compares them).
 
 Tokens `0x01`–`0x1F` are plain bytes. Tokens from `0x20` up carry a **class** in bits 6–5:
 
@@ -1375,7 +1479,18 @@ index         jump       table      choice 1   skip       choice 2   skip       
 
 **Numbers.** Whole numbers 0–65535 are `1E` words; other numbers are `1F` doubles (`=65535` is `1E FF FF`,
 `=65536` a double, `Literals`). A minus sign directly on a number constant is folded into it: `-1` is `1F BF
-F0 00 00 00 00 00 00`, not `1E 00 01 13`. A minus sign on anything else is `13`.
+F0 00 00 00 00 00 00`, not `1E 00 01 13`. A minus sign on anything else is `13`. Excel 1.00 shows a number
+constant as the General format does (§7): at most 14 significant digits, rounded, with a tie at the 14th digit
+rounding down. GET.FORMULA gives `=0.12345678901235` for `=0.12345678901234567`, `=99999999999999` for
+`=99999999999999.5` and `=1.2345678901235E-20` for `=1.2345678901234567E-20`, and SYLK writes the same text. Text with more digits therefore comes back shorter, and entering the shorter text again can give a
+slightly different double: `CORRECT MACROS` defines `Tb` as a time that shows as `0.71097222222222`, whose
+double differs from the stored one in the last bit.
+
+**Whole rows and columns.** Excel 1.00 shows an area that spans every column (A to IV) as rows, `=$1:$16384` or
+`=1:2`, and one that spans every row (1 to 16384) as columns, `=A:B`, and accepts both forms when typed. A row
+area keeps its columns absolute and a column area its rows. Each operand of a range is shown this way on its
+own, so `=1:1:16384:16384` is a range of two whole-row areas, `46 … 0F 25… 25… 11`, wrapped in a memory area
+like any range whose operands are not both single cells.
 
 **TRUE and FALSE** without parentheses are `1D` constants.
 
@@ -1471,6 +1586,9 @@ and Format > Patterns, and charts the library built and Excel 1.00 re-saved (`Li
 
 ### 16.2 Header (128 bytes)
 
+The header gives the chart format's version, the code signature, and where the data and the series lists
+start.
+
 | Offset | Size | Value | Meaning |
 |-------:|-----:|-------|---------|
 | 0 | word | `0x018C` | Magic. Open rejects anything else. |
@@ -1507,6 +1625,8 @@ Zero is eight zero bytes. A value whose exponent exceeds 63 is written as expone
 below −63 as exponent −63 with digits `10 00 …`. So 1.0 is `41 10 00 00 00 00 00 00`.
 
 ### 16.4 Common sub-records
+
+Fonts, line formats and area formats appear in several chart records in the same forms, described once here.
 
 **Font descriptor** (4 bytes):
 
@@ -2568,3 +2688,97 @@ Each chart structure is the 392-byte form of the chart record (§16.5, the table
 Excel 2` the table at 652 holds 666 and 1058, the main (scatter) and overlay (pie) charts of `CLOCK.CH`, and
 the count is 2. The rest of the block is a heap: Excel allocates the chart structures, point formats, series
 and strings in it as it needs them (`30.11`), so their places vary.
+
+---
+
+## Appendix C. SYLK export
+
+Save As and `SAVE.AS(name, type)` take type 1 Normal, 2 SYLK, 3 Text (tab-delimited) and 4 WKS (Lotus 1-2-3).
+Excel 1.00 numbers them 0–3 internally and dispatches in `47.05`: Normal goes to the document writer (`47.0b`),
+the others through `72.01` to the SYLK writer (`69.00`), the text writer (`6e.00`) and the WKS writer
+(`74.00`). The SYLK writer is described here from its code (`69.00`–`69.10`, with `72.20` for format codes) and
+checked against 84 samples Excel 1.00 exported and 94 Excel 1.5 exported: `ExcelDocument.ExportSylk` writes
+the same bytes for all of them. Excel 1.01–1.06 have the same writer (`6a` in 1.04 and 1.06), apart from taking
+TRUE, FALSE and the error names from a string list that a translation can change. Excel 1.5's (`70`) differs in
+three ways, given under **Excel 1.5** below.
+
+SYLK is a text form of the same model, so it also shows how Excel reads each field. Comparing the 84 exports
+with the library's reading (7,936 cells, 2,853 formulas) agreed on every constant, number format, alignment,
+style, border, protection flag and name, apart from the format-text and whole-row rules now in §7 and §15.4.
+
+**Lines.** Each record is a line of Mac OS Roman text ending in a carriage return. Fields are separated by `;`,
+so a `;` inside a format, a text value or a formula is doubled. In `P`, `NN`, `NE` and `C` records a byte below
+32 or above 126 is escaped with ESC (`1B`) and:
+
+* `N` and a letter for the 11 characters of Excel's first table (PCOD 0 at `0x2CB6`): `a` for Æ, `q` for æ,
+  `i` for Ø, `y` for ø, `j` for Œ, `z` for œ, `{` for ß, `x` for †, `c` for ª, `k` for º and `` ` `` for Ω;
+* `N`, an accent letter and the base letter for an accented character (PCOD 0 at `0x2CA5`): `A` grave, `B`
+  acute, `C` circumflex, `D` tilde, `H` umlaut, `J` ring, `K` cedilla, so é is ESC `N B e`;
+* otherwise the byte's high nibble plus `0x20` and its low nibble plus `0x30`: £ (`A3`) is ESC `* 3`, and the
+  active-sheet document name `00` is ESC space `0`.
+
+**Records**, in the order Excel writes them:
+
+| Record | Written |
+|--------|---------|
+| `ID;PXL;N;E` | Always |
+| `P;P<format>` | One per number format: the 19 built-in, then the document's own, as format text (§7) |
+| `F;P<n>;D<code>10[;S…][;E][;G][;H];N<font> <size>` | The defaults: the format, alignment and style of the cell at the grid's margin corner (§6.1), or General with none when the grid has no margin. `E` if the front window shows formulas, `G` if it hides gridlines, `H` if it hides headings (§13); then the standard font number and size (§6). |
+| `B;Y<rows>;X<columns>` | The grid size (state words `0x014` and `0x274`), unless it has no rows |
+| `O[;P][;L][;M][;R][;E][;A<n> <change>]` | `P` protected, `L` A1 references, `M` manual calculation, `R` precision as displayed, `E` a macro sheet, `A` iteration with its count and maximum change (§6) |
+| `F;W<first> <last> <width>` | Each run of columns of one width in characters, except runs of 10: `(pixels + digit / 2 − 5) / digit`, rounded down, where `digit` is the width of 0 in the standard font, and 0 for a hidden column |
+| `F;…;C<column>` | A whole-column format: the margin row's cell in that column, for each column, when it differs from the defaults |
+| `F;…;R<row>` | A whole-row format: the margin column's cell in that row |
+| `NN;N<name>[;F][;G<key>];E<definition>` | Each name with a definition: `F` for a function macro, `G` and its shortcut key for a command macro |
+| `F;…` and `C;…` | For each cell, row by row: a format record if it differs from the defaults, then a cell record if it has a value, is unlocked or is hidden |
+| `NE;F<document>;S<source>;E<cells>` | After a formula that is only an external reference to absolute cells or a name (`=Budget!$A$1`, `=Budget!Rate`): the document, the cells (`R1C1:R2C2`) or name, and the cell or array range that uses it |
+| `E` | Always |
+
+**Formats.** An `F` record compares a cell with the defaults, not with the record before it. `P<n>` and the
+format code are written when the format or the alignment differs, `S` when the style differs (even to give an
+empty `S`). The code is `F` for a cell, `D` for the defaults, then a letter for the format and its decimals,
+then the alignment: `G` General, `L` left, `C` centre, `R` right, `X` fill. The format letter comes from its
+positive section (`72.20`): `%` for a number whose scaling is at least two more than its decimals, `$` for one
+whose first token after the header is the currency symbol, `I` for another with no decimals, `F` for another
+with decimals, `E` for a scientific section, and `G` for anything else, dates included. So `$#,##0.00` is
+`F$2`, `0.0%` `F%1` and `m/d/yy` `FG0`. The style letters are written in the order I, D, T, L, B, R: italic,
+bold, top, left, bottom and right borders.
+
+**Positions.** `Y` and `X` (1-based) are left out when they equal the last ones written. The `B` record is
+written the same way, so it sets them: in a one-column sheet the first cell has no `X`.
+
+**Cells.** `C`, the position, `N` if unlocked, `H` if hidden, then for a value `K` and:
+
+* an integer in decimal, a number as General shows it with room for 21 characters (§7; 1E+20 is
+  `100000000000000000000`);
+* text in quotes, with any quotes in it as they are;
+* TRUE, FALSE or an error name.
+
+A formula has `K` with its current value, then `E` and its R1C1 text. A cell of an array formula or table has
+instead (§12.6): at the anchor, `R` and `C` for the range's last cell, then `M` and the shared expression, or
+`T` and TABLE's inputs, such as `TR7C25,R5C24` (`#REF!` for a deleted input, nothing for a missing one). Every
+other cell of the range has `I` and the anchor's `R` and `C`. Like `Y` and `X`, `R` and `C` are left out when
+they repeat the last ones written.
+
+**R1C1 text.** The formula decompiler's R1C1 form:
+
+* An absolute row or column is `R5`, `C2`. A relative one is an offset with its sign, `R[+2]`, `C[-1]`, or `R`,
+  `C` alone for no offset.
+* An area that spans every column is rows, `R1:R16384` or `R[-20]:R[+16363]`, and one row alone is written once,
+  `R[-20]`; an area that spans every row is columns in the same way.
+* In a name definition a relative row or column is already an offset (§11). Excel 1.00 reads the row offset with
+  the relative-column flag as its sign bit, inverted: with an absolute column, `FF FF` read as −1 gives
+  `R[-1]C2`; with a relative column, −3 gives `R[+16381]C[-2]` (`Relative Names` sample; see Excel bugs).
+* References inside an external reference are written the same way: `CASHBUDGET!R33C2`.
+* Numbers, strings, names and functions are as in A1 style (§15.4).
+
+Cell type 7 (§9) has no case in the writer, as in every other cell switch.
+
+**Excel 1.5.** Its writer (`70.00`–`70.10`) is 1.00's with these changes:
+
+* Formats are written in 1.5's export form (§7): `P;P"$"#,##0\ ;;\("$"#,##0\)`, `P;Pm\/d\/yy`, `P;P@`.
+* When the grid has a margin (state word `0x020`, §6.1), every cell of the grid gets an `F` record, and each
+  has `P`, the format code and `S` whether or not they differ from the defaults: `F;P0;FG0G;S;Y1;X1`. The
+  `C` record that follows then needs no position. A grid in the count form gets `F` records as in 1.00.
+* The defaults record adds `L` and the gridline and heading colour, counting from 1, when the front window's
+  colour is not automatic (window state bytes 127 and 128, §13): `F;P0;DG0G10;L3;N3 10` for red.

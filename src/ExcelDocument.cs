@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using MacExcelReader.Internal;
 
@@ -551,6 +552,55 @@ public sealed class ExcelDocument
     }
 
     /// <summary>
+    /// Writes the document as SYLK, the text interchange format, byte for byte as Excel 1.00's Save As does with
+    /// the SYLK type (spec Appendix C): Mac OS Roman text with carriage returns, formulas in R1C1 style, and
+    /// characters outside printable ASCII escaped. Give the file Finder type <c>TEXT</c>.
+    /// </summary>
+    /// <remarks>Like <see cref="Save(string)"/>, this first sets the grid size from the cells (spec §6.1).</remarks>
+    /// <param name="output">Where to write.</param>
+    /// <param name="version">
+    /// The release whose export to match. Excel 1.00 to 1.06 (the default) write the same; Excel 1.5 writes format
+    /// text with every literal escaped, a whole format record for every cell, and the gridline colour.
+    /// </param>
+    public void ExportSylk(IBufferWriter<byte> output, ExcelVersion version = ExcelVersion.Excel100)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        using var writer = new SylkWriter(this, output, version);
+        writer.Write();
+    }
+
+    /// <summary>
+    /// Writes the document as SYLK to a stream (see <see cref="ExportSylk(IBufferWriter{byte}, ExcelVersion)"/>).
+    /// </summary>
+    public void ExportSylk(Stream stream, ExcelVersion version = ExcelVersion.Excel100)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        var buffer = new ArrayBufferWriter<byte>();
+        ExportSylk(buffer, version);
+        stream.Write(buffer.WrittenSpan);
+    }
+
+    /// <summary>
+    /// Writes the document as SYLK to a file (see <see cref="ExportSylk(IBufferWriter{byte}, ExcelVersion)"/>).
+    /// </summary>
+    public void ExportSylk(string path, ExcelVersion version = ExcelVersion.Excel100)
+    {
+        using var stream = File.Create(path);
+        ExportSylk(stream, version);
+    }
+
+    /// <summary>
+    /// Writes the document as SYLK to a stream asynchronously (see <see cref="ExportSylk(IBufferWriter{byte}, ExcelVersion)"/>).
+    /// </summary>
+    public async Task ExportSylkAsync(Stream stream, ExcelVersion version = ExcelVersion.Excel100, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        var buffer = new ArrayBufferWriter<byte>();
+        ExportSylk(buffer, version);
+        await stream.WriteAsync(buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Gets the Finder file type for this document.
     /// </summary>
     public string FinderType => Kind == ExcelDocumentKind.MacroSheet ? "XLPG" : "XLBN";
@@ -600,11 +650,9 @@ public sealed class ExcelDocument
     }
 
     /// <summary>
-    /// Serialises the document.
+    /// Sets the grid-size words (spec §6.1) from the cells, as Save and the SYLK export need them.
     /// </summary>
-    public byte[] ToArray() => Serialize().ToArray();
-
-    private BigEndianWriter Serialize()
+    internal void UpdateExtent()
     {
         int rows = Cells.ColumnCount == 0 ? 0 : Cells.RowCount;
         int columns = rows == 0 ? 0 : Cells.ColumnCount;
@@ -627,6 +675,18 @@ public sealed class ExcelDocument
         }
 
         State.SetExtent(rows, columns);
+    }
+
+    /// <summary>
+    /// Serialises the document.
+    /// </summary>
+    public byte[] ToArray() => Serialize().ToArray();
+
+    private BigEndianWriter Serialize()
+    {
+        UpdateExtent();
+        int rows = State.RowCount;
+        int columns = State.ColumnCountInTable;
         State.SetNameCounts(
             Names.Count(n => n.Definition.Length > 0 && (n.Flags & ExcelNameFlags.Reference) != 0),
             ExternalDocuments.FindIndex(d => d.Name == "\0") + 1);

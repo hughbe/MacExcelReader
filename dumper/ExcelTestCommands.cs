@@ -35,6 +35,10 @@ sealed class PackSettings : CommandSettings
     [Description("Leave each file open after saving it, so its windows can be looked at.")]
     public bool KeepOpen { get; init; }
 
+    [CommandOption("--save-as <TYPE>")]
+    [Description("Save each file's copy with SAVE.AS's type instead of the normal format: 2 SYLK, 3 text, 4 WKS (1 is normal). ")]
+    public int? SaveAsType { get; init; }
+
     [CommandOption("--no-probe")]
     [Description("Do not record GET.FORMULA for formula cells; only open and re-save.")]
     public bool NoProbe { get; init; }
@@ -234,7 +238,9 @@ sealed class PackCommand : Command<PackSettings>
                 block.Add((command.Trim(), "command " + name));
             }
 
-            block.Add(($"=SAVE.AS({Quote(settings.Volume + ":" + ExcelTest.SavedName(name))})", "save " + name));
+            block.Add(settings.SaveAsType is { } type
+                ? ($"=SAVE.AS({Quote(settings.Volume + ":" + ExcelTest.SavedName(name))},{type})", "save " + name)
+                : ($"=SAVE.AS({Quote(settings.Volume + ":" + ExcelTest.SavedName(name))})", "save " + name));
             if (!settings.KeepOpen)
             {
                 block.Add(("=CLOSE()", "close " + name));

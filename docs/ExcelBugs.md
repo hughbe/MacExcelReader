@@ -58,6 +58,20 @@ Seen in Excel 1.03. With a large macro sheet open (a 345-row Driver after recomp
 command OPEN returned `#VALUE!` for a small file, and opening it by hand reported "Out of memory". A macro
 that does not check OPEN's result carries on with the wrong window active.
 
+## SYLK export leaves a position out after the grid size (Excel 1.00)
+
+Excel 1.00's SYLK writer writes the grid size, `B;Y<rows>;X<columns>`, through the same code that places cells,
+so the first cell record leaves out a `Y` or `X` that equals the grid size: in a sheet one column wide, the first
+cell has no `X` (`Format Compiler`). A reader that does not treat `B` as setting the position puts that cell in
+the wrong column.
+
+## SYLK export misreads a name's relative row (Excel 1.00)
+
+In a name definition a relative row is a 14-bit offset (spec §11). Excel 1.00's R1C1 writer takes the sign from
+the relative-column flag instead of from the offset, so a name defined with a relative row and column three rows
+up is written `R[+16381]C[-2]` rather than `R[-3]C[-2]`, while one with an absolute column is right (`R[-1]C2`;
+`Relative Names` sample).
+
 ## ACTIVATE needs the window title (Excel 1.00)
 
 Excel 1.00 titles a window with its volume when the document is not on the startup disk (`Ws:F 01 saved`), so

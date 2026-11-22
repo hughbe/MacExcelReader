@@ -70,6 +70,8 @@ Options for `pack`:
 - `--each FORMULA`: a macro command to run on every file before it is saved. A file can also have its own
   commands in `FILE.commands` next to it, one per line.
 - `--end FORMULA`: a macro command to run after Driver has saved itself, for example before quitting.
+- `--save-as TYPE`: save each file with `SAVE.AS` type `TYPE` instead of Normal (2 SYLK, 3 Text, 4 WKS; spec
+  Appendix C). A 400K disk holds about 21 SYLK exports of the samples.
 
 If OPEN fails, for example because Excel is out of memory, Driver skips that file rather than run its commands on
 Driver itself.
@@ -190,6 +192,9 @@ Things to know:
 | Nov 2026 | 1.00, 1.5 | TEXT of every sample format for ten values; dates around 2040; `=""&A1` for General | The library matches every result after fixes: the zero section for values that round to zero, `-` before single-section dates, rounding to the second, the 2040 date limit, and General's 14 digits and range (spec §7). TEXT will not take General or fills. |
 | Nov 2026 | 1.00, 1.5 | FORMAT.NUMBER with the formats in `tests/Data/number-formats-1.0.txt` and `-1.5.txt` | Every one compiles to the bytes `ExcelNumberFormat.Parse` gives (spec §7) |
 | Nov 2026 | 1.00, 1.5 | Questions from comparing with BIFF2: TRUE, FALSE, errors and whole numbers typed with FORMULA; TRUE, FALSE and errors in array constants; DEFINE.NAME with relative references, used from other cells | Constants are cell type 4 (a Boolean-or-error flag and a value); integer cells are unsigned, so 40000 is an integer and −7 a number; array elements of types 4 and 16; a relative part of a name's reference is an offset from the cell using the name, as in BIFF2. Both releases save the same bytes (spec §9, §11, §12.5; `Constant Cells`, `Relative Names`, `Array Constant Types`) |
+| Nov 2026 | 1.00 | Every sample exported with `--save-as 2` (SYLK), compared with the library's reading, then with its own SYLK export; cell-type switches decompiled; whole rows and columns and long constants typed | Values, formats, styles, protection and names all agree. Found the 1.00 format-text rule (`;;` shows as `;`), whole-row and whole-column text, 14-digit constants and that cell type 7 is never written. `ExcelDocument.ExportSylk` now writes the same bytes for all 84 (`tests/Data/Sylk`) (spec §7, §9, §15.4, Appendix C) |
+| Nov 2026 | 1.5 | 94 samples exported with `--save-as 2 --excel 1.5` (all but `Worksheet1`, which failed to export), and 1.5's writer compared with 1.00's | Three changes: export-form format text with every literal escaped, a whole `F` record for every cell of a grid with a margin, and the gridline colour. `ExportSylk(…, ExcelVersion.Excel150)` writes the same bytes for all 94 (`tests/Data/Sylk 1.5`). A format of only a text section shows as `@` (spec §7, Appendix C) |
+| Nov 2026 | 1.00 | GET.FORMULA of nine long number constants | Constants show as General does: 14 digits, rounded, a tie rounding down; all nine match the library (spec §15.4) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

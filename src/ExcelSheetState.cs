@@ -223,6 +223,13 @@ public sealed class ExcelSheetState
         SetWord(ColumnWidthsOffset + 2 * column, width);
     }
 
+    // The extent words as stored (spec §6.1): rows and columns of cells, and whether a blank margin follows them.
+    internal int GridRows => GetWord(LastRowOffset);
+
+    internal int GridColumns => GetWord(LastColumnOffset);
+
+    internal bool HasGridMargin => GetWord(NonEmptyOffset) != 0;
+
     /// <summary>
     /// Gets the number of rows in the cell table.
     /// </summary>

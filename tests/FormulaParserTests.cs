@@ -168,11 +168,19 @@ public class FormulaParserTests
             string text = name.GetDefinitionText(document);
             var (parsed, arrays) = ExcelFormulaParser.ParseNameDefinition(text, document, SavedBy(bytes));
             Assert.True(
-                Normalize(name.Definition, true).AsSpan().SequenceEqual(Normalize(parsed, true)),
+                Normalize(name.Definition, true).AsSpan().SequenceEqual(Normalize(parsed, true))
+                    || DiffersOnlyInNumberPrecision(name.Definition, parsed, text, document),
                 $"{name.Name} = {text}: {Convert.ToHexString(name.Definition)} vs {Convert.ToHexString(parsed)}");
             Assert.Equal(name.ArrayConstants.Select(ClearLeftovers), arrays.Select(ClearLeftovers));
         }
     }
+
+    // Excel shows a number constant to 14 significant digits, so its text may not give back the stored double:
+    // CORRECT MACROS defines Tb as a time whose text is 0.71097222222222 (spec §15.4). Such a
+    // definition must still have the same length and decompile to the same text.
+    private static bool DiffersOnlyInNumberPrecision(byte[] expected, byte[] actual, string text, ExcelDocument document)
+        => expected.Length == actual.Length && text.Contains('.')
+            && FormulaDecompiler.Decompile(actual, [], document, fixupsInPlace: true) == text;
 
     // Clears the bytes of TRUE, FALSE and error elements that are left over from memory (spec §12.5).
     private static byte[] ClearLeftovers(byte[] block)
@@ -241,6 +249,37 @@ public class FormulaParserTests
     public void TextRoundTrips(string text)
     {
         Assert.Equal(text, ExcelFormula.Parse(text).ToText());
+    }
+
+    // Whole rows and columns, as Excel 1.00 shows and accepts them: a row range keeps its columns absolute, from
+    // A to IV, and a column range its rows, from 1 to 16384. Excel enters `=1:1:16384:16384` as two areas joined
+    // by a range operator inside a memory area, and shows each area that spans every column as rows.
+    [Theory]
+    [InlineData("=$1:$16384", "4500003FFF00FF")]
+    [InlineData("=1:2", "458000800100FF")]
+    [InlineData("=A:B", "4540007FFF0001")]
+    [InlineData("=1:1:16384:16384", "460000000F" + "258000800000FF" + "25BFFFBFFF00FF" + "11")]
+    public void ParsesWholeRowsAndColumns(string text, string expectedHex)
+    {
+        var formula = ExcelFormula.Parse(text);
+        Assert.Equal(expectedHex, Convert.ToHexString(formula.Expression));
+        Assert.Equal(text, formula.ToText());
+    }
+
+    [Theory]
+    [InlineData("=0.12345678901234567", "=0.12345678901235")]
+    [InlineData("=1/3", "=1/3")]
+    [InlineData("=0.1", "=0.1")]
+    public void NumberConstantsShowFourteenDigits(string text, string expected)
+    {
+        Assert.Equal(expected, ExcelFormula.Parse(text).ToText());
+    }
+
+    [Fact]
+    public void ParenthesesNeedAnOperatorBetweenThem()
+    {
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=(A1)(B1)"));
+        Assert.Equal("=(A1) (B1)", ExcelFormula.Parse("=(A1) (B1)").ToText());
     }
 
     [Fact]

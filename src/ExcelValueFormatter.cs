@@ -56,13 +56,47 @@ public static class ExcelValueFormatter
     public static string FormatGeneral(double value, int width)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
+        int size = GeneralSize(width);
+        char[]? rented = size > 256 ? System.Buffers.ArrayPool<char>.Shared.Rent(size) : null;
+        Span<char> buffer = rented ?? stackalloc char[256];
+        try
+        {
+            return new string(buffer[..FormatGeneral(value, width, buffer)]);
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                System.Buffers.ArrayPool<char>.Shared.Return(rented);
+            }
+        }
+    }
+
+    // The most characters General can write with room for `width`: a sign, the digits written out with a point
+    // and leading zeros, or a mantissa and an exponent.
+    internal static int GeneralSize(int width) => width + 32;
+
+    /// <summary>
+    /// Formats a number as <see cref="FormatGeneral(double, int)"/> does into <paramref name="destination"/>, which
+    /// must hold <see cref="GeneralSize"/> characters, and returns the number written.
+    /// </summary>
+    internal static int FormatGeneral(double value, int width, Span<char> destination)
+    {
         if (double.IsNaN(value) || double.IsInfinity(value))
         {
-            return value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            value.TryFormat(destination, out int special, default, System.Globalization.CultureInfo.InvariantCulture);
+            return special;
         }
 
-        string sign = value < 0 ? "-" : string.Empty;
-        var (digits, exponent) = Num2Str(Math.Abs(value));
+        int n = 0;
+        if (value < 0)
+        {
+            destination[n++] = '-';
+        }
+
+        Span<char> buffer = stackalloc char[15];
+        int length = Num2Str(Math.Abs(value), buffer, out int exponent);
+        Span<char> digits = buffer[..length];
 
         // exponent counts the digits before the point: the value is 0.digits × 10^exponent.
         bool narrow = exponent is >= -3 and < 5 && width < 5;
@@ -93,7 +127,7 @@ public static class ExcelValueFormatter
 
             if (keep < digits.Length)
             {
-                (digits, exponent) = Round(digits, exponent, keep);
+                digits = buffer[..Round(buffer, digits.Length, ref exponent, keep)];
                 if (exponent > width && !narrow)
                 {
                     scientific = true;
@@ -102,65 +136,96 @@ public static class ExcelValueFormatter
 
             if (!scientific)
             {
-                return sign + Fixed(digits, exponent);
+                return n + Fixed(digits, exponent, destination[n..]);
             }
         }
 
         int mantissa = width <= 6 ? 1 : width - 6 + (exponent is > -100 and < 100 ? 1 : 0);
         if (mantissa < digits.Length)
         {
-            (digits, exponent) = Round(digits, exponent, mantissa);
+            digits = buffer[..Round(buffer, digits.Length, ref exponent, mantissa)];
         }
 
         if (digits.Length == 0)
         {
-            digits = "0";
+            buffer[0] = '0';
+            digits = buffer[..1];
+        }
+
+        destination[n++] = digits[0];
+        if (digits.Length > 1)
+        {
+            destination[n++] = '.';
+            digits[1..].CopyTo(destination[n..]);
+            n += digits.Length - 1;
         }
 
         int shown = exponent - 1;
-        string body = digits.Length > 1 ? digits[0] + "." + digits[1..] : digits;
-        return $"{sign}{body}E{(shown < 0 ? '-' : '+')}{Math.Abs(shown).ToString(Math.Abs(shown) >= 100 ? "000" : "00", System.Globalization.CultureInfo.InvariantCulture)}";
+        destination[n++] = 'E';
+        destination[n++] = shown < 0 ? '-' : '+';
+        Math.Abs(shown).TryFormat(destination[n..], out int written, Math.Abs(shown) >= 100 ? "000" : "00", System.Globalization.CultureInfo.InvariantCulture);
+        return n + written;
     }
 
-    private static string Fixed(string digits, int exponent)
+    // The digits written out: 1234, 12.34 or 0.001234.
+    private static int Fixed(ReadOnlySpan<char> digits, int exponent, Span<char> destination)
     {
         if (digits.Length == 0)
         {
-            return "0";
+            destination[0] = '0';
+            return 1;
         }
 
         if (exponent >= digits.Length)
         {
-            return digits + new string('0', exponent - digits.Length);
+            digits.CopyTo(destination);
+            destination[digits.Length..exponent].Fill('0');
+            return exponent;
         }
 
-        return exponent > 0
-            ? digits[..exponent] + "." + digits[exponent..]
-            : "0." + new string('0', -exponent) + digits;
+        if (exponent > 0)
+        {
+            digits[..exponent].CopyTo(destination);
+            destination[exponent] = '.';
+            digits[exponent..].CopyTo(destination[(exponent + 1)..]);
+            return digits.Length + 1;
+        }
+
+        destination[0] = '0';
+        destination[1] = '.';
+        destination.Slice(2, -exponent).Fill('0');
+        digits.CopyTo(destination[(2 - exponent)..]);
+        return 2 - exponent + digits.Length;
     }
 
     // Excel's decimal conversion: at most 14 significant digits, trailing zeros dropped, and the exponent that makes
     // the value 0.digits × 10^exponent. A tie at the 14th digit rounds down (99999999999999.5 gives 99999999999999).
-    private static (string Digits, int Exponent) Num2Str(double magnitude)
+    // Writes the digits to `result` and returns how many there are.
+    private static int Num2Str(double magnitude, Span<char> result, out int exponent)
     {
+        exponent = 1;
         if (magnitude == 0)
         {
-            return (string.Empty, 1);
+            return 0;
         }
 
-        // .NET gives the first 41 significant digits correctly rounded: d.dddd…E±x. They settle the 14 Excel keeps,
-        // unless the 15th starts an apparent exact tie, 5 and then zeros, which the exact conversion has to decide.
-        Span<char> text = stackalloc char[64];
-        magnitude.TryFormat(text, out int length, "E40", System.Globalization.CultureInfo.InvariantCulture);
-        Span<char> digits = stackalloc char[41];
+        // .NET gives the first 17 significant digits correctly rounded: d.dddd…E±x. They settle the 14 Excel keeps,
+        // unless the 15th starts an apparent tie, 5 and then zeros, which the exact conversion has to decide. (A
+        // value just below a tie rounds up to one at 17 digits, so it takes the exact path too.)
+        Span<char> text = stackalloc char[32];
+        magnitude.TryFormat(text, out int length, "E16", System.Globalization.CultureInfo.InvariantCulture);
+        Span<char> digits = stackalloc char[17];
         digits[0] = text[0];
-        text.Slice(2, 40).CopyTo(digits[1..]);
+        text.Slice(2, 16).CopyTo(digits[1..]);
         if (digits[14] == '5' && !digits[15..].ContainsAnyExcept('0'))
         {
-            return Num2StrExact(magnitude);
+            var (exact, exactExponent) = Num2StrExact(magnitude);
+            exact.CopyTo(result);
+            exponent = exactExponent;
+            return exact.Length;
         }
 
-        int exponent = int.Parse(text[43..length], System.Globalization.CultureInfo.InvariantCulture) + 1;
+        exponent = int.Parse(text[19..length], System.Globalization.CultureInfo.InvariantCulture) + 1;
         long kept = long.Parse(digits[..14], System.Globalization.CultureInfo.InvariantCulture);
         if (digits[14] >= '5')
         {
@@ -172,9 +237,8 @@ public static class ExcelValueFormatter
             }
         }
 
-        Span<char> result = stackalloc char[14];
         kept.TryFormat(result, out _, default, System.Globalization.CultureInfo.InvariantCulture);
-        return (new string(result.TrimEnd('0')), exponent);
+        return result[..14].TrimEnd('0').Length;
     }
 
     // The same conversion done exactly, for a value whose 15th digit may be an exact tie.
@@ -237,32 +301,42 @@ public static class ExcelValueFormatter
         return (digits.TrimEnd('0'), exponent);
     }
 
-    // Rounds a digit string to the given number of significant digits, half up, as Excel's General does.
-    private static (string Digits, int Exponent) Round(string digits, int exponent, int keep)
+    // Rounds the digits in `digits` to `keep` significant digits, half up, as Excel's General does, and returns how
+    // many are left once trailing zeros are dropped.
+    private static int Round(Span<char> digits, int length, ref int exponent, int keep)
     {
         if (keep <= 0)
         {
-            return keep == 0 && digits.Length > 0 && digits[0] >= '5' ? ("1", exponent + 1) : (string.Empty, 1);
+            if (keep == 0 && length > 0 && digits[0] >= '5')
+            {
+                digits[0] = '1';
+                exponent++;
+                return 1;
+            }
+
+            exponent = 1;
+            return 0;
         }
 
-        var chars = digits[..keep].ToCharArray();
         if (digits[keep] >= '5')
         {
             int i = keep - 1;
-            while (i >= 0 && chars[i] == '9')
+            while (i >= 0 && digits[i] == '9')
             {
-                chars[i--] = '0';
+                digits[i--] = '0';
             }
 
             if (i < 0)
             {
-                return ("1", exponent + 1);
+                digits[0] = '1';
+                exponent++;
+                return 1;
             }
 
-            chars[i]++;
+            digits[i]++;
         }
 
-        return (new string(chars).TrimEnd('0'), exponent);
+        return digits[..keep].TrimEnd('0').Length;
     }
 
     /// <summary>
