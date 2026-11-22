@@ -230,4 +230,18 @@ public class FormattingTests
 
         Assert.All(document.NumberFormats, f => Assert.False(string.IsNullOrEmpty(f.ToText())));
     }
+
+    [Theory]
+    [InlineData(1234567, 5, "1E+06")]          // too many integer digits: one mantissa digit up to 6 characters
+    [InlineData(1234567, 9, "1234567")]
+    [InlineData(123.456, 5, "123.5")]          // rounded to the digits that fit, less one for the point
+    [InlineData(0.5, 3, "0.5")]
+    [InlineData(0.000012345, 8, "1.23E-05")]   // a tiny number that does not fit: 8 - 6 + 1 mantissa digits
+    [InlineData(0.000012345, 12, "0.000012345")]
+    [InlineData(-2.5, 3, "-2.5")]              // the minus sign is not counted
+    public void General_FitsTheColumn(double value, int width, string expected)
+    {
+        // Excel 1.00's General (19.0c): spec §7.
+        Assert.Equal(expected, ExcelValueFormatter.FormatGeneral(value, width));
+    }
 }

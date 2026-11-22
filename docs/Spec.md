@@ -526,11 +526,37 @@ these rules (`TEXT Formats 1`, `TEXT Formats 2`, `TEXT Date Limits` in Excel 1.0
 * Strings and literals show without their quotes, and digits fill the placeholders around literals:
   1234.5 in `00-00-000` is `00-01-235`.
 
-TEXT will not take `General` or a fill (`*-0`). General is how Excel turns a number into text (`=""&A1`, in
-1.00 and 1.5 alike, `General As Text`): 14 significant digits with trailing zeros dropped, written out in full
-from 1E-18 to below 1E+20 (`0.00000000015`, `99900000000000000000`) and with an exponent outside that
-(`1E+20`, `1.2345678901234E+20`). The exact half 99999999999999.5 gives `99999999999999` **(unknown why)**. On
-screen, General also fits the number into its column.
+Excel 1.00's display routine (`19.0d`, native code) works through the section's tokens one by one, which
+gives the rest:
+
+* Number header `03`: the value goes through Excel's decimal conversion (at most 14 significant digits, a tie at
+  the 14th rounding down), `c − b` is added to its decimal exponent (two per `%`, minus three per trailing
+  comma), and the digits are rounded to the positions there are.
+* Integer digit runs: digits that do not fit go before the first placeholder; a position with no digit shows
+  `0` for `06` and nothing for `04`; with `07`, a comma follows every third position from the right that shows
+  something.
+* Decimal digit runs: leading zeros always show, even for `04`; after them the significant digits, then `0`s
+  for `06` only, so `04` drops trailing zeros.
+* Exponent `1D`/`1E`: `+` (for `1D`) or `-`, then the exponent's digits in the next run's positions.
+* `22` writes `$`; `0A` repeats its character to fill what the column has left; `01` inside a section gets
+  General with the width the rest of the section leaves.
+* Date and time tokens go to `09.1a`, through the date conversion of `09.1b`, which fails past 2^32 − 1 seconds.
+  `mmm` and `ddd` are the first three letters of the name, and 12-hour times show 0 as 12.
+
+A cell whose formatted text is wider than its column shows as many `#` as fit instead (`19.0e`).
+
+TEXT will not take `General` or a fill (`*-0`). General (`19.0c`) fits the number into the characters the column
+has room for, W, not counting a minus sign:
+
+* It is written with an exponent when it has more integer digits than W, or when it is below 1E-3 and its digits
+  do not fit, but not in a column narrower than 5 characters for numbers from 1E-3 to below 1E+4.
+* Written out, it is rounded half up to W digits, less one for a point and one more for a leading `0.`.
+* With an exponent, the mantissa has 1 digit up to W = 6 and W − 6 digits beyond that (one more when the
+  exponent has two digits), and the exponent at least two digits: `1E+06`, `1.23E-05`.
+
+Turning a number into text (`=""&A1`, in 1.00 and 1.5 alike, `General As Text`) is General with W = 20: 14
+significant digits, written out in full from 1E-18 to below 1E+20 (`0.00000000015`, `99900000000000000000`)
+and with an exponent outside that (`1E+20`, `1.2345678901234E+20`).
 
 ---
 

@@ -47,35 +47,193 @@ public static class ExcelValueFormatter
     /// <summary>
     /// Formats a number the way the General format does when Excel turns a number into text (as <c>""&amp;A1</c>
     /// does): rounded to 14 significant digits, written out in full from 1E-18 up to just below 1E+20 and with an
-    /// exponent outside that range (spec §7). On screen Excel also fits General into the column, which this does
-    /// not.
+    /// exponent outside that range (spec §7). This is General with room for 20 characters.
     /// </summary>
-    public static string FormatGeneral(double value)
+    public static string FormatGeneral(double value) => FormatGeneral(value, 20);
+
+    /// <summary>
+    /// Formats a number the way the General format shows it in a column with room for <paramref name="width"/>
+    /// characters, not counting a minus sign (spec §7, <c>19.0c</c> in Excel 1.00): as many digits as fit,
+    /// switching to an exponent when the number does not fit written out.
+    /// </summary>
+    public static string FormatGeneral(double value, int width)
     {
-        if (value == 0 || double.IsNaN(value) || double.IsInfinity(value))
+        ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
+        if (double.IsNaN(value) || double.IsInfinity(value))
         {
-            return value == 0 ? "0" : value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        // Thirteen decimals in scientific form is 14 significant digits.
-        string scientific = Math.Abs(value).ToString("E13", System.Globalization.CultureInfo.InvariantCulture);
-        string digits = (scientific[0] + scientific[2..15]).TrimEnd('0');
-        int exponent = int.Parse(scientific[16..], System.Globalization.CultureInfo.InvariantCulture);
         string sign = value < 0 ? "-" : string.Empty;
-        if (exponent is < -18 or > 19)
+        var (digits, exponent) = Num2Str(Math.Abs(value));
+
+        // exponent counts the digits before the point: the value is 0.digits × 10^exponent.
+        bool narrow = exponent is >= -3 and < 5 && width < 5;
+        bool scientific;
+        if (exponent > width)
         {
-            string mantissa = digits.Length > 1 ? digits[0] + "." + digits[1..] : digits;
-            return $"{sign}{mantissa}E{(exponent < 0 ? '-' : '+')}{Math.Abs(exponent)}";
+            scientific = !narrow;
+        }
+        else
+        {
+            int room = width + exponent - 2;
+            scientific = room <= 0 || (exponent < -3 && room < digits.Length)
+                ? width > 4 && !narrow
+                : false;
         }
 
-        if (exponent < 0)
+        if (!scientific)
         {
-            return $"{sign}0.{new string('0', -exponent - 1)}{digits}";
+            int keep = exponent == 0 && width == 1 ? 0 : width;
+            if (!(exponent == 0 && width == 1) && exponent < keep)
+            {
+                keep--;
+                if (exponent <= 0)
+                {
+                    keep += exponent - 1;
+                }
+            }
+
+            if (keep < digits.Length)
+            {
+                (digits, exponent) = Round(digits, exponent, keep);
+                if (exponent > width && !narrow)
+                {
+                    scientific = true;
+                }
+            }
+
+            if (!scientific)
+            {
+                return sign + Fixed(digits, exponent);
+            }
         }
 
-        return digits.Length <= exponent + 1
-            ? sign + digits + new string('0', exponent + 1 - digits.Length)
-            : $"{sign}{digits[..(exponent + 1)]}.{digits[(exponent + 1)..]}";
+        int mantissa = width <= 6 ? 1 : width - 6 + (exponent is > -100 and < 100 ? 1 : 0);
+        if (mantissa < digits.Length)
+        {
+            (digits, exponent) = Round(digits, exponent, mantissa);
+        }
+
+        if (digits.Length == 0)
+        {
+            digits = "0";
+        }
+
+        int shown = exponent - 1;
+        string body = digits.Length > 1 ? digits[0] + "." + digits[1..] : digits;
+        return $"{sign}{body}E{(shown < 0 ? '-' : '+')}{Math.Abs(shown).ToString(Math.Abs(shown) >= 100 ? "000" : "00", System.Globalization.CultureInfo.InvariantCulture)}";
+    }
+
+    private static string Fixed(string digits, int exponent)
+    {
+        if (digits.Length == 0)
+        {
+            return "0";
+        }
+
+        if (exponent >= digits.Length)
+        {
+            return digits + new string('0', exponent - digits.Length);
+        }
+
+        return exponent > 0
+            ? digits[..exponent] + "." + digits[exponent..]
+            : "0." + new string('0', -exponent) + digits;
+    }
+
+    // Excel's decimal conversion: at most 14 significant digits, trailing zeros dropped, and the exponent that makes
+    // the value 0.digits × 10^exponent. A tie at the 14th digit rounds down (99999999999999.5 gives 99999999999999).
+    private static (string Digits, int Exponent) Num2Str(double magnitude)
+    {
+        if (magnitude == 0)
+        {
+            return (string.Empty, 1);
+        }
+
+        long bits = BitConverter.DoubleToInt64Bits(magnitude);
+        int binaryExponent = (int)((bits >> 52) & 0x7FF);
+        long mantissa = bits & 0xFFFFFFFFFFFFFL;
+        if (binaryExponent == 0)
+        {
+            binaryExponent = 1;
+        }
+        else
+        {
+            mantissa |= 1L << 52;
+        }
+
+        binaryExponent -= 1075;
+        System.Numerics.BigInteger numerator = mantissa, denominator = 1;
+        if (binaryExponent >= 0)
+        {
+            numerator <<= binaryExponent;
+        }
+        else
+        {
+            denominator <<= -binaryExponent;
+        }
+
+        // The exact decimal digits: scale so that the quotient has at least 15 digits.
+        int scale = 0;
+        while (numerator / denominator < System.Numerics.BigInteger.Pow(10, 14))
+        {
+            numerator *= 10;
+            scale++;
+        }
+
+        while (numerator / denominator >= System.Numerics.BigInteger.Pow(10, 15))
+        {
+            denominator *= 10;
+            scale--;
+        }
+
+        var quotient = System.Numerics.BigInteger.DivRem(numerator, denominator, out var remainder);
+        string fifteen = quotient.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        int exponent = 15 - scale;
+        var kept = System.Numerics.BigInteger.Parse(fifteen[..14], System.Globalization.CultureInfo.InvariantCulture);
+        int next = fifteen[14] - '0';
+        if (next > 5 || (next == 5 && !remainder.IsZero))
+        {
+            kept++;
+        }
+
+        string digits = kept.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (digits.Length > 14)
+        {
+            digits = digits[..14];
+            exponent++;
+        }
+
+        return (digits.TrimEnd('0'), exponent);
+    }
+
+    // Rounds a digit string to the given number of significant digits, half up, as Excel's General does.
+    private static (string Digits, int Exponent) Round(string digits, int exponent, int keep)
+    {
+        if (keep <= 0)
+        {
+            return keep == 0 && digits.Length > 0 && digits[0] >= '5' ? ("1", exponent + 1) : (string.Empty, 1);
+        }
+
+        var chars = digits[..keep].ToCharArray();
+        if (digits[keep] >= '5')
+        {
+            int i = keep - 1;
+            while (i >= 0 && chars[i] == '9')
+            {
+                chars[i--] = '0';
+            }
+
+            if (i < 0)
+            {
+                return ("1", exponent + 1);
+            }
+
+            chars[i]++;
+        }
+
+        return (new string(chars).TrimEnd('0'), exponent);
     }
 
     /// <summary>
