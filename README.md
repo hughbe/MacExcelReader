@@ -168,6 +168,19 @@ dotnet test
 
 The tests run over the sample documents in `tests/Samples`, grouped by the release that saved them: `Excel 1.00` (the 1.00 data disk, whose Expenses, REPLACE, COMMANDS and DB.FORM are identical to the 1.03 disk's), `Excel 1.01` (files the French 1.01 saved in experiments), `Excel 1.03` (Worksheet1), `Excel 1.04` and `Excel 1.06` (files those releases saved in experiments) and `Excel 1.5` (the 1.5 sampler, including two charts). Each folder also holds the files that release saved in experiments, named for what they show; `tests/ExperimentTests.cs` checks what each one showed.
 
+### Releasing
+
+CI packs the library on every run (the `package` artifact). To publish a version to NuGet, push a tag:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The Release workflow builds and tests the tagged commit, packs it with the tag as the version (`v1.0.0` gives
+1.0.0) and pushes the package and its symbols to nuget.org. It needs a NuGet API key in the repository secret
+`NUGET_API_KEY`.
+
 ---
 
 ## License
