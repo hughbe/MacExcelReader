@@ -71,7 +71,7 @@ public readonly struct ExcelCellRef
         switch (Type)
         {
             case ExcelCellType.Integer:
-                value = unchecked((short)_word0);
+                value = _word0;
                 return true;
             case ExcelCellType.Number:
             case ExcelCellType.NumericFormula:

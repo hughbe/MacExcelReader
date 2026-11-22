@@ -103,11 +103,14 @@ record to find them (OOo §4.7).
 | Excel 1.x type (§9) | Value | BIFF2 record |
 |---|---|---|
 | 0 Empty | Formatting only | BLANK (`0x01`) |
-| 1 Integer | Signed 16-bit, in the entry itself | INTEGER (`0x02`), which is **unsigned** 16-bit |
+| 1 Integer | Unsigned 16-bit, in the entry itself | INTEGER (`0x02`), also unsigned 16-bit |
 | 2 Number | A double, in section 5 | NUMBER (`0x03`) |
 | 3 Text | A Pascal string, in section 5 | LABEL (`0x04`) |
 | 5, 6 Formula | A formula record, in section 5 | FORMULA (`0x06`), with STRING (`0x07`) for a text result |
-| — | — | BOOLERR (`0x05`): a constant TRUE, FALSE or error. How Excel 1.x stores one is not known: its type 4 occurs in no sample. |
+
+Excel 1.x stores a typed whole number from 0 to 65535 as an integer and any other number, negative ones
+included, as a number (§9).
+| 4 TRUE, FALSE or error | A flag byte (0 TRUE or FALSE, 1 error) and the value or error code, in the entry itself | BOOLERR (`0x05`): the value or error code, then the same flag |
 
 **Formula results.** Both formats keep a formula's last value in 8 bytes, and both mark a value that is not a
 number by setting the high-order word of the double to `0xFFFF`, which makes it a NaN. In Excel 1.x that word
@@ -172,9 +175,9 @@ token (§12.5). BIFF2 puts the name index in the token's first two bytes (OOo §
 Excel 1.x does inside name definitions (§11). BIFF also appends data after the token array, for the same two
 tokens and in the same formats (OOo §3.1.6):
 
-* an array constant's elements: a column count byte (0 meaning 256), a row count word, then typed values, 1
-  for a number and 2 for a string (§12.5, OOo §2.5.8). BIFF also has types 0, 4 and 16 (empty, Boolean,
-  error), which no Excel 1.x file contains;
+* an array constant's elements: a column count byte (0 meaning 256), a row count word, then typed values: 1
+  for a number, 2 for a string, 4 for TRUE or FALSE and 16 for an error, each value in the same place (§12.5,
+  OOo §2.5.8). BIFF also has type 0, for an empty element, which Excel 1.x has no way to write;
 * a memory area's areas: a count word, then 6-byte ranges of first row, last row, first column and last
   column (§12.5, OOo §2.5.15).
 
@@ -193,9 +196,10 @@ and in BIFF, and 58 in an Excel 1.x file. Appendix A of the spec lists every Exc
 **Dialog-box form.** Bit 7 of a variable-count call's argument count marks a command's dialog-box form, as in
 `RUN?()`, in Excel 1.x (§15.2) and in BIFF4 and later (OOo §3.7.2).
 
-**References in names.** BIFF2 stores relative references in names as signed offsets in tRefN and tAreaN
-(“method [B]”, OOo §3.3.1). Excel 1.x uses the same token numbers in definitions; every name in the samples
-refers to absolute cells, so whether their relative parts are offsets is not known.
+**References in names.** Both store a relative row or column in a name as a signed offset from the cell that
+uses the name, in tRefN and tAreaN (“method [B]”, OOo §3.3.1), and an absolute one as an index (§11). A name
+defined as `=R[-3]C[-2]` holds row word `0xFFFD` and column `0xFE` in both (Excel 1.x writes `2C FF FD FE`;
+BIFF2 swaps the bytes of the word).
 
 ## 7. Array formulas and tables
 
@@ -318,8 +322,8 @@ A reader of either format that wants to write the other needs, beyond moving fie
 * byte order: swap every word, long and double;
 * strings: Mac Roman, which BIFF2 supports with CODEPAGE `0x8000` (Apple Roman);
 * dates: DATEMODE 1;
-* cells: walk the dense grid, write a record for each cell that is not an unformatted blank, and turn negative
-  Excel 1.x integers into NUMBER records;
+* cells: walk the dense grid and write a record for each cell that is not an unformatted blank: INTEGER for
+  type 1, BOOLERR for type 4;
 * formatting: four FONT records, the sheet's font plain, bold, italic and bold italic, which is exactly what
   the 2-bit font index holds, and an XF for each combination used;
 * number formats: decompile each user format to text and write all the built-in ones first;

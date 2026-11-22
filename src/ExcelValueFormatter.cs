@@ -278,6 +278,17 @@ public static class ExcelValueFormatter
             return format.Format(number, columns);
         }
 
+        // TRUE, FALSE and errors show as they are, whatever the cell's format.
+        if (cell.Type == ExcelCellType.BooleanOrError)
+        {
+            return cell.IsError ? ExcelFormulaResult.ErrorText(cell.ErrorCode) : cell.BooleanValue ? "TRUE" : "FALSE";
+        }
+
+        if (cell.Formula?.Result is { Kind: ExcelFormulaResultKind.Error } result)
+        {
+            return ExcelFormulaResult.ErrorText(result.ErrorCode);
+        }
+
         return cell.Value switch
         {
             bool b => b ? "TRUE" : "FALSE",

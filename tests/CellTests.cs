@@ -16,8 +16,12 @@ public class CellTests
 
     [Theory]
     [InlineData(5.0, ExcelCellType.Integer)]
-    [InlineData(-32768.0, ExcelCellType.Integer)]
-    [InlineData(32768.0, ExcelCellType.Number)]
+    [InlineData(0.0, ExcelCellType.Integer)]
+    [InlineData(65535.0, ExcelCellType.Integer)]
+    [InlineData(40000.0, ExcelCellType.Integer)]
+    [InlineData(65536.0, ExcelCellType.Number)]
+    [InlineData(-7.0, ExcelCellType.Number)]
+    [InlineData(-32768.0, ExcelCellType.Number)]
     [InlineData(2.5, ExcelCellType.Number)]
     [InlineData(-0.0, ExcelCellType.Number)]
     public void SetValue_ChoosesCompactForm(double value, ExcelCellType expected)
@@ -230,5 +234,33 @@ public class CellTests
         bytes[layout.GetSectionOffset(ExcelSection.CellData)] = 255;
         var corrupt = ExcelDocument.Read(bytes);
         Assert.Throws<ExcelFormatException>(() => corrupt.Cells["A1"].TextValue);
+    }
+
+    [Fact]
+    public void BooleanAndErrorCells_RoundTrip()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.Cells["A1"].SetBoolean(true);
+        document.Cells["A2"].SetBoolean(false);
+        document.Cells["A3"].SetError(42);
+        Assert.Throws<ArgumentOutOfRangeException>(() => document.Cells["A4"].SetError(1));
+
+        var reread = ExcelDocument.Read(document.ToArray());
+        Assert.Equal(true, reread.Cells["A1"].Value);
+        Assert.False(reread.Cells["A2"].BooleanValue);
+        Assert.Equal(42, reread.Cells["A3"].ErrorCode);
+        Assert.Equal("#N/A", ExcelValueFormatter.FormatCell(reread.Cells["A3"], reread));
+        Assert.Throws<InvalidOperationException>(() => reread.Cells["A3"].BooleanValue);
+    }
+
+    [Fact]
+    public void RelativeNameDefinition_IsRelativeToTheGivenCell()
+    {
+        // The usage guide's example: =B1 defined with B2 active is the cell above wherever it is used.
+        var document = ExcelDocument.CreateWorksheet();
+        var above = new ExcelDefinedName("Above");
+        above.SetDefinition("=B1", new ExcelCellAddress(1, 1), document);
+        Assert.Equal([0x2C, 0xFF, 0xFF, 0x00], above.Definition);   // row −1 and column 0, both relative
+        Assert.Equal("D9", above.GetDefinitionText(document, new ExcelCellAddress(9, 3)));
     }
 }

@@ -624,16 +624,7 @@ public static class ExcelFormulaParser
 
                 case TokenKind.Error:
                     Advance();
-                    return new ErrorNode(token.Position, token.Text.ToUpperInvariant() switch
-                    {
-                        "#NULL!" => 0,
-                        "#DIV/0!" => 7,
-                        "#VALUE!" => 15,
-                        "#REF!" => 23,
-                        "#NAME?" => 29,
-                        "#NUM!" => 36,
-                        _ => 42,
-                    });
+                    return new ErrorNode(token.Position, ErrorCode(token.Text));
                 case TokenKind.OpenParen:
                 {
                     Advance();
@@ -675,8 +666,22 @@ public static class ExcelFormulaParser
             throw new ExcelFormulaSyntaxException(token.Kind == TokenKind.End ? "Unexpected end of formula" : $"Unexpected '{token.Text}'", token.Position);
         }
 
-        // {1,2;3,4}: rows separated by ';', columns by ','. Elements are numbers (optionally negative) or strings,
-        // the two element types the samples show (spec §12.5).
+        private static byte ErrorCode(string text) => text.ToUpperInvariant() switch
+        {
+            "#NULL!" => 0,
+            "#DIV/0!" => 7,
+            "#VALUE!" => 15,
+            "#REF!" => 23,
+            "#NAME?" => 29,
+            "#NUM!" => 36,
+            _ => 42,
+        };
+
+        // An error element of an array constant.
+        private sealed record ArrayError(byte Code);
+
+        // {1,2;3,4}: rows separated by ';', columns by ','. Elements are numbers (optionally negative), strings,
+        // TRUE, FALSE and errors (spec §12.5).
         private ArrayNode ParseArrayConstant()
         {
             var start = _current;
@@ -706,9 +711,19 @@ public static class ExcelFormulaParser
 
                     row.Add(bytes);
                 }
+                else if (_current.Kind == TokenKind.Identifier && !negative
+                    && (string.Equals(_current.Text, "TRUE", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(_current.Text, "FALSE", StringComparison.OrdinalIgnoreCase)))
+                {
+                    row.Add(string.Equals(_current.Text, "TRUE", StringComparison.OrdinalIgnoreCase));
+                }
+                else if (_current.Kind == TokenKind.Error && !negative)
+                {
+                    row.Add(new ArrayError(ErrorCode(_current.Text)));
+                }
                 else
                 {
-                    throw new ExcelFormulaSyntaxException("An array constant can hold only numbers and strings", _current.Position);
+                    throw new ExcelFormulaSyntaxException("An array constant can hold only numbers, strings, TRUE, FALSE and errors", _current.Position);
                 }
 
                 Advance();
@@ -742,7 +757,8 @@ public static class ExcelFormulaParser
             }
 
             // The data block (spec §12.5): column count (0 = 256), row count, then elements: type 1 and a double,
-            // or type 2 and a Pascal string.
+            // type 2 and a Pascal string, or type 4 (TRUE, FALSE) or 16 (an error) and 8 bytes holding the value in
+            // the second.
             var block = new List<byte> { (byte)columns, (byte)(rows.Count >> 8), (byte)rows.Count };
             foreach (var r in rows)
             {
@@ -755,12 +771,18 @@ public static class ExcelFormulaParser
                         BinaryPrimitives.WriteDoubleBigEndian(bytes, number);
                         block.AddRange(bytes);
                     }
-                    else
+                    else if (element is byte[] text)
                     {
-                        var text = (byte[])element;
                         block.Add(2);
                         block.Add((byte)text.Length);
                         block.AddRange(text);
+                    }
+                    else
+                    {
+                        block.Add(element is bool ? (byte)4 : (byte)16);
+                        block.Add(0);
+                        block.Add(element is bool value ? (byte)(value ? 1 : 0) : ((ArrayError)element).Code);
+                        block.AddRange(new byte[6]);
                     }
                 }
             }

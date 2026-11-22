@@ -18,7 +18,7 @@ charts. It was reverse-engineered from the applications' code and checked agains
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 80 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 85 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
@@ -680,12 +680,17 @@ Cell types:
 | Type | Meaning | word 0 / data |
 |-----:|---------|---------------|
 | 0 | Empty (formatting only) | word 0 is a pointer left over from memory; ignore it |
-| 1 | Integer | word 0 = signed 16-bit value, stored inline. Bits 15–12 of word 1 are not meaningful (always `0xD` in the sample). |
+| 1 | Integer | word 0 = **unsigned** 16-bit value, 0–65535, stored inline. Bits 15–12 of word 1 are not meaningful (`0xD` in one sample, 1 in others). |
 | 2 | Number | 8-byte double in cell data |
 | 3 | Text | Pascal string in cell data |
-| 4 | Not seen in any sample | No data in cell data |
+| 4 | TRUE, FALSE or an error | word 0: high byte 0 for TRUE or FALSE, 1 for an error; low byte the value (1 TRUE, 0 FALSE) or the error code (§12.4). No cell data; bits 15–12 of word 1 are not meaningful. |
 | 5 | Formula, numeric result | Formula record in cell data (§12) |
 | 6 | Formula, non-numeric result | Formula record in cell data (§12) |
+
+Excel picks the type when a constant is typed or entered with FORMULA (Excel 1.00 and 1.5 alike, `Constant
+Cells` and `Constant Cells 1.5` samples). A whole number from 0 to 65535 is an integer: 40000 is `9C 40`, and
+Excel shows it as 40000. Any other number, −7 included, is type 2. TRUE is `00 01`, FALSE `00 00` and `#REF!`
+`01 17`, all type 4: the same parts as BIFF2's BOOLERR record, a value and a Boolean-or-error flag.
 
 For types 2, 3, 5 and 6 the cell's data is at
 
@@ -768,6 +773,14 @@ Definitions differ from cell formulas:
   holds the index in that document's list in section 3 (§10).
 * A definition can be a union written without parentheses, such as `=$C$9,$E$9,$C$10` (`INVOICE TEMPLATE`).
 * Token classes follow the rules for array formulas (§15.4).
+* A **relative** row or column in a cell or area reference (`2C`, `2D`) is an **offset** from the cell the name
+  is used in, not a cell index: 14-bit two's complement in the row word, a signed byte for the column. An
+  absolute row or column is an index, as in a cell formula. DEFINE.NAME takes the offsets from the active cell.
+  With D5 active, `DEFINE.NAME("Up3","=R[-3]C[-2]")` stores `2C FF FD FE` (row −3 and column −2, both
+  relative), and `=Up3` gives B2 in D5 and B3 in D6; `"=R[-1]C2"` stores `2C BF FF 01` and `"=R5C[-2]"` stores
+  `2C 40 04 FE` (Excel 1.00 and 1.5, `Relative Names` and `Relative Names 1.5` samples). So a definition
+  written as `=B2` means different cells for different active cells; one whose references are all absolute, as
+  in every one of Microsoft's samples, means the same cells everywhere.
 
 A new worksheet always has five names with empty definitions: `Criteria`, `Database`, `Print_Area`,
 `Print_Titles`, `Recorder`. From 1.01 on they are items 30–34 of the string list `STR#` 256, so a translated
@@ -853,9 +866,10 @@ appends replacements, in token order:
 | `0x26` memory area | word `n`, then `n` × 6-byte areas (first row word, last row word, first column byte, last column byte) | The areas the wrapped union or intersection stands for, as the compiler worked them out (§15.4). |
 
 Array block: byte column count (0 means 256), word row count, then the `rows × cols` elements row by row, each
-a type byte and a value: type 1 is a number (a double) and type 2 a string (a Pascal string). Readers treat
-any other type as 8 bytes; no other type occurs. The same blocks hold the array constants of name definitions
-(§11). For example, in `MATRIX`, `{0,1,3;2,-1,2;-3,2,-2}` is `09 00 01` and nine type-1 elements.
+a type byte and a value: type 1 is a number (a double), type 2 a string (a Pascal string), type 4 TRUE or
+FALSE and type 16 an error. Types 4 and 16 have 8 bytes: 0, then the value (1 TRUE, 0 FALSE) or the error code
+(§12.4), then six bytes left over from memory (`Constant Cells`, `Array Constant Types`). These are BIFF's
+element types and values. The same blocks hold the array constants of name definitions (§11). For example, in `MATRIX`, `{0,1,3;2,-1,2;-3,2,-2}` is `09 00 01` and nine type-1 elements.
 
 ### 12.6 Array formulas and tables
 
@@ -1135,8 +1149,8 @@ not exist.
 | 29 | 1 | Memory function: the length in bytes of the subexpression that follows. Wraps a range or union that involves a function result or a name (§15.4). |
 | 2A | 3 | Deleted cell reference. The bytes look like the former row word and column (`2A 00 84 02`); nothing reads them. |
 | 2B | 6 | Deleted area reference |
-| 2C | 3 | Cell reference inside a name definition |
-| 2D | 6 | Area reference inside a name definition |
+| 2C | 3 | Cell reference inside a name definition. Relative parts are offsets from the cell the name is used in (§11). |
+| 2D | 6 | Area reference inside a name definition, with offsets as in `2C` |
 | 2E | 1 | Memory function inside a name definition (the definition form of `29`; `INVOICE TEMPLATE`) |
 | 2F | 1 | Memory function with no memory, in a name definition: what `2E` becomes when recalculation runs out of memory while evaluating it. The evaluator rewrites the token's low five bits to `0F` (`25.01` in 1.00), as it turns `26`–`28` into `28`, and Open turns `2F` back into `2E` (`46.06`; `46.07` in 1.01) so that it is evaluated again. |
 | 30 | 7 | Marked copy of `23` (name) |

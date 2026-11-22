@@ -58,7 +58,7 @@ public class ReadBenchmarks
                 switch ((r + c) % 4)
                 {
                     case 0:
-                        cell.SetInteger((short)(r + c));
+                        cell.SetInteger((ushort)(r + c));
                         break;
                     case 1:
                         cell.SetNumber(r * 1.5 + c);

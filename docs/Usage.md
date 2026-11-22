@@ -62,17 +62,22 @@ var maybe = document.Cells.Find("Z99");  // null outside the grid; never grows i
 
 switch (cell.Type)
 {
-    case ExcelCellType.Integer: short i = cell.IntegerValue; break;
+    case ExcelCellType.Integer: ushort i = cell.IntegerValue; break;
     case ExcelCellType.Number:  double d = cell.NumberValue; break;
     case ExcelCellType.Text:    string s = cell.TextValue; break;
+    case ExcelCellType.BooleanOrError:
+        if (cell.IsError) { byte code = cell.ErrorCode; } else { bool b = cell.BooleanValue; }
+        break;
     case ExcelCellType.NumericFormula:
     case ExcelCellType.Formula: var f = cell.Formula!; break;
 }
 
-object? value = cell.Value;   // short, double, string, bool, error text, or null
+object? value = cell.Value;   // ushort, double, string, bool, error text such as "#N/A", or null
 ```
 
-`Integer` cells hold whole numbers in −32768…32767; Excel uses them to save space. Use `TryGetNumber` to treat
+`Integer` cells hold whole numbers from 0 to 65535; Excel stores a typed whole number in that range this way to
+save space, and a negative one as a number. `BooleanOrError` cells hold a TRUE, FALSE or error typed into the
+cell. Use `TryGetNumber` to treat
 integers, numbers and numeric formulas alike, without allocating:
 
 ```csharp
@@ -195,6 +200,16 @@ unions without parentheses (`=$A$1,$C$3`) and array constants:
 ```csharp
 var name = new ExcelDefinedName("Totals");
 name.SetDefinition("=$A$1:$A$5", document);
+```
+
+A relative reference in a name is stored as an offset from the cell that uses the name, so it means something
+only against a cell, as in Excel's Define Name dialog, which uses the active cell. Give that cell when setting or
+reading such a definition; without one, A1 is used:
+
+```csharp
+var above = new ExcelDefinedName("Above");
+above.SetDefinition("=B1", new ExcelCellAddress(1, 1), document);   // B2 active: the cell above
+Console.WriteLine(above.GetDefinitionText(document, new ExcelCellAddress(9, 3)));   // D9
 ```
 
 The rules the parser follows (token classes, `IF` and `CHOOSE` jumps, the `SUM` attribute, volatile and

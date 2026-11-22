@@ -34,7 +34,7 @@ public class DocumentWriterTests
     public void Cells_AllTypesAndAttributesRoundTrip()
     {
         var document = ExcelDocument.CreateWorksheet();
-        document.Cells["A1"].SetInteger(-5);
+        document.Cells["A1"].SetInteger(40000);
         document.Cells["B1"].SetNumber(Math.PI);
         document.Cells["C1"].SetText("Café ™");
         var cell = document.Cells["D1"];
@@ -48,7 +48,7 @@ public class DocumentWriterTests
 
         var reread = RoundTrip(document);
 
-        Assert.Equal(-5, reread.Cells["A1"].IntegerValue);
+        Assert.Equal(40000, reread.Cells["A1"].IntegerValue);
         Assert.Equal(Math.PI, reread.Cells["B1"].NumberValue);
         Assert.Equal("Café ™", reread.Cells["C1"].TextValue);
         var d1 = reread.Cells["D1"];

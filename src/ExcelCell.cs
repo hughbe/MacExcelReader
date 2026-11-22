@@ -46,11 +46,30 @@ public sealed class ExcelCell
     public bool HasValue => Type != ExcelCellType.Empty;
 
     /// <summary>
-    /// Gets the integer value of an <see cref="ExcelCellType.Integer"/> cell.
+    /// Gets the integer value of an <see cref="ExcelCellType.Integer"/> cell: 0–65535.
     /// </summary>
-    public short IntegerValue => Type == ExcelCellType.Integer
-        ? unchecked((short)Word0)
+    public ushort IntegerValue => Type == ExcelCellType.Integer
+        ? Word0
         : throw new InvalidOperationException("The cell is not an integer cell.");
+
+    /// <summary>
+    /// Gets whether a <see cref="ExcelCellType.BooleanOrError"/> cell holds an error rather than TRUE or FALSE.
+    /// </summary>
+    public bool IsError => Type == ExcelCellType.BooleanOrError && (Word0 >> 8) != 0;
+
+    /// <summary>
+    /// Gets the value of a <see cref="ExcelCellType.BooleanOrError"/> cell that holds TRUE or FALSE.
+    /// </summary>
+    public bool BooleanValue => Type == ExcelCellType.BooleanOrError && !IsError
+        ? (Word0 & 0xFF) != 0
+        : throw new InvalidOperationException("The cell is not a TRUE or FALSE cell.");
+
+    /// <summary>
+    /// Gets the error code (spec §12.4) of a <see cref="ExcelCellType.BooleanOrError"/> cell that holds an error.
+    /// </summary>
+    public byte ErrorCode => IsError
+        ? (byte)Word0
+        : throw new InvalidOperationException("The cell is not an error cell.");
 
     /// <summary>
     /// Gets the value of a <see cref="ExcelCellType.Number"/> cell.
@@ -85,7 +104,7 @@ public sealed class ExcelCell
         switch (Type)
         {
             case ExcelCellType.Integer:
-                value = unchecked((short)Word0);
+                value = Word0;
                 return true;
             case ExcelCellType.Number:
                 value = ReadNumber();
@@ -145,12 +164,14 @@ public sealed class ExcelCell
     public ExcelFormula? Formula => Type is ExcelCellType.Formula or ExcelCellType.NumericFormula ? DecodeFormula() : null;
 
     /// <summary>
-    /// Gets the cell's value: a <see cref="short"/>, <see cref="double"/>, <see cref="string"/>, the
-    /// formula's current value, or null for an empty cell.
+    /// Gets the cell's value: a <see cref="ushort"/>, <see cref="double"/>, <see cref="string"/>,
+    /// <see cref="bool"/>, an error's text such as <c>#N/A</c>, the formula's current value, or null for an empty
+    /// cell.
     /// </summary>
     public object? Value => Type switch
     {
         ExcelCellType.Integer => IntegerValue,
+        ExcelCellType.BooleanOrError => IsError ? ExcelFormulaResult.ErrorText(ErrorCode) : BooleanValue,
         ExcelCellType.Number => ReadNumber(),
         ExcelCellType.Text => DecodeText(),
         ExcelCellType.NumericFormula or ExcelCellType.Formula => DecodeFormula().Result.Value,
@@ -160,11 +181,37 @@ public sealed class ExcelCell
     /// <summary>
     /// Makes the cell an integer cell.
     /// </summary>
-    public void SetInteger(short value)
+    public void SetInteger(ushort value)
     {
         ClearValue();
         Type = ExcelCellType.Integer;
-        Word0 = unchecked((ushort)value);
+        Word0 = value;
+    }
+
+    /// <summary>
+    /// Makes the cell a constant TRUE or FALSE, as Excel stores one typed into a cell.
+    /// </summary>
+    public void SetBoolean(bool value)
+    {
+        ClearValue();
+        Type = ExcelCellType.BooleanOrError;
+        Word0 = value ? (ushort)1 : (ushort)0;
+    }
+
+    /// <summary>
+    /// Makes the cell a constant error value, as Excel stores one typed into a cell.
+    /// </summary>
+    /// <param name="errorCode">The error code (spec §12.4): 0, 7, 15, 23, 29, 36 or 42.</param>
+    public void SetError(byte errorCode)
+    {
+        if (errorCode is not (0 or 7 or 15 or 23 or 29 or 36 or 42))
+        {
+            throw new ArgumentOutOfRangeException(nameof(errorCode), errorCode, "Not an Excel error code.");
+        }
+
+        ClearValue();
+        Type = ExcelCellType.BooleanOrError;
+        Word0 = (ushort)(0x100 | errorCode);
     }
 
     /// <summary>
@@ -178,13 +225,14 @@ public sealed class ExcelCell
     }
 
     /// <summary>
-    /// Sets a numeric value, using the compact integer form when the value is a whole number that fits in 16 bits.
+    /// Sets a numeric value as Excel does: a whole number from 0 to 65535 in the compact integer form, anything else,
+    /// negative numbers included, as a number.
     /// </summary>
     public void SetValue(double value)
     {
-        if (value == Math.Floor(value) && value >= short.MinValue && value <= short.MaxValue && !(value == 0 && double.IsNegative(value)))
+        if (value == Math.Floor(value) && value >= 0 && value <= ushort.MaxValue && !double.IsNegative(value))
         {
-            SetInteger((short)value);
+            SetInteger((ushort)value);
         }
         else
         {

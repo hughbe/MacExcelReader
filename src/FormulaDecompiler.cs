@@ -24,6 +24,14 @@ public static class FormulaDecompiler
     /// data blocks (spec §12.5), one per <c>0x20</c> token in order.
     /// </summary>
     public static string Decompile(ReadOnlySpan<byte> expression, IReadOnlyList<ushort> fixupWords, ExcelDocument? document, bool fixupsInPlace, IReadOnlyList<byte[]>? arrays)
+        => Decompile(expression, fixupWords, document, fixupsInPlace, arrays, default);
+
+    /// <summary>
+    /// Converts a parsed expression to text, without the leading '=', placing the relative references of a name
+    /// definition (tokens <c>0x2C</c>, <c>0x2D</c>), which hold offsets (spec §11), relative to
+    /// <paramref name="relativeTo"/>, as Excel shows them with that cell active.
+    /// </summary>
+    public static string Decompile(ReadOnlySpan<byte> expression, IReadOnlyList<ushort> fixupWords, ExcelDocument? document, bool fixupsInPlace, IReadOnlyList<byte[]>? arrays, ExcelCellAddress relativeTo)
     {
         int arrayIndex = 0;
         var stack = new Stack<string>();
@@ -135,18 +143,27 @@ public static class FormulaDecompiler
                 }
 
                 case 0x24:
-                case 0x2C:
                 case 0x31:
                 case 0x37:
                     stack.Push(WithPrefix(ref externalPrefix, CellText(BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p)), expression[p + 2])));
                     break;
+                case 0x2C:
+                    stack.Push(WithPrefix(ref externalPrefix, CellText(BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p)), expression[p + 2], relativeTo)));
+                    break;
                 case 0x25:
-                case 0x2D:
                 case 0x32:
                 {
                     ushort row1 = BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p));
                     ushort row2 = BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p + 2));
                     stack.Push(WithPrefix(ref externalPrefix, CellText(row1, expression[p + 4]) + ":" + CellText(row2, expression[p + 5])));
+                    break;
+                }
+
+                case 0x2D:
+                {
+                    ushort row1 = BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p));
+                    ushort row2 = BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p + 2));
+                    stack.Push(WithPrefix(ref externalPrefix, CellText(row1, expression[p + 4], relativeTo) + ":" + CellText(row2, expression[p + 5], relativeTo)));
                     break;
                 }
 
@@ -170,7 +187,7 @@ public static class FormulaDecompiler
 
     /// <summary>
     /// Formats an array-constant block (column count, row count, then elements) as <c>{1,2;3,4}</c>.
-    /// Element type 1 is a number and 2 a string; the samples contain no others.
+    /// Element type 1 is a number, 2 a string, 4 TRUE or FALSE and 16 an error (spec §12.5).
     /// </summary>
     public static string ArrayText(ReadOnlySpan<byte> block)
     {
@@ -201,9 +218,13 @@ public static class FormulaDecompiler
                 }
                 else
                 {
-                    builder.Append(type == 1
-                        ? BinaryPrimitives.ReadDoubleBigEndian(block.Slice(p)).ToString("R", CultureInfo.InvariantCulture)
-                        : $"?{type}");
+                    builder.Append(type switch
+                    {
+                        1 => BinaryPrimitives.ReadDoubleBigEndian(block.Slice(p)).ToString("R", CultureInfo.InvariantCulture),
+                        4 => block[p + 1] != 0 ? "TRUE" : "FALSE",
+                        16 => ExcelFormulaResult.ErrorText(block[p + 1]),
+                        _ => $"?{type}",
+                    });
                     p += 8;
                 }
             }
@@ -280,6 +301,27 @@ public static class FormulaDecompiler
     /// Formats a cell reference from a row word (bit 15 = relative row, bit 14 = relative column) and a column.
     /// </summary>
     public static string CellText(ushort rowWord, byte column)
+        => CellText(rowWord, column, default);
+
+    // A reference in a name definition: its relative row and column are offsets from the cell the name is used in
+    // (spec §11), 14-bit and 8-bit two's complement, shown relative to `relativeTo`. Excel wraps an offset past the
+    // edge of the sheet round to the other side, so B1's R[-3] is row 16382.
+    private static string CellText(ushort rowWord, byte column, ExcelCellAddress relativeTo)
+    {
+        if ((rowWord & 0x8000) != 0)
+        {
+            rowWord = (ushort)((rowWord & 0xC000) | ((rowWord + relativeTo.Row) & 0x3FFF));
+        }
+
+        if ((rowWord & 0x4000) != 0)
+        {
+            column = (byte)(column + relativeTo.Column);
+        }
+
+        return CellTextCore(rowWord, column);
+    }
+
+    private static string CellTextCore(ushort rowWord, byte column)
     {
         bool rowRelative = (rowWord & 0x8000) != 0;
         bool columnRelative = (rowWord & 0x4000) != 0;
