@@ -5,7 +5,7 @@ namespace MacExcelReader;
 /// </summary>
 public enum ExcelVersion
 {
-    /// <summary>Excel 1.00 to 1.03: 208 functions (0–207). Their function tables are identical.</summary>
+    /// <summary>Excel 1.00 to 1.03 (including 1.01): 208 functions (0–207). Their function tables are identical.</summary>
     Excel100 = 100,
 
     /// <summary>Excel 1.04: adds CHANGE.LINK (208); otherwise encodes formulas as 1.00–1.03 do (assumed).</summary>
