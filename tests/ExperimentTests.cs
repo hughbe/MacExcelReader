@@ -187,6 +187,17 @@ public class ExperimentTests
         Assert.Equal(LegendPosition.Bottom, chart.LegendPosition);
     }
 
+    [Theory]
+    [InlineData("B4", "2")]          // DCOUNT(D1:D4,1,F1:F2)
+    [InlineData("B5", "#VALUE!")]    // field 0
+    [InlineData("B6", "2")]          // empty field: "not given", because the argument's type has bit 0x80
+    [InlineData("B7", "#VALUE!")]    // field 2, past the database's one column
+    public void DCountEmptyField_IsNotGiven(string address, string value)
+    {
+        // Re-entered with FORMULA by the harness in Excel 1.00 and saved (spec §15.3).
+        Assert.Equal(value, Convert.ToString(Load("DCount Empty Field").Cells[address].Value, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
     [Fact]
     public void PieExplodedAll_DefaultSeriesFormatHoldsTheExplosion()
     {

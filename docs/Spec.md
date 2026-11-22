@@ -72,6 +72,8 @@ misbehaves, for example with a file that breaks a rule given here.
 * All multi-byte integers are **big-endian**.
 * `byte` = 8 bits, `word` = 16 bits, `long` = 32 bits, `double` = IEEE 754 64-bit.
 * *Pascal string* = one length byte followed by that many characters (Mac Roman).
+* *Rectangle* = four words, top, left, bottom, right: the Macintosh Toolbox's (QuickDraw's) `Rect`, in pixels
+  unless a field says otherwise.
 * Bits are numbered from 0, the least significant: bit 15 is the top bit of a word. A field that packs several
   flags or bit fields has its own table under the record table: a **Bits** column (highest first) where the
   spec numbers bits, or a **Flag** column where Excel's code tests masks (`0x04`). A field holding one bit
@@ -308,7 +310,7 @@ A raw dump of a contiguous run of application globals. Offsets are relative to t
 | 0x014 | word | | **Last row** of the grid; see §6.1 |
 | 0x016 | word | 255 | Index of the last column whose width is not zero. Starts at 255; the column-width routine lowers it when the last such column is set to width 0 and raises it when a higher column is given a width. (A column width of 0 is how a column is hidden.) |
 | 0x018 | word | 0 / 1 | Recalculation state: 0 clean, 1 needs recalculation, 2 a pending state the code never lowers to 1. Open loads it as it is and the recalculation driver (`25.0e`) acts on it, so Excel recalculates a file saved with 1 or 2 as soon as it opens it (`Recalculated` sample). With 0 it keeps the stored results, even after CALCULATE.NOW, until something they depend on changes. The external-link reader (`72.0d`) checks it before trusting a closed file's stored values. |
-| 0x01A | word | 0 | Pending-work flag. Excel 1.00 never sets it: a new sheet starts with 0 (`10.00`), so only a file can. When it is set, `22.03` runs the range routine `23.01` over the whole sheet (rows 0–16383, columns 0–255) with operation code `0xD01F` and clears the word. Operation 31 does nothing to a cell; the flag bits make the routine rescan each row's cells for neighbours (`23.02`), which is how Excel works out text that overflows into empty cells **(inferred)**. A sheet saved with 1 looked the same in Excel 1.00 as with 0, and Excel saved it back with 0. |
+| 0x01A | word | 0 | Pending-work flag. Excel 1.00 never sets it: a new sheet starts with 0 (`10.00`), so only a file can. When it is set, `22.03` runs the range routine `23.01` over the whole sheet (rows 0–16383, columns 0–255) with operation code `0xD01F` and clears the word. Operation 31 does nothing to a cell; the flag bits make the routine rescan each row (`23.02`), checking for each cell whether its neighbours are empty and whether they are Fill-aligned: what Excel needs to draw text that spills into the next cells. Excel 1.00 works that out as it draws anyway, so the word has no visible effect: sheets with overflowing text and with runs of Fill-aligned cells look the same saved with 0 or 1, and Excel saves them back with 0. |
 | 0x01C | word | 0 | Set to 1 by the formula compiler when a formula uses a function at or above the base function count. It selects which count Save writes at the start of the data area (§5). Cleared for a new sheet. |
 | 0x01E | word | 0 / 1 | **Document protected.** Selects the "Protect Document…" / "Unprotect Document…" menu text and is checked by ~50 editing routines. 1 only in `DB.FORM`. |
 | 0x020 | word | 0 / 1 | Which form 0x014 and 0x274 are in: 1 = last indices, 0 = counts (§6.1) |
@@ -766,7 +768,7 @@ Input word (offsets 10 and 16):
 | Bits | Meaning |
 |-----:|---------|
 | 15–2 | Row of the input cell |
-| 1 | A mark the code that moves and deletes cells sets and clears; while it is set that code clears bit 0 (`0e.01`, `4f.0b`) **(inferred)** |
+| 1 | The input was deleted by the last command, which can still be undone. The move and delete code sets bits 1 and 0 together and keeps the old record for Undo (`4f.0e`); Undo clears bit 0 of an input with bit 1 set (`0e.01`), and the next command clears bit 1 (`4f.0b`). 0 in every saved file seen, `Table Deleted Input` included. |
 | 0 | The input cell has been deleted, and the formula shows `#REF!` in its place (`1d.01` in 1.00) |
 
 Byte 14:
@@ -1100,11 +1102,13 @@ Type bytes are bit masks:
 | `0x40` | Array |
 | `0x80` | An empty argument means "not given" |
 
-`0x80` is on the arguments of the commands whose omitted arguments mean "leave unchanged" or "use the dialog's
-setting" (STYLE, BORDER, FONT, PAGE.SETUP, CALCULATION, SORT…), OPEN's second, INPUT's later ones and DCOUNT's
-field, and on no function that needs every argument **(inferred from which functions have it)**. The compiler
-accepts an empty argument anywhere (`=ROUND(1,)` is `1E 00 01 16 41 1B`); where the bit is absent the function
-sees 0, so `=ROUND(1,)` gives 1 and `=MID("abc",,1)` gives #VALUE! in Excel 1.00 (`Empty Arguments` sample).
+The compiler accepts an empty argument anywhere (`=ROUND(1,)` is `1E 00 01 16 41 1B`). Where the argument's
+type has `0x80`, the function is told the argument was not given; elsewhere it sees 0. In Excel 1.00
+`=DCOUNT(D1:D4,,F1:F2)` counts the matching records, as with no field, while `=DCOUNT(D1:D4,0,F1:F2)` gives
+#VALUE! (`DCount Empty Field` sample); and `=ROUND(1,)` gives 1 and `=MID("abc",,1)` gives #VALUE!, as with 0
+(`Empty Arguments` sample). The bit is on the arguments of the commands whose omitted arguments mean "leave
+unchanged" or "use the dialog's setting" (STYLE, BORDER, FONT, PAGE.SETUP, CALCULATION, SORT…), OPEN's second,
+INPUT's later ones and DCOUNT's field.
 
 ### 15.4 How Excel compiles formula text
 
@@ -1947,7 +1951,7 @@ rules from the function tables (§15.3), and numbers 208–291 from Excel 1.5's 
   other uses `22` (§15.4).
 * **Returns**, **First**, **Others**: what the function returns and what its first and later arguments accept:
   **N** number, **T** text, **L** logical, **R** reference, **E** error, **C** command, **A** array, **?**
-  type bit `0x80`: an empty argument means "not given" **(inferred, §15.3)**.
+  type bit `0x80`: an empty argument means "not given" (§15.3).
 * **Flags**: **M** macro sheets only, **D** has a dialog-box form (`NAME?(…)`), **V** volatile (formulas start
   with `19 01`), **X** cannot be used in a cell formula (flag `0x02`, §15.3).
 * **Since**: the first release with the function (§2.1).
@@ -2290,14 +2294,14 @@ it moves.
 | 334 | Chart title: a text object in its 60-byte in-memory form (§16.7), kind 1 (`0f.02`) |
 | 394 | Category-axis title, kind 2 |
 | 454 | Value-axis title, kind 3 |
-| 514 | Three QuickDraw rectangles, 8 bytes each: the chart area, plot area and legend as last drawn. A click is tested against them for selection kinds 0–2 (`36.03`). |
+| 514 | Three rectangles: the chart area, plot area and legend as last drawn (`31.03`, `57.00`). A click is tested against them for selection kinds 0–2 (`36.03`). |
 | 538 | Word: the **selection**, the kind of chart object selected (below); −1 when nothing is (`0f.02`, `36.06`) |
 | 540 | Word: which object of that kind (below) |
 | 542 | Word: a second index for some kinds (below) |
 | 544 | Byte: the number of selection handles drawn round the selection (`36.17`) |
 | 545 | Byte: the style of those handles, from a table indexed by the selection kind |
 | 546 | Word: the offset of the structure of the chart the selection belongs to, main or overlay |
-| 548 | 8 bytes: a rectangle the handle code works with (`36.17`) **(inferred)** |
+| 548 | Rectangle: the outline of the selection. Excel frames it, or for line-like objects draws a line between its corners, depending on the handle style (`36.17`, `36.36`). |
 | 556 | 4 bytes for each handle, up to eight: where it is drawn (`36.17`) |
 | 652 | Two words: the offsets of the main chart's structure and the overlay's (0 when there is none). Save writes them last first, which is why a file has the overlay first (§16.1; `5d.00`). |
 | 656 | Word: the number of charts |
@@ -2314,7 +2318,7 @@ draws (`39`, `53`–`56`, `3a`):
 |---:|---|---|---|
 | −1 | Nothing | | |
 | 0 | Chart area (Chart > Select Chart) | | Area |
-| 1 | Plot area (Chart > Select Plot Area) **(inferred, from the order of the rectangles at 514)** | | Area |
+| 1 | Plot area (Chart > Select Plot Area) | | Area |
 | 2 | Legend | | Area |
 | 3 | Value axis | | Axis |
 | 4 | Category axis | | Axis |
@@ -2336,8 +2340,8 @@ whatever its block had there, left over from memory: in `Resume Excel 2` offsets
 
 Each chart structure is the 392-byte form of the chart record (§16.5, the table's "mem" column). In `Resume
 Excel 2` the table at 652 holds 666 and 1058, the main (scatter) and overlay (pie) charts of `CLOCK.CH`, and
-the count is 2. The rest of the block, its point formats, strings and free space, has no fixed layout
-**(inferred)**.
+the count is 2. The rest of the block is a heap: Excel allocates the chart structures, point formats, series
+and strings in it as it needs them (`30.11`), so their places vary.
 
 Printer type:
 
@@ -2371,7 +2375,7 @@ Window entry:
 | byte | Document kind, as in §5 (`0x20` for a chart) |
 | Pascal string | Document name. Excel 1.00 writes the window title, which includes the volume for a document on another disk (`Ws:Clock saved`). |
 | Pascal string | Folder: the volume name and any folder names, each followed by `:` |
-| word | 0 unless the system has HFS (low-memory `FSFCBLen` above 0). Then it is the low word of the directory ID of the document's folder, from an HFS Dispatch call whose parameter block returns it at offset 50, `ioWDDirID`'s low word (`48.22` in 1.00) **(inferred from the parameter-block offsets)**. 2, the ID of a volume's root directory, for a document at the top of a floppy; 0 for one on the startup disk. |
+| word | 0 unless the system has HFS (low-memory `FSFCBLen` above 0). Then it is the low word of the directory ID of the document's folder, which Excel asks the File Manager for (HFS Dispatch, `48.22` in 1.00): 2, the ID of a volume's root directory, for a document at the top of a floppy; 0 for one on the startup disk. |
 | 4 words | Window rectangle (top, left, bottom, right), in global coordinates. Open fits it to the screen. |
 | 41 bytes | Window state, as in §13. Absent for a chart. |
 | word + `n` × 6 bytes | Selected areas, as in §13. Absent for a chart. |
