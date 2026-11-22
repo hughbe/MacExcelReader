@@ -137,20 +137,20 @@ Measured with BenchmarkDotNet (`benchmarks/`) on an Apple Silicon Mac with .NET 
 
 | Operation | Time | Allocated |
 |-----------|-----:|----------:|
-| Read Expenses (15 KB, 988 cells) | 3.1 µs | 23 KB |
-| Read DB.FORM (24 KB, 433 cells, 275 formulas) | 3.9 µs | 35 KB |
-| Read large sheet | 77 µs | 841 KB |
-| Read large sheet, `copyData: false` | 10 µs | 26 KB |
-| Read large sheet and sum every number with `EnumerateNonEmpty` | 145 µs | 26 KB |
-| Read large sheet and sum every number via `NonEmptyCells` | 759 µs | 2.7 MB |
-| Read large sheet and box every value via `Value` | 2.8 ms | 4.9 MB |
-| Read and re-save Expenses unchanged | 11 µs | 54 KB |
-| Read and re-save the large sheet unchanged | 705 µs | 2.4 MB |
-| Read DB.FORM and decompile all 275 formulas | 46 µs | 206 KB |
-| Parse `=IF(A1>0,SUM($A$1:$A$5)*2,-1)` | 0.71 µs | 2.3 KB |
-| Parse all 275 DB.FORM formulas from text | 118 µs | 282 KB |
+| Read Expenses (15 KB, 988 cells) | 2.4 µs | 23 KB |
+| Read DB.FORM (24 KB, 433 cells, 275 formulas) | 6.4 µs | 37 KB |
+| Read large sheet | 56 µs | 854 KB |
+| Read large sheet, `copyData: false` | 11 µs | 27 KB |
+| Read large sheet and sum every number with `EnumerateNonEmpty` | 148 µs | 27 KB |
+| Read large sheet and sum every number via `NonEmptyCells` | 1.5 ms | 2.7 MB |
+| Read large sheet and box every value via `Value` | 2.7 ms | 5.0 MB |
+| Read and re-save Expenses unchanged | 16 µs | 54 KB |
+| Read and re-save the large sheet unchanged | 753 µs | 2.5 MB |
+| Read DB.FORM and decompile all 275 formulas | 52 µs | 205 KB |
+| Parse `=IF(A1>0,SUM($A$1:$A$5)*2,-1)` | 0.83 µs | 2.4 KB |
+| Parse all 275 DB.FORM formulas from text | 110 µs | 315 KB |
 
-The 841 KB when reading the large sheet is the copy of the input; pass `copyData: false` to avoid it.
+The 854 KB when reading the large sheet is the copy of the input; pass `copyData: false` to avoid it.
 
 Before the lazy design, reading Expenses took 36 µs (192 KB) and the large sheet 3.4 ms (7.6 MB).
 
