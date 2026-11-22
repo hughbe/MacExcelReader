@@ -326,12 +326,13 @@ document read and saved without changes is byte-for-byte identical to the origin
 ## Exporting SYLK
 
 `ExportSylk` writes a worksheet or macro sheet as SYLK, the text format Excel's Save As offers, with the bytes
-Excel 1.00 writes (spec Appendix C): Mac OS Roman text with carriage returns, R1C1 formulas with their current
+Excel 1.00–1.06 write, or Excel 1.5 with `ExcelVersion.Excel150` (spec Appendix C): Mac OS Roman text with carriage returns, R1C1 formulas with their current
 values, number formats, styles, column widths, names and links.
 
 ```csharp
 var document = ExcelDocument.Load("Expenses");
 document.ExportSylk("Expenses.slk");          // give it Finder type TEXT
+document.ExportSylk("Expenses 1.5.slk", ExcelVersion.Excel150);
 
 var output = new ArrayBufferWriter<byte>();   // or into any IBufferWriter<byte>, without allocating per cell
 document.ExportSylk(output);

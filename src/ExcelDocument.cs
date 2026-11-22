@@ -557,41 +557,46 @@ public sealed class ExcelDocument
     /// characters outside printable ASCII escaped. Give the file Finder type <c>TEXT</c>.
     /// </summary>
     /// <remarks>Like <see cref="Save(string)"/>, this first sets the grid size from the cells (spec §6.1).</remarks>
-    public void ExportSylk(IBufferWriter<byte> output)
+    /// <param name="output">Where to write.</param>
+    /// <param name="version">
+    /// The release whose export to match. Excel 1.00 to 1.06 (the default) write the same; Excel 1.5 writes format
+    /// text with every literal escaped, a whole format record for every cell, and the gridline colour.
+    /// </param>
+    public void ExportSylk(IBufferWriter<byte> output, ExcelVersion version = ExcelVersion.Excel100)
     {
         ArgumentNullException.ThrowIfNull(output);
-        using var writer = new SylkWriter(this, output);
+        using var writer = new SylkWriter(this, output, version);
         writer.Write();
     }
 
     /// <summary>
-    /// Writes the document as SYLK to a stream (see <see cref="ExportSylk(IBufferWriter{byte})"/>).
+    /// Writes the document as SYLK to a stream (see <see cref="ExportSylk(IBufferWriter{byte}, ExcelVersion)"/>).
     /// </summary>
-    public void ExportSylk(Stream stream)
+    public void ExportSylk(Stream stream, ExcelVersion version = ExcelVersion.Excel100)
     {
         ArgumentNullException.ThrowIfNull(stream);
         var buffer = new ArrayBufferWriter<byte>();
-        ExportSylk(buffer);
+        ExportSylk(buffer, version);
         stream.Write(buffer.WrittenSpan);
     }
 
     /// <summary>
-    /// Writes the document as SYLK to a file (see <see cref="ExportSylk(IBufferWriter{byte})"/>).
+    /// Writes the document as SYLK to a file (see <see cref="ExportSylk(IBufferWriter{byte}, ExcelVersion)"/>).
     /// </summary>
-    public void ExportSylk(string path)
+    public void ExportSylk(string path, ExcelVersion version = ExcelVersion.Excel100)
     {
         using var stream = File.Create(path);
-        ExportSylk(stream);
+        ExportSylk(stream, version);
     }
 
     /// <summary>
-    /// Writes the document as SYLK to a stream asynchronously (see <see cref="ExportSylk(IBufferWriter{byte})"/>).
+    /// Writes the document as SYLK to a stream asynchronously (see <see cref="ExportSylk(IBufferWriter{byte}, ExcelVersion)"/>).
     /// </summary>
-    public async Task ExportSylkAsync(Stream stream, CancellationToken cancellationToken = default)
+    public async Task ExportSylkAsync(Stream stream, ExcelVersion version = ExcelVersion.Excel100, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
         var buffer = new ArrayBufferWriter<byte>();
-        ExportSylk(buffer);
+        ExportSylk(buffer, version);
         await stream.WriteAsync(buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
 

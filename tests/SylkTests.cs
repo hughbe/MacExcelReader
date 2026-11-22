@@ -8,14 +8,24 @@ namespace MacExcelReader.Tests;
 /// </summary>
 public class SylkTests
 {
-    private static readonly string SylkDirectory = Path.Combine(AppContext.BaseDirectory, "Data", "Sylk");
+    private static readonly string DataDirectory = Path.Combine(AppContext.BaseDirectory, "Data");
 
-    public static TheoryData<string> Exports()
-        => new(Directory.GetFiles(SylkDirectory, "*.slk").Select(Path.GetFileNameWithoutExtension).Order(StringComparer.Ordinal)!);
+    public static TheoryData<string> Exports() => Samples("Sylk");
+
+    public static TheoryData<string> Exports15() => Samples("Sylk 1.5");
+
+    private static TheoryData<string> Samples(string folder)
+        => new(Directory.GetFiles(Path.Combine(DataDirectory, folder), "*.slk").Select(Path.GetFileNameWithoutExtension).Order(StringComparer.Ordinal)!);
 
     [Theory]
     [MemberData(nameof(Exports))]
-    public void ExportMatchesExcel100(string sample)
+    public void ExportMatchesExcel100(string sample) => AssertMatches(sample, "Sylk", ExcelVersion.Excel100);
+
+    [Theory]
+    [MemberData(nameof(Exports15))]
+    public void ExportMatchesExcel15(string sample) => AssertMatches(sample, "Sylk 1.5", ExcelVersion.Excel150);
+
+    private static void AssertMatches(string sample, string folder, ExcelVersion version)
     {
         var document = ExcelDocument.Load(TestData.SamplePath(sample));
 
@@ -24,9 +34,9 @@ public class SylkTests
         document.State.ReferenceStyle = ExcelReferenceStyle.A1;
         document.State.CalculationMode = ExcelCalculationMode.Automatic;
         var output = new ArrayBufferWriter<byte>();
-        document.ExportSylk(output);
+        document.ExportSylk(output, version);
 
-        byte[] expected = File.ReadAllBytes(Path.Combine(SylkDirectory, sample + ".slk"));
+        byte[] expected = File.ReadAllBytes(Path.Combine(DataDirectory, folder, sample + ".slk"));
         if (!output.WrittenSpan.SequenceEqual(expected))
         {
             var ours = Lines(output.WrittenSpan, sample);

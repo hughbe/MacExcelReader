@@ -827,6 +827,10 @@ sealed class SylkSettings : FileSettings
     [CommandOption("-o|--output <FILE>")]
     [Description("Write to this file instead of the console.")]
     public string? Output { get; init; }
+
+    [CommandOption("--excel <VERSION>")]
+    [Description("Match this release's export: 1.00 (the default, also 1.01–1.06) or 1.5.")]
+    public string? Excel { get; init; }
 }
 
 sealed class SylkCommand : Command<SylkSettings>
@@ -834,16 +838,17 @@ sealed class SylkCommand : Command<SylkSettings>
     public override int Execute(CommandContext context, SylkSettings settings, CancellationToken cancellationToken)
     {
         var document = ExcelDocument.Load(settings.Input);
+        var version = settings.Excel == "1.5" ? ExcelVersion.Excel150 : ExcelVersion.Excel100;
         if (settings.Output is not null)
         {
-            document.ExportSylk(settings.Output);
+            document.ExportSylk(settings.Output, version);
             AnsiConsole.MarkupLine($"Wrote {Program.Escape(settings.Output)}");
             return 0;
         }
 
         // Mac OS Roman with carriage returns: shown as lines, with escapes as they are.
         var buffer = new System.Buffers.ArrayBufferWriter<byte>();
-        document.ExportSylk(buffer);
+        document.ExportSylk(buffer, version);
         Console.Write(MacRoman.GetString(buffer.WrittenSpan).Replace('\r', '\n'));
         return 0;
     }

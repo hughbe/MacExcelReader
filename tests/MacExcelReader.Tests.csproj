@@ -25,6 +25,9 @@
     <Content Include="Data\number-formats-*.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="Data\Sylk 1.5\*.slk">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="Data\Sylk\*.slk">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

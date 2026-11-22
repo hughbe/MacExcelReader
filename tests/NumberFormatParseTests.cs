@@ -39,18 +39,14 @@ public class NumberFormatParseTests
     [MemberData(nameof(Sheets))]
     public void AddNumberFormat_RecompilesEverySampleFormat(string sample)
     {
-        // Text from ToText compiles back to the stored bytes, in the form the file's version keeps. The exception is
-        // a format with only a text section, such as @: Excel shows it as General;@, and General;@ typed in compiles
-        // to the same thing laid out differently, so recompile what was typed (spec §7).
+        // Text from ToText compiles back to the stored bytes, in the form the file's version keeps (spec §7).
         var document = ExcelDocument.Read(File.ReadAllBytes(TestData.SampleFile(sample)));
         var version = sample.StartsWith("Excel 1.5", StringComparison.Ordinal) ? ExcelVersion.Excel150 : ExcelVersion.Excel100;
         foreach (var format in document.NumberFormats)
         {
             var target = ExcelDocument.CreateWorksheet();
             target.Version = document.Version;
-            string text = format.ToText();
-            bool textOnly = format.SectionCount == 4 && format.IsSingleSection && format.Descriptor[3] < format.Descriptor[2];
-            int index = target.AddNumberFormat(textOnly ? text["General;".Length..] : text, version);
+            int index = target.AddNumberFormat(format.ToText(), version);
             Assert.Equal(ExcelNumberFormat.BuiltInCount, index);
             Assert.Equal(format.Descriptor, target.NumberFormats[0].Descriptor);
             Assert.Equal(format.Body, target.NumberFormats[0].Body);

@@ -6,7 +6,8 @@ using MacExcelReader.Internal;
 namespace MacExcelReader;
 
 /// <summary>
-/// Writes a document as SYLK, byte for byte as Excel 1.00's Save As with the SYLK type does (spec Appendix C).
+/// Writes a document as SYLK, byte for byte as Excel's Save As with the SYLK type does: Excel 1.00 to 1.06, or
+/// Excel 1.5 (spec Appendix C).
 /// </summary>
 /// <remarks>
 /// Each record is built in one reusable buffer of Mac OS Roman bytes and written to the output with a carriage
@@ -25,6 +26,13 @@ internal sealed class SylkWriter : IDisposable
 
     private readonly ExcelDocument _document;
     private readonly IBufferWriter<byte> _output;
+
+    // Excel 1.5's writer (segment 0x70) writes its export form of format text, a whole F record for every cell of a
+    // grid with a margin, and the gridline colour in the defaults.
+    private readonly bool _excel15;
+
+    // Set while writing cells when every cell gets a whole F record.
+    private bool _fullFormats;
     private byte[] _line = ArrayPool<byte>.Shared.Rent(512);
     private int _length;
 
@@ -38,10 +46,11 @@ internal sealed class SylkWriter : IDisposable
     // The default format (the F;D record). Excel writes a cell's format only where it differs from this.
     private CellFormat _default = new(-1, -1, 0);
 
-    public SylkWriter(ExcelDocument document, IBufferWriter<byte> output)
+    public SylkWriter(ExcelDocument document, IBufferWriter<byte> output, ExcelVersion version)
     {
         _document = document;
         _output = output;
+        _excel15 = version >= ExcelVersion.Excel150;
     }
 
     public void Dispose()
@@ -90,6 +99,7 @@ internal sealed class SylkWriter : IDisposable
         }
 
         WriteNames();
+        _fullFormats = _excel15 && margin;
         for (int row = 0; row < rows; row++)
         {
             for (int column = 0; column < columns; column++)
@@ -105,18 +115,19 @@ internal sealed class SylkWriter : IDisposable
     // P records: every format, built in and the document's own, as the Format Number dialog shows it.
     private void WriteNumberFormats()
     {
-        foreach (string text in s_builtInText.Value)
+        foreach (string text in (_excel15 ? s_builtInText15 : s_builtInText).Value)
         {
             WriteNumberFormat(text);
         }
 
         foreach (var format in _document.NumberFormats)
         {
-            WriteNumberFormat(format.ToText(ExcelVersion.Excel100));
+            WriteNumberFormat(_excel15 ? format.ToText(ExcelVersion.Excel150, export: true) : format.ToText(ExcelVersion.Excel100));
         }
     }
 
     private static readonly Lazy<string[]> s_builtInText = new(() => [.. ExcelNumberFormat.BuiltIn.Select(f => f.ToText(ExcelVersion.Excel100))]);
+    private static readonly Lazy<string[]> s_builtInText15 = new(() => [.. ExcelNumberFormat.BuiltIn.Select(f => f.ToText(ExcelVersion.Excel150, export: true))]);
 
     private void WriteNumberFormat(string text)
     {
@@ -214,13 +225,14 @@ internal sealed class SylkWriter : IDisposable
     // for a cell, which it places with Y and X.
     private void WriteFormat(CellFormat format, char kind, int index, int row = 0, int column = 0)
     {
-        if (format == _default)
+        bool full = _fullFormats && kind == 0;
+        if (format == _default && !full)
         {
             return;
         }
 
         Append("F"u8);
-        if (format.Number != _default.Number || format.Alignment != _default.Alignment)
+        if (full || format.Number != _default.Number || format.Alignment != _default.Alignment)
         {
             AppendField('P', format.Number);
             AppendFormatCode(kind == 'D' ? 'D' : 'F', format);
@@ -230,7 +242,7 @@ internal sealed class SylkWriter : IDisposable
             }
         }
 
-        if (format.Style != _default.Style)
+        if (full || format.Style != _default.Style)
         {
             Append(";S"u8);
             int style = format.Style;
@@ -286,6 +298,12 @@ internal sealed class SylkWriter : IDisposable
         if (!(window?.DisplayHeadings ?? true))
         {
             Append(";H"u8);
+        }
+
+        // Excel 1.5: the gridline and heading colour, from 1, when it is not automatic (window bytes 127 and 128).
+        if (_excel15 && window is { HasVersion18State: true } && window.State[127] == 0)
+        {
+            AppendField('L', window.State[128] + 1);
         }
 
         AppendField('N', _document.State.StandardFont);

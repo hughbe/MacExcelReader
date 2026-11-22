@@ -514,9 +514,16 @@ positive section first, then the others after `;`. Which sections are written di
   zero section unless its offset and length equal the positive section's, even when both are empty. So `;;`,
   whose three sections are empty at offset 0, comes back as `;`, while `0.0;;` keeps both separators.
 * Excel 1.5 (`0d.19`) leaves out a negative or zero section only when it repeats a non-empty positive section
-  (a zero section is written only after a negative one), and writes the text section unless it is the General that the compiler appended. `;;` comes back as `;;`.
+  (a zero section is written only after a negative one), and writes the text section unless it is the General
+  the compiler appended. `;;` comes back as `;;`. A format whose text section comes before its number sections,
+  `@` alone or `"pre"@"post"`, is written as the text section alone (unless Save is recompiling it, `47.11`).
 
-Excel 1.00's SYLK export of `Format Compiler` gives every format in it this way.
+Excel 1.5 also marks literals (`0d.1a`). A literal character (`02`) gets a backslash unless it is one of
+characters 6–14 of the format-character string, `, : / space - + ( ) .`, or the `E` before an exponent's sign:
+`#,##0.00\_)`. In its export form, which the converters use (`79.14` sets the flag `g3100` for SYLK), every
+literal gets a backslash and the currency symbol is quoted: `"$"#,##0\ ;\("$"#,##0\)`, `m\/d\/yy`.
+
+Excel 1.00's and 1.5's SYLK exports of `Format Compiler` and `Format Compiler 1.5` give every format this way.
 
 Built-in formats are not stored in documents; they live in the application's `FRMT` 256 resource in the same
 descriptor-plus-body form. Total formats are capped at 64. The 19 built-ins, by index, in Excel 1.00. A file
@@ -621,7 +628,7 @@ checks the keywords `General`, `AM/PM`, `A/P` and the currency symbol first. It 
 * `@` gives `23`, in a section without numbers or dates. That section is the text section and must be the last.
   A positive section that is only General (and a colour) doubles as the text section. Otherwise General (`01`)
   is appended as the text section: every version-18 format has one. A format of only a text section, such as
-  `@`, gets General appended as its number sections, so Excel shows it as `General;@`.
+  `@`, gets General appended as its number sections, after the text section.
 * For a version-17 file, Save recompiles each format and keeps the first three slots (`47.11`).
 
 Every format in the samples and in the test lists compiles to Excel's own bytes (`Format Compiler` in Excel 1.00,
@@ -2690,10 +2697,10 @@ Save As and `SAVE.AS(name, type)` take type 1 Normal, 2 SYLK, 3 Text (tab-delimi
 Excel 1.00 numbers them 0–3 internally and dispatches in `47.05`: Normal goes to the document writer (`47.0b`),
 the others through `72.01` to the SYLK writer (`69.00`), the text writer (`6e.00`) and the WKS writer
 (`74.00`). The SYLK writer is described here from its code (`69.00`–`69.10`, with `72.20` for format codes) and
-checked against 84 samples Excel 1.00 exported: `ExcelDocument.ExportSylk` writes the same bytes for all of
-them. Excel 1.01–1.06 have the same writer (`6a` in 1.04 and 1.06), apart from taking TRUE, FALSE and the
-error names from a string list that a translation can change. Excel 1.5's (`70`) adds to the `F` records and
-writes 1.5's format text; it has not been checked against an export.
+checked against 84 samples Excel 1.00 exported and 94 Excel 1.5 exported: `ExcelDocument.ExportSylk` writes
+the same bytes for all of them. Excel 1.01–1.06 have the same writer (`6a` in 1.04 and 1.06), apart from taking
+TRUE, FALSE and the error names from a string list that a translation can change. Excel 1.5's (`70`) differs in
+three ways, given under **Excel 1.5** below.
 
 SYLK is a text form of the same model, so it also shows how Excel reads each field. Comparing the 84 exports
 with the library's reading (7,936 cells, 2,853 formulas) agreed on every constant, number format, alignment,
@@ -2766,3 +2773,12 @@ they repeat the last ones written.
 * Numbers, strings, names and functions are as in A1 style (§15.4).
 
 Cell type 7 (§9) has no case in the writer, as in every other cell switch.
+
+**Excel 1.5.** Its writer (`70.00`–`70.10`) is 1.00's with these changes:
+
+* Formats are written in 1.5's export form (§7): `P;P"$"#,##0\ ;;\("$"#,##0\)`, `P;Pm\/d\/yy`, `P;P@`.
+* When the grid has a margin (state word `0x020`, §6.1), every cell of the grid gets an `F` record, and each
+  has `P`, the format code and `S` whether or not they differ from the defaults: `F;P0;FG0G;S;Y1;X1`. The
+  `C` record that follows then needs no position. A grid in the count form gets `F` records as in 1.00.
+* The defaults record adds `L` and the gridline and heading colour, counting from 1, when the front window's
+  colour is not automatic (window state bytes 127 and 128, §13): `F;P0;DG0G10;L3;N3 10` for red.

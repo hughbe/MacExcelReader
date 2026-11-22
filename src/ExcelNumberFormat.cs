@@ -173,9 +173,13 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     /// the format is single-section, and leave out a zero section with the positive section's offset and length,
     /// even an empty one: <c>;;</c> comes back as <c>;</c>. Excel 1.5 (<c>0d.19</c>) leaves out a negative or zero
     /// section that repeats a non-empty positive one, and writes <c>;;</c> back as it is. A format with Excel 1.5's
-    /// text section always follows 1.5.
+    /// text section always follows 1.5, and one with only a text section, such as <c>@</c>, is written as that alone.
     /// </param>
-    public string ToText(ExcelVersion version = ExcelVersion.Excel100)
+    public string ToText(ExcelVersion version = ExcelVersion.Excel100) => ToText(version, export: false);
+
+    // Excel 1.5's export form (the SYLK writer sets g3100 through 79.14) escapes every literal character and quotes
+    // the currency symbol: "$"#,##0\ ;\("$"#,##0\).
+    internal string ToText(ExcelVersion version, bool export)
     {
         var text = new StringBuilder();
         int count = SectionCount;
@@ -184,17 +188,25 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         bool SameBytes(ExcelNumberFormatSection s)
             => Offset(s) == Offset(ExcelNumberFormatSection.Positive) && Length(s) == Length(ExcelNumberFormatSection.Positive);
 
-        AppendSectionText(text, GetSection(ExcelNumberFormatSection.Positive));
+        // Excel 1.5 writes a format whose text section comes before the General its compiler appended (@ alone,
+        // or "pre"@"post") as the text section alone (0d.19).
+        if (count == 4 && HasOwnTextSection() && Offset(ExcelNumberFormatSection.Text) < Offset(ExcelNumberFormatSection.Positive))
+        {
+            AppendSectionText(text, GetSection(ExcelNumberFormatSection.Text), export);
+            return text.ToString();
+        }
+
+        AppendSectionText(text, GetSection(ExcelNumberFormatSection.Positive), export);
         if (version < ExcelVersion.Excel150 && count == 3)
         {
             if (!IsSingleSection)
             {
                 text.Append(';');
-                AppendSectionText(text, GetSection(ExcelNumberFormatSection.Negative));
+                AppendSectionText(text, GetSection(ExcelNumberFormatSection.Negative), export);
                 if (!SameBytes(ExcelNumberFormatSection.Zero))
                 {
                     text.Append(';');
-                    AppendSectionText(text, GetSection(ExcelNumberFormatSection.Zero));
+                    AppendSectionText(text, GetSection(ExcelNumberFormatSection.Zero), export);
                 }
             }
 
@@ -205,18 +217,18 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         if (!SameAsPositive(ExcelNumberFormatSection.Negative))
         {
             text.Append(';');
-            AppendSectionText(text, GetSection(ExcelNumberFormatSection.Negative));
+            AppendSectionText(text, GetSection(ExcelNumberFormatSection.Negative), export);
             if (!SameAsPositive(ExcelNumberFormatSection.Zero))
             {
                 text.Append(';');
-                AppendSectionText(text, GetSection(ExcelNumberFormatSection.Zero));
+                AppendSectionText(text, GetSection(ExcelNumberFormatSection.Zero), export);
             }
         }
 
         if (count == 4 && HasOwnTextSection())
         {
             text.Append(';');
-            AppendSectionText(text, GetSection(ExcelNumberFormatSection.Text));
+            AppendSectionText(text, GetSection(ExcelNumberFormatSection.Text), export);
         }
 
         return text.ToString();
@@ -410,7 +422,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     // string (spec §7).
     private static bool IsUnescaped(char c) => c is ',' or ':' or '/' or ' ' or '-' or '+' or '(' or ')' or '.';
 
-    private static void AppendSectionText(StringBuilder text, ReadOnlySpan<byte> section)
+    private static void AppendSectionText(StringBuilder text, ReadOnlySpan<byte> section, bool export)
     {
         var tokens = Tokenize(section);
         int integerLeft = 0;
@@ -435,7 +447,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
                     {
                         percents--;
                     }
-                    else if (!beforeExponent && !IsUnescaped(c))
+                    else if (!beforeExponent && (export || !IsUnescaped(c)))
                     {
                         text.Append('\\');
                     }
@@ -490,7 +502,15 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
                 case 0x09 or 0x0A or 0x22 or 0x23 or 0x24 or 0x21:
                 case >= 0x0B and <= 0x1A:
                 case 0x1F or 0x20:
-                    AppendLiteral(text, token);
+                    if (export && token.Code == 0x22)
+                    {
+                        text.Append("\"$\"");
+                    }
+                    else
+                    {
+                        AppendLiteral(text, token);
+                    }
+
                     break;
             }
         }
