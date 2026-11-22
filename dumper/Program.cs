@@ -401,7 +401,7 @@ sealed class CellCommand : Command<CellSettings>
             case 0x1D:
                 return operands[0] != 0 ? "TRUE" : "FALSE";
             case 0x1C:
-                return ExcelFormulaResult.ErrorText(operands[0]);
+                return ExcelFormulaResult.ErrorText((ExcelError)operands[0]);
             case 0x19:
                 return operands[0] == 0x01 ? "volatile" : (operands[0] & 0x02) != 0 ? "IF jump" : (operands[0] & 0x08) != 0 ? "skip" : (operands[0] & 0x04) != 0 ? "CHOOSE" : $"flags 0x{operands[0]:X2}";
             default:

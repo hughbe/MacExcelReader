@@ -121,7 +121,7 @@ public class FormattingTests
         var cell = new ExcelCell();
         cell.SetFormula(formula);
         Assert.Equal("TRUE", ExcelValueFormatter.FormatCell(cell));
-        formula.SetErrorResult(7);
+        formula.SetErrorResult(ExcelError.DivideByZero);
         Assert.Equal("#DIV/0!", ExcelValueFormatter.FormatCell(cell));
     }
 

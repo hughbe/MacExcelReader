@@ -65,10 +65,10 @@ public sealed class ExcelCell
         : throw new InvalidOperationException("The cell is not a TRUE or FALSE cell.");
 
     /// <summary>
-    /// Gets the error code (spec §12.4) of a <see cref="ExcelCellType.BooleanOrError"/> cell that holds an error.
+    /// Gets the error held by a <see cref="ExcelCellType.BooleanOrError"/> cell that holds one.
     /// </summary>
-    public byte ErrorCode => IsError
-        ? (byte)Word0
+    public ExcelError Error => IsError
+        ? (ExcelError)(byte)Word0
         : throw new InvalidOperationException("The cell is not an error cell.");
 
     /// <summary>
@@ -171,7 +171,7 @@ public sealed class ExcelCell
     public object? Value => Type switch
     {
         ExcelCellType.Integer => IntegerValue,
-        ExcelCellType.BooleanOrError => IsError ? ExcelFormulaResult.ErrorText(ErrorCode) : BooleanValue,
+        ExcelCellType.BooleanOrError => IsError ? ExcelFormulaResult.ErrorText(Error) : BooleanValue,
         ExcelCellType.Number => ReadNumber(),
         ExcelCellType.Text => DecodeText(),
         ExcelCellType.NumericFormula or ExcelCellType.Formula => DecodeFormula().Result.Value,
@@ -201,17 +201,16 @@ public sealed class ExcelCell
     /// <summary>
     /// Makes the cell a constant error value, as Excel stores one typed into a cell.
     /// </summary>
-    /// <param name="errorCode">The error code (spec §12.4): 0, 7, 15, 23, 29, 36 or 42.</param>
-    public void SetError(byte errorCode)
+    public void SetError(ExcelError error)
     {
-        if (errorCode is not (0 or 7 or 15 or 23 or 29 or 36 or 42))
+        if (!Enum.IsDefined(error))
         {
-            throw new ArgumentOutOfRangeException(nameof(errorCode), errorCode, "Not an Excel error code.");
+            throw new ArgumentOutOfRangeException(nameof(error), error, "Not an Excel error.");
         }
 
         ClearValue();
         Type = ExcelCellType.BooleanOrError;
-        Word0 = (ushort)(0x100 | errorCode);
+        Word0 = (ushort)(0x100 | (byte)error);
     }
 
     /// <summary>

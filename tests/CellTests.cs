@@ -108,7 +108,7 @@ public class CellTests
         formula.SetResult(false);
         Assert.Equal(false, formula.Result.Value);
 
-        formula.SetErrorResult(15);
+        formula.SetErrorResult(ExcelError.Value);
         Assert.Equal("#VALUE!", formula.Result.Value);
 
         formula.SetResult(2.5);
@@ -116,17 +116,17 @@ public class CellTests
     }
 
     [Theory]
-    [InlineData((byte)0, "#NULL!")]
-    [InlineData((byte)7, "#DIV/0!")]
-    [InlineData((byte)15, "#VALUE!")]
-    [InlineData((byte)23, "#REF!")]
-    [InlineData((byte)29, "#NAME?")]
-    [InlineData((byte)36, "#NUM!")]
-    [InlineData((byte)42, "#N/A")]
-    [InlineData((byte)99, "#ERR99")]
-    public void ErrorText(byte code, string expected)
+    [InlineData(ExcelError.Null, "#NULL!")]
+    [InlineData(ExcelError.DivideByZero, "#DIV/0!")]
+    [InlineData(ExcelError.Value, "#VALUE!")]
+    [InlineData(ExcelError.Reference, "#REF!")]
+    [InlineData(ExcelError.Name, "#NAME?")]
+    [InlineData(ExcelError.Number, "#NUM!")]
+    [InlineData(ExcelError.NotAvailable, "#N/A")]
+    [InlineData((ExcelError)99, "#ERR99")]
+    public void ErrorText(ExcelError error, string expected)
     {
-        Assert.Equal(expected, ExcelFormulaResult.ErrorText(code));
+        Assert.Equal(expected, ExcelFormulaResult.ErrorText(error));
     }
 
     [Fact]
@@ -242,13 +242,13 @@ public class CellTests
         var document = ExcelDocument.CreateWorksheet();
         document.Cells["A1"].SetBoolean(true);
         document.Cells["A2"].SetBoolean(false);
-        document.Cells["A3"].SetError(42);
-        Assert.Throws<ArgumentOutOfRangeException>(() => document.Cells["A4"].SetError(1));
+        document.Cells["A3"].SetError(ExcelError.NotAvailable);
+        Assert.Throws<ArgumentOutOfRangeException>(() => document.Cells["A4"].SetError((ExcelError)1));
 
         var reread = ExcelDocument.Read(document.ToArray());
         Assert.Equal(true, reread.Cells["A1"].Value);
         Assert.False(reread.Cells["A2"].BooleanValue);
-        Assert.Equal(42, reread.Cells["A3"].ErrorCode);
+        Assert.Equal(ExcelError.NotAvailable, reread.Cells["A3"].Error);
         Assert.Equal("#N/A", ExcelValueFormatter.FormatCell(reread.Cells["A3"], reread));
         Assert.Throws<InvalidOperationException>(() => reread.Cells["A3"].BooleanValue);
     }

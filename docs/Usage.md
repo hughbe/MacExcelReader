@@ -66,7 +66,7 @@ switch (cell.Type)
     case ExcelCellType.Number:  double d = cell.NumberValue; break;
     case ExcelCellType.Text:    string s = cell.TextValue; break;
     case ExcelCellType.BooleanOrError:
-        if (cell.IsError) { byte code = cell.ErrorCode; } else { bool b = cell.BooleanValue; }
+        if (cell.IsError) { ExcelError e = cell.Error; } else { bool b = cell.BooleanValue; }
         break;
     case ExcelCellType.NumericFormula:
     case ExcelCellType.Formula: var f = cell.Formula!; break;

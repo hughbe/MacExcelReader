@@ -102,8 +102,8 @@ public sealed class ExcelFormula
     /// <summary>Sets the current value to a logical value.</summary>
     public void SetResult(bool value) => SetValue(ExcelFormulaResultKind.Boolean, 0, value, 0, null);
 
-    /// <summary>Sets the current value to an error code.</summary>
-    public void SetErrorResult(byte errorCode) => SetValue(ExcelFormulaResultKind.Error, 0, false, errorCode, null);
+    /// <summary>Sets the current value to an error.</summary>
+    public void SetErrorResult(ExcelError error) => SetValue(ExcelFormulaResultKind.Error, 0, false, (byte)error, null);
 
     private void SetValue(ExcelFormulaResultKind kind, double number, bool boolean, byte errorCode, string? text)
     {

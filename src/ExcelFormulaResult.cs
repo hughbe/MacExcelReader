@@ -49,7 +49,7 @@ public readonly struct ExcelFormulaResult
                 break;
             case 2:
                 Kind = ExcelFormulaResultKind.Error;
-                ErrorCode = valueBytes[4];
+                Error = (ExcelError)valueBytes[4];
                 break;
             default:
                 Kind = ExcelFormulaResultKind.Unknown;
@@ -69,8 +69,8 @@ public readonly struct ExcelFormulaResult
     /// <summary>Gets the logical value, for <see cref="ExcelFormulaResultKind.Boolean"/>.</summary>
     public bool Boolean { get; }
 
-    /// <summary>Gets the error code, for <see cref="ExcelFormulaResultKind.Error"/>.</summary>
-    public byte ErrorCode { get; }
+    /// <summary>Gets the error, for <see cref="ExcelFormulaResultKind.Error"/>.</summary>
+    public ExcelError Error { get; }
 
     /// <summary>
     /// Gets the value as an object: a double, string, bool, or the error text such as "#VALUE!".
@@ -80,23 +80,24 @@ public readonly struct ExcelFormulaResult
         ExcelFormulaResultKind.Number => Number,
         ExcelFormulaResultKind.Text => Text,
         ExcelFormulaResultKind.Boolean => Boolean,
-        ExcelFormulaResultKind.Error => ErrorText(ErrorCode),
+        ExcelFormulaResultKind.Error => ErrorText(Error),
         _ => null,
     };
 
     /// <summary>
-    /// Gets the display text of an error code (the BIFF-compatible codes).
+    /// Gets the text Excel shows for an error, such as <c>#N/A</c>; <c>#ERR</c> and the code for a code Excel does
+    /// not have.
     /// </summary>
-    public static string ErrorText(byte code) => code switch
+    public static string ErrorText(ExcelError error) => error switch
     {
-        0 => "#NULL!",
-        7 => "#DIV/0!",
-        15 => "#VALUE!",
-        23 => "#REF!",
-        29 => "#NAME?",
-        36 => "#NUM!",
-        42 => "#N/A",
-        _ => $"#ERR{code}",
+        ExcelError.Null => "#NULL!",
+        ExcelError.DivideByZero => "#DIV/0!",
+        ExcelError.Value => "#VALUE!",
+        ExcelError.Reference => "#REF!",
+        ExcelError.Name => "#NAME?",
+        ExcelError.Number => "#NUM!",
+        ExcelError.NotAvailable => "#N/A",
+        _ => $"#ERR{(byte)error}",
     };
 
     /// <summary>

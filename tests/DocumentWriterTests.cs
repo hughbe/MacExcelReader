@@ -72,7 +72,7 @@ public class DocumentWriterTests
         logical.SetResult(true);
         document.Cells["A2"].SetFormula(logical);
         var error = new ExcelFormula([0x1C, 42]);
-        error.SetErrorResult(42);
+        error.SetErrorResult(ExcelError.NotAvailable);
         document.Cells["A3"].SetFormula(error);
 
         var reread = RoundTrip(document);

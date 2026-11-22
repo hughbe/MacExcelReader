@@ -18,12 +18,12 @@ public class ExperimentTests
     [InlineData("C6", "#VALUE!", 0x0F)]
     [InlineData("C7", "#NULL!", 0x00)]
     [InlineData("C8", "#NAME?", 0x1D)]
-    public void Errors_UseTheErrorCodes(string address, string text, byte code)
+    public void Errors_UseTheErrorCodes(string address, string text, int code)
     {
         // Each formula entered with FORMULA and calculated by Excel 1.03 (spec §12.4).
         var result = Load("Errors").Cells[address].Formula!.Result;
         Assert.Equal(ExcelFormulaResultKind.Error, result.Kind);
-        Assert.Equal(code, result.ErrorCode);
+        Assert.Equal((ExcelError)code, result.Error);
         Assert.Equal(text, result.Value);
     }
 
@@ -61,7 +61,7 @@ public class ExperimentTests
         // Written by the library with every result 0 and state word 0x018 = 1; Excel 1.03 recalculated it on Open.
         // The same sheet with 0x018 = 0 kept its zeros even after CALCULATE.NOW (spec §6).
         var document = Load("Recalculated");
-        Assert.Equal((byte)0x07, document.Cells["B2"].Formula!.Result.ErrorCode);
+        Assert.Equal(ExcelError.DivideByZero, document.Cells["B2"].Formula!.Result.Error);
         Assert.Equal("#NUM!", document.Cells["B3"].Value);
         Assert.Equal("#N/A", document.Cells["B4"].Value);
     }
@@ -819,7 +819,7 @@ public class ExperimentTests
 
         var d2 = document.Cells["D2"];
         Assert.True(d2.IsError);
-        Assert.Equal(23, d2.ErrorCode);
+        Assert.Equal(ExcelError.Reference, d2.Error);
         Assert.Equal("#REF!", d2.Value);
         Assert.Equal("#REF!", ExcelValueFormatter.FormatCell(d2, document));
     }
