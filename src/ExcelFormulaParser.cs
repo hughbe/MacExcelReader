@@ -1113,12 +1113,11 @@ public static class ExcelFormulaParser
             _ => ValueClass,
         });
 
-        // Excel 1.00–1.03 give every function call inside IF or CHOOSE reference class; Excel 1.5 treats them like
-        // other arguments (spec §15.4).
+        // The arguments of IF and CHOOSE follow the same rules as any other in every release; the 1.00 disk's macro
+        // sheets carry reference-class calls from an earlier build's compiler (spec §15.4).
         private int FunctionClass(Context context, ExcelValueTypes returns) => InArrayFormula(context, context.Kind switch
         {
             ContextKind.Range or ContextKind.MacroTarget or ContextKind.DefinitionTop => ReferenceClass,
-            ContextKind.IfArgument when _version < ExcelVersion.Excel150 => ReferenceClass,
             ContextKind.Argument or ContextKind.IfArgument when returns == ExcelValueTypes.Array && (context.Accepts & ExcelValueTypes.Array) != 0 => ArrayClass,
             ContextKind.Argument or ContextKind.IfArgument when (context.Accepts & ExcelValueTypes.Reference) != 0 && (returns & ExcelValueTypes.Reference) != 0 => ReferenceClass,
             _ => ValueClass,

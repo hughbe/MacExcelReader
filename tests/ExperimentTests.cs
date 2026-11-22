@@ -724,4 +724,16 @@ public class ExperimentTests
         Assert.Equal(0x45, document.Cells["B10"].Formula!.SharedExpression[0]);   // {=A1:B1+A2:B2}
         Assert.Equal(0x45, document.Cells["B12"].Formula!.SharedExpression[0]);   // {=-A1:A2}
     }
+
+    [Theory]
+    [InlineData("B5", 0x41)]    // =IF(A1,NOW()): NOW in value class
+    [InlineData("B21", 0x41)]   // =IF(ISERROR(A1),1), typed: ISERROR in value class
+    [InlineData("B22", 0x41)]   // =IF(A1,GOTO(B1)), typed: GOTO in value class
+    public void IfArguments_FollowTheArgumentRules(string address, byte expected)
+    {
+        // Excel 1.00 compiling through FORMULA and by typing (spec §15.4).
+        var expression = Load("If Classes").Cells[address].Formula!.Expression.ToArray();
+        Assert.Contains(expected, expression.Where(b => (b & 0x9F) is 0x01 or 0x02));
+        Assert.DoesNotContain(expression, b => b is 0x21 or 0x22);
+    }
 }

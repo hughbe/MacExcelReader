@@ -69,9 +69,9 @@ B).
 Seen in Excel 1.03. `=A1:IV16384` comes back from GET.FORMULA as `=R[-20]:R[16363]`, and entering that text
 gives a different formula: a range of two whole-row areas wrapped in a memory area (`46 … 25 … 25 … 11`).
 
-## Display quirks of GET.FORMULA (Excel 1.03)
+## Display quirks of GET.FORMULA (Excel 1.03, 1.5)
 
-Seen in Excel 1.03. These look like mismatches but the formula is right:
+Seen in Excel 1.03; the whole-row and array-formula ones also in Excel 1.5. These look like mismatches but the formula is right:
 
 * GET.FORMULA returns R1C1 text even when the sheet shows A1 references: `=A1%` in B4 is `=R[-3]C[-1]%`.
 * A range of whole rows is shortened: `=A1:IV16384` becomes `=R[-20]:R[16363]`, and `=$A$1:$IV$16384` becomes

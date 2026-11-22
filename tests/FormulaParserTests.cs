@@ -17,6 +17,30 @@ public class FormulaParserTests
 
     // The pre-release Excel 1.5 build wrote FORMULA with one argument in the variable-count form, where the
     // released 1.5 keeps the fixed-count form (spec §2.3, §15.4).
+    // Samples whose formulas Excel kept from another compiler: the 1.00 disk's macro sheets, compiled by a build
+    // before 1.00 that gave every function call inside IF or CHOOSE reference class, and Driver French, which an
+    // earlier version of this library compiled the same way (spec §15.4).
+    private static readonly string[] s_preReleaseIfClasses =
+        ["COMMANDS", "DB.FORM", "REPLACE", "MATRIX", "MATRIX 2", "CLOCK.MS", "Driver French"];
+
+    private static bool DiffersOnlyInFunctionClass(string sample, ReadOnlySpan<byte> expected, byte[] actual)
+    {
+        if (!s_preReleaseIfClasses.Contains(Path.GetFileName(sample)) || expected.Length != actual.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < actual.Length; i++)
+        {
+            if (expected[i] != actual[i] && !((expected[i] & 0x9F) is 0x01 or 0x02 && expected[i] >> 5 == 1 && actual[i] == (expected[i] & 0x1F | 0x40)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool IsKnownException(byte[] file, ExcelFormula formula)
     {
         // A range of two areas (25 25 11), which Excel 1.03 compiled from GET.FORMULA's whole-row text
@@ -119,7 +143,8 @@ public class FormulaParserTests
             }
 
             Assert.True(
-                Normalize(expected, false).AsSpan().SequenceEqual(Normalize(actual, false)),
+                Normalize(expected, false).AsSpan().SequenceEqual(Normalize(actual, false))
+                    || DiffersOnlyInFunctionClass(sample, Normalize(expected, false), Normalize(actual, false)),
                 $"{address} {text}: {Convert.ToHexString(expected)} vs {Convert.ToHexString(actual)}");
         }
     }

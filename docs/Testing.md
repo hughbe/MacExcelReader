@@ -185,6 +185,8 @@ Things to know:
 | Nov 2026 | 1.00 | `Literals` written by the library with function count 209 and one extra function name, and with 208 | 1.00 refuses a count above 208 ("File is not a saved worksheet") before reading the names; 208 opens (spec §5, §14) |
 | Nov 2026 | 1.5 | `formulas-1.5` sheets 2–6 with `--recompile`, and `BREAK CHART` and `PROFIT CHART` | Charts and sheets 3, 4 and 6 match. Array-formula operands take array class only inside array arguments, and 1.5's Save writes `DATA.DELETE?()` as `41 82`; both now in the parser (spec §15.4). GET.FORMULA gives every cell of an array range the anchor's text; the check now reads it from the anchor. |
 | Nov 2026 | 1.00 | Six array formulas re-entered with `--recompile` | An operator at the top of an array formula leaves its operands in value class, as in 1.5 (spec §15.4) |
+| Nov 2026 | 1.00 | `formulas-1.0` sheets 2–6 with `--recompile`, and IF and CHOOSE probes, some typed | Sheets 3–6 match. Function calls inside IF and CHOOSE follow the ordinary argument rules, typed or through FORMULA; the 1.00 disk's macro sheets carry an earlier compiler's reference classes (spec §15.4) |
+| Nov 2026 | 1.5 | `formulas-1.5` sheet 1 with `--recompile` | Matches, apart from GET.FORMULA's whole-row text for `=A1:IV16384` |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

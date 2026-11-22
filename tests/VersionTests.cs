@@ -47,11 +47,16 @@ public class VersionTests
     }
 
     [Fact]
-    public void FunctionsInsideIf_ChangeClassInExcel15()
+    public void FunctionsInsideIf_FollowTheArgumentRules()
     {
-        // GOTO inside IF: reference class (21) in 1.00–1.03, value class (41) in 1.5.
-        Assert.Contains("2135", Convert.ToHexString(ExcelFormula.Parse("=IF(A1,GOTO(B1))").Expression));
-        Assert.Contains("4135", Convert.ToHexString(ExcelFormula.Parse("=IF(A1,GOTO(B1))", null, ExcelVersion.Excel150).Expression));
+        // GOTO inside IF is value class (41) in Excel 1.00 and 1.5; an IF in a branch, which can return a
+        // reference, is reference class (22), and one in the condition value class (42) (spec §15.4).
+        foreach (var version in new[] { ExcelVersion.Excel100, ExcelVersion.Excel150 })
+        {
+            Assert.Contains("4135", Convert.ToHexString(ExcelFormula.Parse("=IF(A1,GOTO(B1))", null, version).Expression));
+            Assert.Contains("220201", Convert.ToHexString(ExcelFormula.Parse("=IF(A1,IF(B1,1))", null, version).Expression));
+            Assert.Contains("420201", Convert.ToHexString(ExcelFormula.Parse("=IF(IF(A1,B1),1)", null, version).Expression)[..^6]);
+        }
     }
 
     [Fact]
