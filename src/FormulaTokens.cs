@@ -269,6 +269,27 @@ public static class FormulaTokens
     public static bool IsSharedReference(ReadOnlySpan<byte> expression)
         => expression.Length > 0 && Normalize(expression[0]) is 0x01 or 0x02;
 
+    // The text of the binary operators, tokens 0x03–0x11 in order (spec §15.1). 0x0F is the space, Excel's
+    // intersection operator.
+    private static readonly string[] s_binaryOperators = ["+", "-", "*", "/", "^", "&", "<", "<=", "=", ">=", ">", "<>", " ", ",", ":"];
+
+    /// <summary>Gets the text of a binary operator token (0x03–0x11), or "?".</summary>
+    internal static string BinaryOperatorText(byte code)
+        => code is >= 0x03 and <= 0x11 ? s_binaryOperators[code - 0x03] : "?";
+
+    /// <summary>Gets the token of a binary operator's text.</summary>
+    internal static byte BinaryOperatorCode(string text)
+    {
+        int index = System.Array.IndexOf(s_binaryOperators, text);
+        return index >= 0 ? (byte)(index + 0x03) : throw new ArgumentException($"'{text}' is not a binary operator.", nameof(text));
+    }
+
+    /// <summary>
+    /// The word that starts the trailer of an array formula's or table's top-left cell, where other cells hold the
+    /// anchor's row; it cannot be a row (spec §12.6).
+    /// </summary>
+    internal const ushort SharedAnchorMarker = 0x4000;
+
     /// <summary>
     /// Measures the fix-ups that follow an expression in a cell formula record (spec §12.5, §12.6).
     /// </summary>
@@ -282,7 +303,7 @@ public static class FormulaTokens
         {
             ushort row = ReadWord(data, ref position);
             Skip(data, ref position, 1);
-            if (row == 0x4000)
+            if (row == SharedAnchorMarker)
             {
                 Require(data, position, 10);
                 byte sharedLength = data[position + 9];

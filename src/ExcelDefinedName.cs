@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using MacExcelReader.Internal;
 
 namespace MacExcelReader;
@@ -10,7 +11,7 @@ public sealed class ExcelDefinedName
     /// <summary>
     /// Flag: the definition is a reference: a cell, an area, or a union of them. Excel sets it on every such name,
     /// on worksheets and macro sheets alike, so a name used as a macro has it too (spec §11).
-    /// <see cref="SetDefinition"/> sets it.
+    /// <see cref="SetDefinition(string, ExcelDocument?, ExcelVersion)"/> sets it.
     /// </summary>
     public const byte ReferenceFlag = 0x04;
 
@@ -71,10 +72,20 @@ public sealed class ExcelDefinedName
     public bool IsFunctionMacro => (Flags & MacroFlag) != 0 && (MacroKind & FunctionKind) != 0;
 
     /// <summary>
-    /// Gets the definition as A1-style text, without '='.
+    /// Gets the definition as A1-style text, without '=', with its relative references as Excel shows them while
+    /// A1 is the active cell.
     /// </summary>
     public string GetDefinitionText(ExcelDocument? document = null)
-        => FormulaDecompiler.Decompile(Definition, [], document, fixupsInPlace: true, ArrayConstants);
+        => GetDefinitionText(document, default);
+
+    /// <summary>
+    /// Gets the definition as A1-style text, without '=', with its relative references as Excel shows them while
+    /// <paramref name="relativeTo"/> is the active cell. A definition stores a relative row or column as an offset
+    /// from the cell the name is used in (spec §11): a name defined as <c>=B1</c> with C2 active refers to the cell
+    /// one row up and one column left of each cell that uses it.
+    /// </summary>
+    public string GetDefinitionText(ExcelDocument? document, ExcelCellAddress relativeTo)
+        => FormulaDecompiler.Decompile(Definition, [], document, fixupsInPlace: true, ArrayConstants, relativeTo);
 
     /// <summary>
     /// Gets the data of the array constants (<c>0x20</c> tokens) in the definition, one block per token in order
@@ -88,12 +99,55 @@ public sealed class ExcelDefinedName
     /// </summary>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
     public void SetDefinition(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
+        => SetDefinition(text, default, document, version);
+
+    /// <summary>
+    /// Sets the definition from formula text whose relative references are relative to
+    /// <paramref name="relativeTo"/>, as when Excel defines a name with that cell active: <c>=B1</c> with C2 as
+    /// <paramref name="relativeTo"/> refers to the cell one row up and one column left of each cell that uses the
+    /// name (spec §11). Sets or clears <see cref="ReferenceFlag"/> to match the definition.
+    /// </summary>
+    /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
+    public void SetDefinition(string text, ExcelCellAddress relativeTo, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
     {
         var (definition, arrays) = ExcelFormulaParser.ParseNameDefinition(text, document, version);
+        Rebase(definition, relativeTo);
         Definition = definition;
         ArrayConstants.Clear();
         ArrayConstants.AddRange(arrays);
         Flags = IsReference(definition) ? (byte)(Flags | ReferenceFlag) : (byte)(Flags & ~ReferenceFlag);
+    }
+
+    // Turns the relative parts of the definition's references, parsed as cell indices, into offsets from relativeTo.
+    private static void Rebase(byte[] definition, ExcelCellAddress relativeTo)
+    {
+        if (relativeTo == default)
+        {
+            return;
+        }
+
+        foreach (var token in FormulaTokens.Enumerate(definition))
+        {
+            int p = token.Offset + 1;
+            switch (token.Code)
+            {
+                case 0x2C:
+                    RebaseCell(definition, p, p + 2, relativeTo);
+                    break;
+                case 0x2D:
+                    RebaseCell(definition, p, p + 4, relativeTo);
+                    RebaseCell(definition, p + 2, p + 5, relativeTo);
+                    break;
+            }
+        }
+    }
+
+    private static void RebaseCell(byte[] definition, int rowOffset, int columnOffset, ExcelCellAddress relativeTo)
+    {
+        var (rowWord, column) = RowWord.Move(
+            BinaryPrimitives.ReadUInt16BigEndian(definition.AsSpan(rowOffset)), definition[columnOffset], -relativeTo.Row, -relativeTo.Column);
+        BinaryPrimitives.WriteUInt16BigEndian(definition.AsSpan(rowOffset), rowWord);
+        definition[columnOffset] = column;
     }
 
     // A single cell or area token (2C, 2D in any class), or a union in its definition form (2E n ...).

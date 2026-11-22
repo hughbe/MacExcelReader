@@ -1,3 +1,5 @@
+using MacExcelReader.Internal;
+
 namespace MacExcelReader;
 
 /// <summary>
@@ -278,9 +280,20 @@ public static class ExcelValueFormatter
             return format.Format(number, columns);
         }
 
+        // TRUE, FALSE and errors show as they are, whatever the cell's format.
+        if (cell.Type == ExcelCellType.BooleanOrError)
+        {
+            return cell.IsError ? cell.Error.ToText() : BooleanText.Of(cell.BooleanValue);
+        }
+
+        if (cell.Formula?.Result is { Kind: ExcelFormulaResultKind.Error } result)
+        {
+            return result.Error.ToText();
+        }
+
         return cell.Value switch
         {
-            bool b => b ? "TRUE" : "FALSE",
+            bool b => BooleanText.Of(b),
             string s => document?.GetNumberFormat(cell.NumberFormat)?.Format(s) ?? s,
             _ => string.Empty,
         };

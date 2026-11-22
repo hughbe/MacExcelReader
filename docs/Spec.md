@@ -18,7 +18,7 @@ charts. It was reverse-engineered from the applications' code and checked agains
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 80 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 85 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
@@ -298,8 +298,8 @@ Document kind:
 | Value | Kind |
 |---:|---|
 | `0x10` | Worksheet |
-| `0x40` | Macro sheet |
 | `0x20` | Chart: the in-memory kind only, since charts never reach this writer (§16) |
+| `0x40` | Macro sheet |
 
 Section 0 begins immediately after the extra header.
 
@@ -326,8 +326,8 @@ A raw dump of a contiguous run of application globals. Offsets are relative to t
 |-------:|-----:|---------|---------|
 | 0x000 | word | 100 | Maximum iterations (Calculation dialog; 1…32767) |
 | 0x002 | word | 1 | Calculation mode (values below; `CALCULATION(2)` saves −1, `CALCULATION(3)` saves 0). Like 0x006 it is a global setting: every sheet Excel saves gets the current one. |
-| 0x004 | word | 1 | Precision: 1 = full precision, 0 = precision as displayed (results are rounded through the cell format when 0) |
-| 0x006 | word | 1 | Reference style: 1 = A1, 0 = R1C1 (`A1.R1C1(FALSE)` saves 0). It is saved and restored around formula parsing, and is global like 0x002. |
+| 0x004 | word | 1 | Precision: 0 = precision as displayed (results are rounded through the cell format), 1 = full precision |
+| 0x006 | word | 1 | Reference style: 0 = R1C1 (`A1.R1C1(FALSE)` saves it), 1 = A1. It is saved and restored around formula parsing, and is global like 0x002. |
 | 0x008 | word | 0 | Unused: no code in the application reads or writes it |
 | 0x00A | double | 0.001 | Maximum change (iteration) |
 | 0x012 | word | 0 | Iteration enabled (0 / 1) |
@@ -337,7 +337,7 @@ A raw dump of a contiguous run of application globals. Offsets are relative to t
 | 0x01A | word | 0 | Pending-work flag. Excel 1.00 never sets it: a new sheet starts with 0 (`10.00`), so only a file can. When it is set, `22.03` runs the range routine `23.01` over the whole sheet (rows 0–16383, columns 0–255) with operation code `0xD01F` and clears the word. Operation 31 does nothing to a cell; the flag bits make the routine rescan each row (`23.02`), checking for each cell whether its neighbours are empty and whether they are Fill-aligned: what Excel needs to draw text that spills into the next cells. Excel 1.00 works that out as it draws anyway, so the word has no visible effect: sheets with overflowing text and with runs of Fill-aligned cells look the same saved with 0 or 1, and Excel saves them back with 0. |
 | 0x01C | word | 0 | Set to 1 by the formula compiler when a formula uses a function at or above the base function count. It selects which count Save writes at the start of the data area (§5). Cleared for a new sheet. |
 | 0x01E | word | 0 / 1 | **Document protected.** Selects the "Protect Document…" / "Unprotect Document…" menu text and is checked by ~50 editing routines. 1 only in `DB.FORM`. |
-| 0x020 | word | 0 / 1 | Which form 0x014 and 0x274 are in: 1 = last indices, 0 = counts (§6.1) |
+| 0x020 | word | 0 / 1 | Which form 0x014 and 0x274 are in: 0 = counts, 1 = last indices (§6.1) |
 | 0x022 | word | | Number of defined names that have a definition (0 for a new sheet, 6 in `REPLACE`). Define Name counts it up; Open and Save carry it through unchanged, so a file written with 0 keeps 0 when Excel re-saves it. Every sample has the true count. |
 | 0x024 | word | | Number of names whose definition is a reference (flag `0x04`, §11; 5 in `REPLACE`). Excel recomputes it when it saves. |
 | 0x026 | long | | Pointer, left over from memory |
@@ -371,9 +371,9 @@ Calculation mode (`0x002`):
 
 | Value | Meaning |
 |---:|---|
-| 1 | Automatic |
 | −1 | Automatic except tables |
 | 0 | Manual |
+| 1 | Automatic |
 
 Offsets 0x262–0x273 are all derived from the `Print_Area` and `Print_Titles` names by one routine, which is
 re-run whenever a name or a column width changes; a writer can leave them zero.
@@ -475,10 +475,9 @@ international character table at run time, so the ones shown are the US defaults
 | `01` | | `General` |
 | `02` | 1 byte `c` | Literal character `c`. A backslash is written before it unless it is one of the characters that may appear unescaped. |
 | `03` | 3 bytes `a b c` | Starts a number section; produces no text. `a` = number of integer digit positions (drives thousands-separator placement), `b` = decimal places, `c` a signed byte: `(c − b) / 2` = number of percent signs. Excel 1.5: when `c` is below `b`, `(b − c) / 3` is the number of trailing thousands separators, each dividing the number by 1000 (`#,##0,` is `03 04 00 FD`, `Format Scaling`). |
-| `1C` | 3 bytes | Same, for a scientific section |
 | `04` | 1 byte `n` | `n` × `#` |
-| `06` | 1 byte `n` | `n` × `0` |
 | `05` | | Decimal point; digit runs after it are written without separators |
+| `06` | 1 byte `n` | `n` × `0` |
 | `07` | | Turns on the thousands separator, inserted every three integer positions |
 | `08`, `1B` | | Reserved. The format compiler (`07.09` in 1.00, `05.09` in 1.03) never emits them and the routines that read formats skip them. |
 | `09` | 1 byte `n`, `n` chars | Quoted string `"…"` |
@@ -486,11 +485,12 @@ international character table at run time, so the ones shown are the US defaults
 | `0B`–`0E` | | `d`, `dd`, `ddd`, `dddd` |
 | `0F`–`12` | | `m`, `mm`, `mmm`, `mmmm` (month) |
 | `13`, `14` | | `h`, `hh` (24-hour) |
-| `1F`, `20` | | `h`, `hh` (12-hour; used when the section has an AM/PM token) |
 | `15`, `16` | | `m`, `mm` (minutes) |
 | `17`, `18` | | `s`, `ss` |
 | `19`, `1A` | | `yy`, `yyyy` |
+| `1C` | 3 bytes | Starts a scientific section, with the same operands as `03` |
 | `1D`, `1E` | 1 byte | Exponent sign `+` / `-`; the byte is the exponent digit count |
+| `1F`, `20` | | `h`, `hh` (12-hour; used when the section has an AM/PM token) |
 | `21` | 2 bytes `n1 n2`, `n1` chars, `n2` chars | AM/PM designator, written as the two strings joined by `/` (`AM/PM`, `A/P`) |
 | `22` | | Currency symbol |
 | `23` | | Excel 1.5: `@`, the text placeholder. The character is the 28th of the format-character string (below). |
@@ -680,12 +680,17 @@ Cell types:
 | Type | Meaning | word 0 / data |
 |-----:|---------|---------------|
 | 0 | Empty (formatting only) | word 0 is a pointer left over from memory; ignore it |
-| 1 | Integer | word 0 = signed 16-bit value, stored inline. Bits 15–12 of word 1 are not meaningful (always `0xD` in the sample). |
+| 1 | Integer | word 0 = **unsigned** 16-bit value, 0–65535, stored inline. Bits 15–12 of word 1 are not meaningful (`0xD` in one sample, 1 in others). |
 | 2 | Number | 8-byte double in cell data |
 | 3 | Text | Pascal string in cell data |
-| 4 | Not seen in any sample | No data in cell data |
+| 4 | TRUE, FALSE or an error | word 0: high byte 0 for TRUE or FALSE, 1 for an error; low byte the value (1 TRUE, 0 FALSE) or the error code (§12.4). No cell data; bits 15–12 of word 1 are not meaningful. |
 | 5 | Formula, numeric result | Formula record in cell data (§12) |
 | 6 | Formula, non-numeric result | Formula record in cell data (§12) |
+
+Excel picks the type when a constant is typed or entered with FORMULA (Excel 1.00 and 1.5 alike, `Constant
+Cells` and `Constant Cells 1.5` samples). A whole number from 0 to 65535 is an integer: 40000 is `9C 40`, and
+Excel shows it as 40000. Any other number, −7 included, is type 2. TRUE is `00 01`, FALSE `00 00` and `#REF!`
+`01 17`, all type 4: the same parts as BIFF2's BOOLERR record, a value and a Boolean-or-error flag.
 
 For types 2, 3, 5 and 6 the cell's data is at
 
@@ -768,6 +773,14 @@ Definitions differ from cell formulas:
   holds the index in that document's list in section 3 (§10).
 * A definition can be a union written without parentheses, such as `=$C$9,$E$9,$C$10` (`INVOICE TEMPLATE`).
 * Token classes follow the rules for array formulas (§15.4).
+* A **relative** row or column in a cell or area reference (`2C`, `2D`) is an **offset** from the cell the name
+  is used in, not a cell index: 14-bit two's complement in the row word, a signed byte for the column. An
+  absolute row or column is an index, as in a cell formula. DEFINE.NAME takes the offsets from the active cell.
+  With D5 active, `DEFINE.NAME("Up3","=R[-3]C[-2]")` stores `2C FF FD FE` (row −3 and column −2, both
+  relative), and `=Up3` gives B2 in D5 and B3 in D6; `"=R[-1]C2"` stores `2C BF FF 01` and `"=R5C[-2]"` stores
+  `2C 40 04 FE` (Excel 1.00 and 1.5, `Relative Names` and `Relative Names 1.5` samples). So a definition
+  written as `=B2` means different cells for different active cells; one whose references are all absolute, as
+  in every one of Microsoft's samples, means the same cells everywhere.
 
 A new worksheet always has five names with empty definitions: `Criteria`, `Database`, `Print_Area`,
 `Print_Titles`, `Recorder`. From 1.01 on they are items 30–34 of the string list `STR#` 256, so a translated
@@ -847,15 +860,16 @@ appends replacements, in token order:
 
 | Token | Appended | Meaning |
 |-------|----------|---------|
-| `0x23` name | word | 1-based index of the name in section 4. Inside an external reference (between `1A` and `1B`) it is instead the 1-based index in that document's list in section 3. |
 | `0x1A` external sheet | word | 1-based index of the external document in §8. An entry named `\0` stands for the active sheet, written `!A1` (§8) |
 | `0x20` array constant | array block (below) | The constant's elements |
+| `0x23` name | word | 1-based index of the name in section 4. Inside an external reference (between `1A` and `1B`) it is instead the 1-based index in that document's list in section 3. |
 | `0x26` memory area | word `n`, then `n` × 6-byte areas (first row word, last row word, first column byte, last column byte) | The areas the wrapped union or intersection stands for, as the compiler worked them out (§15.4). |
 
 Array block: byte column count (0 means 256), word row count, then the `rows × cols` elements row by row, each
-a type byte and a value: type 1 is a number (a double) and type 2 a string (a Pascal string). Readers treat
-any other type as 8 bytes; no other type occurs. The same blocks hold the array constants of name definitions
-(§11). For example, in `MATRIX`, `{0,1,3;2,-1,2;-3,2,-2}` is `09 00 01` and nine type-1 elements.
+a type byte and a value: type 1 is a number (a double), type 2 a string (a Pascal string), type 4 TRUE or
+FALSE and type 16 an error. Types 4 and 16 have 8 bytes: 0, then the value (1 TRUE, 0 FALSE) or the error code
+(§12.4), then six bytes left over from memory (`Constant Cells`, `Array Constant Types`). These are BIFF's
+element types and values. The same blocks hold the array constants of name definitions (§11). For example, in `MATRIX`, `{0,1,3;2,-1,2;-3,2,-2}` is `09 00 01` and nine type-1 elements.
 
 ### 12.6 Array formulas and tables
 
@@ -1067,7 +1081,7 @@ The file ends after this section.
 ## 15. Parsed expressions
 
 Reverse-Polish token stream. This is the direct ancestor of the BIFF2 `ptg` encoding: token numbers and
-operand sizes coincide wherever they could be checked.
+operand sizes coincide wherever they could be checked ([Excel 1.x and BIFF2](Biff2.md#6-formulas) compares them).
 
 Tokens `0x01`–`0x1F` are plain bytes. Tokens from `0x20` up carry a **class** in bits 6–5:
 
@@ -1135,8 +1149,8 @@ not exist.
 | 29 | 1 | Memory function: the length in bytes of the subexpression that follows. Wraps a range or union that involves a function result or a name (§15.4). |
 | 2A | 3 | Deleted cell reference. The bytes look like the former row word and column (`2A 00 84 02`); nothing reads them. |
 | 2B | 6 | Deleted area reference |
-| 2C | 3 | Cell reference inside a name definition |
-| 2D | 6 | Area reference inside a name definition |
+| 2C | 3 | Cell reference inside a name definition. Relative parts are offsets from the cell the name is used in (§11). |
+| 2D | 6 | Area reference inside a name definition, with offsets as in `2C` |
 | 2E | 1 | Memory function inside a name definition (the definition form of `29`; `INVOICE TEMPLATE`) |
 | 2F | 1 | Memory function with no memory, in a name definition: what `2E` becomes when recalculation runs out of memory while evaluating it. The evaluator rewrites the token's low five bits to `0F` (`25.01` in 1.00), as it turns `26`–`28` into `28`, and Open turns `2F` back into `2E` (`46.06`; `46.07` in 1.01) so that it is evaluated again. |
 | 30 | 7 | Marked copy of `23` (name) |

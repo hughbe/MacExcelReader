@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using MacExcelReader.Internal;
 
 namespace MacExcelReader;
 
@@ -100,7 +101,7 @@ public sealed class ExcelCellGrid
             return cell.Type;
         }
 
-        return IsSourcePosition(row, column) ? (ExcelCellType)((SourceWord1(row, column) >> 9) & 7) : ExcelCellType.Empty;
+        return IsSourcePosition(row, column) ? CellWords.Type(SourceWord1(row, column)) : ExcelCellType.Empty;
     }
 
     /// <summary>
@@ -162,7 +163,7 @@ public sealed class ExcelCellGrid
                 while (++_column < columns)
                 {
                     _grid.GetWords(_row, _column, out ushort word0, out ushort word1, out ushort word2);
-                    if ((word1 & 0x0E00) != 0)
+                    if (CellWords.Type(word1) != ExcelCellType.Empty)
                     {
                         Current = new ExcelCellRef(_grid, _row, _column, word0, word1, word2);
                         return true;
@@ -361,7 +362,7 @@ public sealed class ExcelCellGrid
         word0 = BinaryPrimitives.ReadUInt16BigEndian(entry);
         word1 = BinaryPrimitives.ReadUInt16BigEndian(entry.Slice(2));
         word2 = BinaryPrimitives.ReadUInt16BigEndian(entry.Slice(4));
-        var type = (ExcelCellType)((word1 >> 9) & 7);
+        var type = CellWords.Type(word1);
         if (HasCellData(type))
         {
             int offset = DataOffset(word0, word1);

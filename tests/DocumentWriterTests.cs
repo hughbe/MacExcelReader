@@ -34,7 +34,7 @@ public class DocumentWriterTests
     public void Cells_AllTypesAndAttributesRoundTrip()
     {
         var document = ExcelDocument.CreateWorksheet();
-        document.Cells["A1"].SetInteger(-5);
+        document.Cells["A1"].SetInteger(40000);
         document.Cells["B1"].SetNumber(Math.PI);
         document.Cells["C1"].SetText("Café ™");
         var cell = document.Cells["D1"];
@@ -48,7 +48,7 @@ public class DocumentWriterTests
 
         var reread = RoundTrip(document);
 
-        Assert.Equal(-5, reread.Cells["A1"].IntegerValue);
+        Assert.Equal(40000, reread.Cells["A1"].IntegerValue);
         Assert.Equal(Math.PI, reread.Cells["B1"].NumberValue);
         Assert.Equal("Café ™", reread.Cells["C1"].TextValue);
         var d1 = reread.Cells["D1"];
@@ -72,7 +72,7 @@ public class DocumentWriterTests
         logical.SetResult(true);
         document.Cells["A2"].SetFormula(logical);
         var error = new ExcelFormula([0x1C, 42]);
-        error.SetErrorResult(42);
+        error.SetErrorResult(ExcelError.NotAvailable);
         document.Cells["A3"].SetFormula(error);
 
         var reread = RoundTrip(document);
@@ -80,7 +80,7 @@ public class DocumentWriterTests
         Assert.Equal("hi", reread.Cells["A1"].Value);
         Assert.Equal("=\"hi\"", reread.Cells["A1"].Formula!.ToText());
         Assert.Equal(true, reread.Cells["A2"].Value);
-        Assert.Equal("#N/A", reread.Cells["A3"].Value);
+        Assert.Equal(ExcelError.NotAvailable, reread.Cells["A3"].Value);
         Assert.Equal(0, reread.Cells["A3"].Formula!.StoredColumn);
         Assert.Equal(2, reread.Cells["A3"].Formula!.StoredRowWord & 0x3FFF);
     }

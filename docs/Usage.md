@@ -62,17 +62,22 @@ var maybe = document.Cells.Find("Z99");  // null outside the grid; never grows i
 
 switch (cell.Type)
 {
-    case ExcelCellType.Integer: short i = cell.IntegerValue; break;
+    case ExcelCellType.Integer: ushort i = cell.IntegerValue; break;
     case ExcelCellType.Number:  double d = cell.NumberValue; break;
     case ExcelCellType.Text:    string s = cell.TextValue; break;
+    case ExcelCellType.BooleanOrError:
+        if (cell.IsError) { ExcelError e = cell.Error; } else { bool b = cell.BooleanValue; }
+        break;
     case ExcelCellType.NumericFormula:
     case ExcelCellType.Formula: var f = cell.Formula!; break;
 }
 
-object? value = cell.Value;   // short, double, string, bool, error text, or null
+object? value = cell.Value;   // ushort, double, string, bool, ExcelError, or null
 ```
 
-`Integer` cells hold whole numbers in −32768…32767; Excel uses them to save space. Use `TryGetNumber` to treat
+`Integer` cells hold whole numbers from 0 to 65535; Excel stores a typed whole number in that range this way to
+save space, and a negative one as a number. `BooleanOrError` cells hold a TRUE, FALSE or error typed into the
+cell. Use `TryGetNumber` to treat
 integers, numbers and numeric formulas alike, without allocating:
 
 ```csharp
@@ -197,6 +202,16 @@ var name = new ExcelDefinedName("Totals");
 name.SetDefinition("=$A$1:$A$5", document);
 ```
 
+A relative reference in a name is stored as an offset from the cell that uses the name, so it means something
+only against a cell, as in Excel's Define Name dialog, which uses the active cell. Give that cell when setting or
+reading such a definition; without one, A1 is used:
+
+```csharp
+var above = new ExcelDefinedName("Above");
+above.SetDefinition("=B1", new ExcelCellAddress(1, 1), document);   // B2 active: the cell above
+Console.WriteLine(above.GetDefinitionText(document, new ExcelCellAddress(9, 3)));   // D9
+```
+
 The rules the parser follows (token classes, `IF` and `CHOOSE` jumps, the `SUM` attribute, volatile and
 memory-function tokens, and how they differ between releases) are in
 [spec §15.4](Spec.md#154-how-excel-compiles-formula-text). To see what it produces:
@@ -212,15 +227,15 @@ You can also build an expression yourself. The common tokens:
 
 | Token | Bytes | Meaning |
 |-------|-------|---------|
-| `0x44 rr rr cc` | 4 | Cell reference. Row word: bit 15 relative row, bit 14 relative column. |
-| `0x25 r1 r1 r2 r2 c1 c2` | 7 | Area |
+| `0x03`…`0x0E` | 1 | `+ - * / ^ & < <= = >= > <>` |
+| `0x17 len text` | 2+ | String constant |
 | `0x1E nn nn` | 3 | Integer constant |
 | `0x1F` + 8 bytes | 9 | Number constant (big-endian double) |
-| `0x17 len text` | 2+ | String constant |
-| `0x03`…`0x0E` | 1 | `+ - * / ^ & < <= = >= > <>` |
+| `0x23` + 7 bytes | 8 | Defined name; its 1-based index goes in the fix-ups |
+| `0x25 r1 r1 r2 r2 c1 c2` | 7 | Area |
 | `0x41 ff` | 2 | Function `ff` with its fixed argument count |
 | `0x42 nn ff` | 3 | Function `ff` with `nn` arguments |
-| `0x23` + 7 bytes | 8 | Defined name; its 1-based index goes in the fix-ups |
+| `0x44 rr rr cc` | 4 | Cell reference. Row word: bit 15 relative row, bit 14 relative column. |
 
 ```csharp
 // =AVERAGE($A$1:$A$5)*2: area rows 0–4 of column 0, AVERAGE (5) with 1 argument, integer 2, multiply.

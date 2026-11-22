@@ -8,7 +8,7 @@ public enum ExcelCellType : byte
     /// <summary>The cell has no value; it may still carry formatting.</summary>
     Empty = 0,
 
-    /// <summary>A 16-bit integer stored in the cell table.</summary>
+    /// <summary>An unsigned 16-bit integer (0–65535) stored in the cell table.</summary>
     Integer = 1,
 
     /// <summary>A double-precision number.</summary>
@@ -17,8 +17,8 @@ public enum ExcelCellType : byte
     /// <summary>A text constant.</summary>
     Text = 3,
 
-    /// <summary>A type not seen in any known file; it has no cell data.</summary>
-    Unknown4 = 4,
+    /// <summary>A constant TRUE, FALSE or error value, stored in the cell table; it has no cell data.</summary>
+    BooleanOrError = 4,
 
     /// <summary>A formula whose current value is a number.</summary>
     NumericFormula = 5,

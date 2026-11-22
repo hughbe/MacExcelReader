@@ -28,7 +28,8 @@ public enum ExcelNumberFormatSection
 /// <param name="Body">The tokens.</param>
 public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
 {
-    private static readonly string[] s_colors = ["black", "white", "red", "green", "blue", "yellow", "magenta", "cyan"];
+    // Excel 1.5's colour names (STR# 263), in the order of their numbers in a colour token (spec §7).
+    internal static readonly string[] ColorNames = ["black", "white", "red", "green", "blue", "yellow", "magenta", "cyan"];
 
     // The bodies of Excel 1.00's FRMT 256 resource, in index order.
     private static readonly ExcelNumberFormat[] s_builtIn =
@@ -473,7 +474,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
                 text.Append('@');
                 break;
             case 0x24 when op.Length == 1:
-                text.Append('[').Append(op[0] < s_colors.Length ? s_colors[op[0]] : op[0].ToString(CultureInfo.InvariantCulture)).Append(']');
+                text.Append('[').Append(op[0] < ColorNames.Length ? ColorNames[op[0]] : op[0].ToString(CultureInfo.InvariantCulture)).Append(']');
                 break;
             case 0x21 when op.Length >= 2:
                 text.Append(MacRoman.GetString(op.AsSpan(2, op[0]))).Append('/').Append(MacRoman.GetString(op.AsSpan(2 + op[0], op[1])));

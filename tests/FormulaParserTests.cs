@@ -167,8 +167,35 @@ public class FormulaParserTests
             Assert.True(
                 Normalize(name.Definition, true).AsSpan().SequenceEqual(Normalize(parsed, true)),
                 $"{name.Name} = {text}: {Convert.ToHexString(name.Definition)} vs {Convert.ToHexString(parsed)}");
-            Assert.Equal(name.ArrayConstants, arrays);
+            Assert.Equal(name.ArrayConstants.Select(ClearLeftovers), arrays.Select(ClearLeftovers));
         }
+    }
+
+    // Clears the bytes of TRUE, FALSE and error elements that are left over from memory (spec §12.5).
+    private static byte[] ClearLeftovers(byte[] block)
+    {
+        var copy = (byte[])block.Clone();
+        int count = (copy[0] == 0 ? 256 : copy[0]) * ((copy[1] << 8) | copy[2]);
+        int p = 3;
+        for (int i = 0; i < count; i++)
+        {
+            byte type = copy[p++];
+            if (type == 2)
+            {
+                p += 1 + copy[p];
+                continue;
+            }
+
+            if (type is 4 or 16)
+            {
+                copy[p] = 0;
+                copy.AsSpan(p + 2, 6).Clear();
+            }
+
+            p += 8;
+        }
+
+        return copy;
     }
 
     [Theory]

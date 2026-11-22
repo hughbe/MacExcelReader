@@ -11,7 +11,6 @@ internal static class NumberFormatCompiler
     // Room past MaxBody for the bytes a section adds after its last length check (header, pad, colour).
     private const int Slack = 16;
 
-    private static readonly string[] s_colors = ["black", "white", "red", "green", "blue", "yellow", "magenta", "cyan"];
 
     /// <summary>Compiles a whole format; <paramref name="textSection"/> asks for Excel 1.5's four-slot form.</summary>
     public static ExcelNumberFormat Compile(string text, ExcelVersion version, bool textSection)
@@ -147,9 +146,9 @@ internal static class NumberFormatCompiler
 
     private static int ColorIndex(ReadOnlySpan<char> name)
     {
-        for (int i = 0; i < s_colors.Length; i++)
+        for (int i = 0; i < ExcelNumberFormat.ColorNames.Length; i++)
         {
-            if (name.Equals(s_colors[i], StringComparison.OrdinalIgnoreCase))
+            if (name.Equals(ExcelNumberFormat.ColorNames[i], StringComparison.OrdinalIgnoreCase))
             {
                 return i;
             }

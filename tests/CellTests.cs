@@ -16,8 +16,12 @@ public class CellTests
 
     [Theory]
     [InlineData(5.0, ExcelCellType.Integer)]
-    [InlineData(-32768.0, ExcelCellType.Integer)]
-    [InlineData(32768.0, ExcelCellType.Number)]
+    [InlineData(0.0, ExcelCellType.Integer)]
+    [InlineData(65535.0, ExcelCellType.Integer)]
+    [InlineData(40000.0, ExcelCellType.Integer)]
+    [InlineData(65536.0, ExcelCellType.Number)]
+    [InlineData(-7.0, ExcelCellType.Number)]
+    [InlineData(-32768.0, ExcelCellType.Number)]
     [InlineData(2.5, ExcelCellType.Number)]
     [InlineData(-0.0, ExcelCellType.Number)]
     public void SetValue_ChoosesCompactForm(double value, ExcelCellType expected)
@@ -104,25 +108,34 @@ public class CellTests
         formula.SetResult(false);
         Assert.Equal(false, formula.Result.Value);
 
-        formula.SetErrorResult(15);
-        Assert.Equal("#VALUE!", formula.Result.Value);
+        formula.SetErrorResult(ExcelError.Value);
+        Assert.Equal(ExcelError.Value, formula.Result.Value);
 
         formula.SetResult(2.5);
         Assert.Equal(2.5, formula.Result.Value);
     }
 
     [Theory]
-    [InlineData((byte)0, "#NULL!")]
-    [InlineData((byte)7, "#DIV/0!")]
-    [InlineData((byte)15, "#VALUE!")]
-    [InlineData((byte)23, "#REF!")]
-    [InlineData((byte)29, "#NAME?")]
-    [InlineData((byte)36, "#NUM!")]
-    [InlineData((byte)42, "#N/A")]
-    [InlineData((byte)99, "#ERR99")]
-    public void ErrorText(byte code, string expected)
+    [InlineData(ExcelError.Null, "#NULL!")]
+    [InlineData(ExcelError.DivideByZero, "#DIV/0!")]
+    [InlineData(ExcelError.Value, "#VALUE!")]
+    [InlineData(ExcelError.Reference, "#REF!")]
+    [InlineData(ExcelError.Name, "#NAME?")]
+    [InlineData(ExcelError.Number, "#NUM!")]
+    [InlineData(ExcelError.NotAvailable, "#N/A")]
+    [InlineData((ExcelError)99, "#ERR99")]
+    public void ErrorText(ExcelError error, string expected)
     {
-        Assert.Equal(expected, ExcelFormulaResult.ErrorText(code));
+        Assert.Equal(expected, error.ToText());
+        if (Enum.IsDefined(error))
+        {
+            Assert.True(ExcelErrorExtensions.TryParse(expected.ToLowerInvariant(), out var parsed));
+            Assert.Equal(error, parsed);
+        }
+        else
+        {
+            Assert.False(ExcelErrorExtensions.TryParse(expected, out _));
+        }
     }
 
     [Fact]
@@ -230,5 +243,33 @@ public class CellTests
         bytes[layout.GetSectionOffset(ExcelSection.CellData)] = 255;
         var corrupt = ExcelDocument.Read(bytes);
         Assert.Throws<ExcelFormatException>(() => corrupt.Cells["A1"].TextValue);
+    }
+
+    [Fact]
+    public void BooleanAndErrorCells_RoundTrip()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.Cells["A1"].SetBoolean(true);
+        document.Cells["A2"].SetBoolean(false);
+        document.Cells["A3"].SetError(ExcelError.NotAvailable);
+        Assert.Throws<ArgumentOutOfRangeException>(() => document.Cells["A4"].SetError((ExcelError)1));
+
+        var reread = ExcelDocument.Read(document.ToArray());
+        Assert.Equal(true, reread.Cells["A1"].Value);
+        Assert.False(reread.Cells["A2"].BooleanValue);
+        Assert.Equal(ExcelError.NotAvailable, reread.Cells["A3"].Error);
+        Assert.Equal("#N/A", ExcelValueFormatter.FormatCell(reread.Cells["A3"], reread));
+        Assert.Throws<InvalidOperationException>(() => reread.Cells["A3"].BooleanValue);
+    }
+
+    [Fact]
+    public void RelativeNameDefinition_IsRelativeToTheGivenCell()
+    {
+        // The usage guide's example: =B1 defined with B2 active is the cell above wherever it is used.
+        var document = ExcelDocument.CreateWorksheet();
+        var above = new ExcelDefinedName("Above");
+        above.SetDefinition("=B1", new ExcelCellAddress(1, 1), document);
+        Assert.Equal([0x2C, 0xFF, 0xFF, 0x00], above.Definition);   // row −1 and column 0, both relative
+        Assert.Equal("D9", above.GetDefinitionText(document, new ExcelCellAddress(9, 3)));
     }
 }

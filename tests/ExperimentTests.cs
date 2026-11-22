@@ -18,13 +18,14 @@ public class ExperimentTests
     [InlineData("C6", "#VALUE!", 0x0F)]
     [InlineData("C7", "#NULL!", 0x00)]
     [InlineData("C8", "#NAME?", 0x1D)]
-    public void Errors_UseTheErrorCodes(string address, string text, byte code)
+    public void Errors_UseTheErrorCodes(string address, string text, int code)
     {
         // Each formula entered with FORMULA and calculated by Excel 1.03 (spec §12.4).
         var result = Load("Errors").Cells[address].Formula!.Result;
         Assert.Equal(ExcelFormulaResultKind.Error, result.Kind);
-        Assert.Equal(code, result.ErrorCode);
-        Assert.Equal(text, result.Value);
+        Assert.Equal((ExcelError)code, result.Error);
+        Assert.Equal(text, result.Error.ToText());
+        Assert.Equal(result.Error, result.Value);
     }
 
     [Fact]
@@ -61,9 +62,9 @@ public class ExperimentTests
         // Written by the library with every result 0 and state word 0x018 = 1; Excel 1.03 recalculated it on Open.
         // The same sheet with 0x018 = 0 kept its zeros even after CALCULATE.NOW (spec §6).
         var document = Load("Recalculated");
-        Assert.Equal((byte)0x07, document.Cells["B2"].Formula!.Result.ErrorCode);
-        Assert.Equal("#NUM!", document.Cells["B3"].Value);
-        Assert.Equal("#N/A", document.Cells["B4"].Value);
+        Assert.Equal(ExcelError.DivideByZero, document.Cells["B2"].Formula!.Result.Error);
+        Assert.Equal(ExcelError.Number, document.Cells["B3"].Value);
+        Assert.Equal(ExcelError.NotAvailable, document.Cells["B4"].Value);
     }
 
     [Theory]
@@ -195,7 +196,7 @@ public class ExperimentTests
     public void DCountEmptyField_IsNotGiven(string address, string value)
     {
         // Re-entered with FORMULA by the harness in Excel 1.00 and saved (spec §15.3).
-        Assert.Equal(value, Convert.ToString(Load("DCount Empty Field").Cells[address].Value, System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(value, Load("DCount Empty Field").Cells[address].ToString());
     }
 
     [Fact]
@@ -683,7 +684,7 @@ public class ExperimentTests
         var document = Load("Empty Arguments");
         Assert.Equal([0x1E, 0x00, 0x01, 0x16, 0x41, 0x1B], document.Cells["C2"].Formula!.Expression.ToArray());
         Assert.Equal(1, Convert.ToDouble(document.Cells["C2"].Value));          // ROUND(1,) is ROUND(1,0)
-        Assert.Equal("#VALUE!", document.Cells["C3"].Value);                   // MID("abc",,1): start 0
+        Assert.Equal(ExcelError.Value, document.Cells["C3"].Value);            // MID("abc",,1): start 0
         Assert.Equal(ExcelCellType.Empty, document.Cells["C6"].Type);
     }
 
@@ -800,6 +801,100 @@ public class ExperimentTests
             }
 
             Assert.Equal(formula.Result.Text, ExcelValueFormatter.FormatGeneral(document.Cells[row, 1].NumberValue));
+        }
+    }
+    [Theory]
+    [InlineData("Constant Cells")]
+    [InlineData("Constant Cells 1.5")]
+    public void ConstantCells_TrueFalseAndErrorsAreType4(string name)
+    {
+        // Excel 1.00 and 1.5: FORMULA("TRUE") in D1 and FORMULA("#REF!") in D2 (spec §9). Word 0 holds a kind byte,
+        // 0 for TRUE or FALSE and 1 for an error, then the value or the error code, like BIFF2's BOOLERR.
+        var document = Load(name);
+        var d1 = document.Cells["D1"];
+        Assert.Equal(ExcelCellType.BooleanOrError, d1.Type);
+        Assert.False(d1.IsError);
+        Assert.True(d1.BooleanValue);
+        Assert.Equal(true, d1.Value);
+        Assert.Equal("TRUE", ExcelValueFormatter.FormatCell(d1, document));
+
+        var d2 = document.Cells["D2"];
+        Assert.True(d2.IsError);
+        Assert.Equal(ExcelError.Reference, d2.Error);
+        Assert.Equal(ExcelError.Reference, d2.Value);
+        Assert.Equal("#REF!", d2.ToString());
+        Assert.Equal("#REF!", ExcelValueFormatter.FormatCell(d2, document));
+    }
+
+    [Theory]
+    [InlineData("Constant Cells")]
+    [InlineData("Constant Cells 1.5")]
+    public void ConstantCells_IntegersAreUnsigned(string name)
+    {
+        // Typed 7, -7, 32767, 40000 and 0 in D3:D7: whole numbers from 0 to 65535 are integer cells, Excel shows
+        // 40000 for D6, and a negative number is a number cell (spec §9).
+        var document = Load(name);
+        Assert.Equal(7, document.Cells["D3"].IntegerValue);
+        Assert.Equal(ExcelCellType.Number, document.Cells["D4"].Type);
+        Assert.Equal(-7.0, document.Cells["D4"].NumberValue);
+        Assert.Equal(32767, document.Cells["D5"].IntegerValue);
+        Assert.Equal(40000, document.Cells["D6"].IntegerValue);
+        Assert.True(document.Cells["D6"].TryGetNumber(out double d6));
+        Assert.Equal(40000.0, d6);
+        Assert.Equal(0, document.Cells["D7"].IntegerValue);
+
+        var cell = new ExcelCell();
+        cell.SetValue(-7);
+        Assert.Equal(ExcelCellType.Number, cell.Type);
+        cell.SetValue(40000);
+        Assert.Equal(ExcelCellType.Integer, cell.Type);
+    }
+
+    [Fact]
+    public void ArrayConstants_HoldTrueFalseAndErrors()
+    {
+        // Elements of type 4 (TRUE, FALSE) and 16 (an error) hold the value in their second byte, as BIFF's types 4
+        // and 16 do (spec §12.5).
+        var worksheet = Load("Constant Cells");
+        var e1 = worksheet.Cells["E1"].Formula!;
+        Assert.Equal("={1,FALSE;#DIV/0!,\"b\"}", e1.ToText(worksheet));
+        var parsed = ExcelFormula.Parse("={1,FALSE;#DIV/0!,\"b\"}", worksheet);
+        Assert.Equal(e1.Expression[..4].ToArray(), parsed.Expression[..4].ToArray());   // the rest is left over from memory
+        Assert.Equal(e1.Fixups.ToArray(), parsed.Fixups.ToArray());
+        Assert.Equal(true, worksheet.Cells["E2"].Value);
+
+        var macros = Load("Array Constant Types");
+        Assert.Equal("={TRUE,#N/A,\"a\",1}", macros.Cells["D1"].Formula!.ToText(macros));
+        Assert.Equal("{FALSE,#REF!}", macros.Names.Single(n => n.Name == "ArrName").GetDefinitionText(macros));
+    }
+
+    [Theory]
+    [InlineData("Relative Names")]
+    [InlineData("Relative Names 1.5")]
+    public void RelativeNames_HoldOffsetsFromTheCellThatUsesThem(string name)
+    {
+        // With D5 active: DEFINE.NAME("Up3","=R[-3]C[-2]"), "UpArea" R[-3]C[-2]:R[-2]C[-2], "Up1Abs" R[-1]C2 and
+        // "Left" R5C[-2]. A relative row or column is stored as an offset (spec §11), so =Up3 in D5 is B2 (11) and
+        // in D6 is B3 (22); =Up1Abs in F5 is B4 (33) and in F6 is B5 (44).
+        var document = Load(name);
+        var d5 = new ExcelCellAddress(4, 3);
+        var names = document.Names.ToDictionary(n => n.Name);
+        Assert.Equal([0x2C, 0xFF, 0xFD, 0xFE], names["Up3"].Definition);
+        Assert.Equal("B2", names["Up3"].GetDefinitionText(document, d5));
+        Assert.Equal("IU16382", names["Up3"].GetDefinitionText(document));
+        Assert.Equal("B2:B3", names["UpArea"].GetDefinitionText(document, d5));
+        Assert.Equal("$B4", names["Up1Abs"].GetDefinitionText(document, d5));
+        Assert.Equal("B$5", names["Left"].GetDefinitionText(document, d5));
+        Assert.Equal(11.0, document.Cells["D5"].Formula!.Result.Number);
+        Assert.Equal(22.0, document.Cells["D6"].Formula!.Result.Number);
+        Assert.Equal(33.0, document.Cells["F5"].Formula!.Result.Number);
+        Assert.Equal(44.0, document.Cells["F6"].Formula!.Result.Number);
+
+        foreach (var (defined, text) in new[] { ("Up3", "=B2"), ("UpArea", "=B2:B3"), ("Up1Abs", "=$B4"), ("Left", "=B$5") })
+        {
+            var copy = new ExcelDefinedName(defined);
+            copy.SetDefinition(text, d5, document);
+            Assert.Equal(names[defined].Definition, copy.Definition);
         }
     }
 }

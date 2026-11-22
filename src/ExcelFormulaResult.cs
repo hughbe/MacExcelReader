@@ -49,7 +49,7 @@ public readonly struct ExcelFormulaResult
                 break;
             case 2:
                 Kind = ExcelFormulaResultKind.Error;
-                ErrorCode = valueBytes[4];
+                Error = (ExcelError)valueBytes[4];
                 break;
             default:
                 Kind = ExcelFormulaResultKind.Unknown;
@@ -69,35 +69,21 @@ public readonly struct ExcelFormulaResult
     /// <summary>Gets the logical value, for <see cref="ExcelFormulaResultKind.Boolean"/>.</summary>
     public bool Boolean { get; }
 
-    /// <summary>Gets the error code, for <see cref="ExcelFormulaResultKind.Error"/>.</summary>
-    public byte ErrorCode { get; }
+    /// <summary>Gets the error, for <see cref="ExcelFormulaResultKind.Error"/>.</summary>
+    public ExcelError Error { get; }
 
     /// <summary>
-    /// Gets the value as an object: a double, string, bool, or the error text such as "#VALUE!".
+    /// Gets the value as an object: a double, string, bool, or an <see cref="ExcelError"/>.
     /// </summary>
     public object? Value => Kind switch
     {
         ExcelFormulaResultKind.Number => Number,
         ExcelFormulaResultKind.Text => Text,
         ExcelFormulaResultKind.Boolean => Boolean,
-        ExcelFormulaResultKind.Error => ErrorText(ErrorCode),
+        ExcelFormulaResultKind.Error => Error,
         _ => null,
     };
 
-    /// <summary>
-    /// Gets the display text of an error code (the BIFF-compatible codes).
-    /// </summary>
-    public static string ErrorText(byte code) => code switch
-    {
-        0 => "#NULL!",
-        7 => "#DIV/0!",
-        15 => "#VALUE!",
-        23 => "#REF!",
-        29 => "#NAME?",
-        36 => "#NUM!",
-        42 => "#N/A",
-        _ => $"#ERR{code}",
-    };
 
     /// <summary>
     /// Encodes a result as the 8 value bytes of a formula record.
