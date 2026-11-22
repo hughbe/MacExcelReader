@@ -713,4 +713,15 @@ public class ExperimentTests
         Assert.Equal(0x45, document.Cells["B60"].Formula!.SharedExpression[0]);   // {=A1:A2*2}
         Assert.Equal(0x65, document.Cells["B64"].Formula!.SharedExpression[0]);   // {=SUM(A1:A2*B1:B2)}
     }
+
+    [Fact]
+    public void ArrayFormulaOperands_TakeValueClassAtTheTop()
+    {
+        // Excel 1.00 re-entering array formulas with FORMULA.ARRAY: an operator at the top of an array formula
+        // leaves its operands in value class, as Excel 1.5 does (spec §15.4).
+        var document = Load("Array Formula Classes");
+        Assert.Equal(0x45, document.Cells["B4"].Formula!.SharedExpression[0]);    // {=A1:A2*2}
+        Assert.Equal(0x45, document.Cells["B10"].Formula!.SharedExpression[0]);   // {=A1:B1+A2:B2}
+        Assert.Equal(0x45, document.Cells["B12"].Formula!.SharedExpression[0]);   // {=-A1:A2}
+    }
 }

@@ -1090,8 +1090,8 @@ public static class ExcelFormulaParser
 
         // In a name definition, operator operands and arguments that accept arrays take array class where they would
         // otherwise take value class. In an array formula, arguments that accept arrays do, and operator operands only
-        // where the operator is itself in such an argument: {=A1:A2*2} keeps value class, {=SUM(A1:A2*B1:B2)} does
-        // not (spec §15.4). The formula as a whole keeps the class the other rules give.
+        // where the operator is itself in such an argument: {=A1:A2*2} keeps value class in Excel 1.00 and 1.5, while
+        // {=SUM(A1:A2*B1:B2)} takes array class (spec §15.4). The formula as a whole keeps the class the other rules give.
         private int InArrayFormula(Context context, int tokenClass)
             => tokenClass == ValueClass
                 && (context.Kind == ContextKind.Operator ? _definition || (ArrayFormula && context.InArrayArgument) : (ArrayFormula || _definition) && AcceptsArrays(context))

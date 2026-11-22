@@ -8,7 +8,7 @@ The file format was reverse-engineered from the code of Excel 1.00, 1.01, 1.03, 
 
 ## Features
 
-- **Exact round-trips.** All 37 sample documents from the Excel 1.00, 1.03 and 1.5 disks, and 60 files Excel itself saved in experiments, read and write back byte for byte, sheets and charts, including Excel 1.5's version-18 files. Fields the library does not model are preserved untouched.
+- **Exact round-trips.** All 37 sample documents from the Excel 1.00, 1.03 and 1.5 disks, and 63 files Excel itself saved in experiments, read and write back byte for byte, sheets and charts, including Excel 1.5's version-18 files. Fields the library does not model are preserved untouched.
 - **Cells.** Integers, numbers, text and formulas with their current values, plus number formats, alignment, bold and italic, borders, and protection flags.
 - **Formulas, both ways.** Decompile tokens to A1-style text (`=IF(NOT(FORMULA.FIND(B19,1,2,1)),RETURN())`) and compile text back to tokens with `ExcelFormula.Parse`. The parser reproduces Excel's own encoding byte for byte for 1,281 of the samples' 1,282 formulas and all 206 name definitions, for whichever release saved them: token classes, `IF` and `CHOOSE` jumps, the one-argument `SUM` attribute, volatile and memory-function tokens, array formulas and array constants, macro commands, dialog-box forms (`RUN?()`), names, external references and calls to macros on this or another sheet. Every function Excel 1.00–1.5 knows, with each release's argument rules. Allocation-free token walking.
 - **Display formatting.** All 19 built-in number formats, with dates in the 1904 date system. User-defined formats are read and written.

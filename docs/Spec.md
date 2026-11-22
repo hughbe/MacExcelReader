@@ -18,7 +18,7 @@ charts. It was reverse-engineered from the applications' code and checked agains
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 60 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 63 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
@@ -1205,8 +1205,9 @@ For a function call:
 **Array formulas and name definitions.** In a name definition, operands of operators and arguments that accept
 arrays (type bit `0x40`) take array class where the rules above give value class. In the shared expression of
 an array formula (§12.6), arguments that accept arrays do too, and operands of operators only where the
-operator is itself inside such an argument: Excel 1.5 compiles `{=A1:A2*2}` with the area in value class (`45
-…`) but `{=SUM(A1:A2*B1:B2)}` with both areas in array class (`Formulas 1.5 Sheet 2`). The expression as a
+operator is itself inside such an argument: Excel 1.00 and 1.5 compile `{=A1:A2*2}` with the area in value
+class (`45 …`) but `{=SUM(A1:A2*B1:B2)}` with both areas in array class (`Array Formula Classes`, `Formulas 1.5
+Sheet 2`). The expression as a
 whole keeps the class the rules give.
 `{=AVERAGE(D4-B9:B18)}` is `64 C0 03 03  65 C0 08 C0 11 01 01  04  42 01 05` (both operands of the subtraction
 in array class, AVERAGE itself in value class); the definition `rads = PI()/180` is `61 13  1E 00 B4  06`.
