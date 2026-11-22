@@ -332,7 +332,7 @@ public sealed class ExcelFormula
     /// <summary>
     /// Measures a formula record at the start of <paramref name="tail"/>.
     /// </summary>
-    private static int MeasureRecord(ReadOnlySpan<byte> tail, out int fixupsOffset, out int rawTextOffset)
+    internal static int MeasureRecord(ReadOnlySpan<byte> tail, out int fixupsOffset, out int rawTextOffset)
     {
         if (tail.Length < ExpressionOffset)
         {

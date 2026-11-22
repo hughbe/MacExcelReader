@@ -519,7 +519,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             case 0x24 when op.Length == 1:
                 text.Append('[').Append(op[0] < ColorNames.Length ? ColorNames[op[0]] : op[0].ToString(CultureInfo.InvariantCulture)).Append(']');
                 break;
-            case 0x21 when op.Length >= 2:
+            case 0x21 when op.Length >= 2 && op.Length >= 2 + op[0] + op[1]:
                 text.Append(MacRoman.GetString(op.AsSpan(2, op[0]))).Append('/').Append(MacRoman.GetString(op.AsSpan(2 + op[0], op[1])));
                 break;
             default:

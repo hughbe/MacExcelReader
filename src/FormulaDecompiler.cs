@@ -50,14 +50,56 @@ internal static class FormulaDecompiler
 
     private static string Decompile(ReadOnlySpan<byte> expression, ref FixupSource fixups, ExcelDocument? document, ExcelCellAddress relativeTo, ReadOnlySpan<char> prefix, ReadOnlySpan<char> suffix)
     {
-        // The text is built in one buffer. In reverse Polish the operands of each operator are the last entries on
-        // the stack, and their text is the end of the buffer, in order, so an entry needs only its start: combining
-        // operands inserts the operator text between them and drops the later entries.
         var text = new TextBuffer(stackalloc char[256]);
-        text.Append(prefix);
-        Span<int> starts = stackalloc int[256];
-        int count = 0;
         try
+        {
+            text.Append(prefix);
+            Write(ref text, expression, fixups, document, new References(relativeTo, r1c1: false));
+            text.Append(suffix);
+            return text.ToString();
+        }
+        finally
+        {
+            text.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Appends a cell formula's expression in R1C1 style, as Excel's SYLK export writes it: relative references as
+    /// offsets from <paramref name="cell"/>, such as <c>R[-1]C[+2]</c>.
+    /// </summary>
+    internal static void AppendR1C1(ref TextBuffer text, ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixupBytes, ExcelDocument? document, ExcelCellAddress cell)
+    {
+        var fixups = new FixupSource(fixupBytes);
+        Write(ref text, expression, fixups, document, new References(cell, r1c1: true));
+    }
+
+    /// <summary>
+    /// Appends a name definition in R1C1 style. Its relative references already hold offsets (spec §11).
+    /// </summary>
+    internal static void AppendDefinitionR1C1(ref TextBuffer text, ExcelDefinedName name, ExcelDocument? document)
+    {
+        var fixups = new FixupSource([], name.HasArrayConstants ? name.ArrayConstants : null, inPlace: true);
+        Write(ref text, name.Definition, fixups, document, new References(default, r1c1: true));
+    }
+
+    // How references are written: A1 style, with a definition's relative parts placed relative to Origin, or R1C1
+    // style, with a cell formula's relative parts written as offsets from Origin, the formula's cell.
+    private readonly struct References(ExcelCellAddress origin, bool r1c1)
+    {
+        public ExcelCellAddress Origin { get; } = origin;
+
+        public bool R1C1 { get; } = r1c1;
+    }
+
+    private static void Write(ref TextBuffer text, scoped ReadOnlySpan<byte> expression, FixupSource fixups, ExcelDocument? document, References references)
+    {
+        // In reverse Polish the operands of each operator are the last entries on the stack, and their text is the
+        // end of the buffer, in order, so an entry needs only its start: combining operands inserts the operator
+        // text between them and drops the later entries.
+        Span<int> starts = stackalloc int[256];
+        Span<char> numberText = stackalloc char[ExcelValueFormatter.GeneralSize(20)];
+        int count = 0;
         {
             int external = 0;
             int pendingExternal = -1;
@@ -132,7 +174,7 @@ internal static class FormulaDecompiler
                         Push(ref text, starts, ref count);
                         // Excel 1.00 writes a number constant as General shows it, with at most 14 significant digits (spec
                         // §15.4), so text with more digits comes back shorter.
-                        text.Append(ExcelValueFormatter.FormatGeneral(BinaryPrimitives.ReadDoubleBigEndian(expression.Slice(p))));
+                        text.Append(numberText[..ExcelValueFormatter.FormatGeneral(BinaryPrimitives.ReadDoubleBigEndian(expression.Slice(p)), 20, numberText)]);
                         break;
                     case 0x20:
                         Push(ref text, starts, ref count);
@@ -186,22 +228,32 @@ internal static class FormulaDecompiler
                     case 0x24:
                     case 0x31:
                     case 0x37:
-                        PushOperand(ref text, starts, ref count, document, ref pendingExternal);
-                        AppendCell(ref text, BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p)), expression[p + 2], default);
-                        break;
                     case 0x2C:
+                    {
                         PushOperand(ref text, starts, ref count, document, ref pendingExternal);
-                        AppendCell(ref text, BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p)), expression[p + 2], relativeTo);
+                        ushort rowWord = BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p));
+                        bool definition = token.Code == 0x2C;
+                        if (references.R1C1)
+                        {
+                            AppendCellR1C1(ref text, rowWord, expression[p + 2], references.Origin, offsets: definition);
+                        }
+                        else
+                        {
+                            AppendCell(ref text, rowWord, expression[p + 2], definition ? references.Origin : default);
+                        }
+
                         break;
+                    }
+
                     case 0x25:
                     case 0x32:
                     case 0x2D:
                     {
                         // A definition's area (0x2D) holds offsets for its relative parts (spec §11).
-                        var origin = token.Code == 0x2D ? relativeTo : default;
+                        bool definition = token.Code == 0x2D;
                         PushOperand(ref text, starts, ref count, document, ref pendingExternal);
                         AppendArea(ref text, BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p)), BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p + 2)),
-                            expression[p + 4], expression[p + 5], origin);
+                            expression[p + 4], expression[p + 5], definition, references);
                         break;
                     }
 
@@ -225,18 +277,11 @@ internal static class FormulaDecompiler
             {
                 text.Insert(starts[i], " ");
             }
-
-            text.Append(suffix);
-            return text.ToString();
-        }
-        finally
-        {
-            text.Dispose();
         }
     }
 
     // Starts a new operand at the end of the text.
-    private static void Push(ref TextBuffer text, Span<int> starts, ref int count)
+    private static void Push(ref TextBuffer text, scoped Span<int> starts, ref int count)
     {
         if (count == starts.Length)
         {
@@ -247,7 +292,7 @@ internal static class FormulaDecompiler
     }
 
     // Starts an operand that an external sheet prefix (a 0x1A token before it) applies to, writing the prefix.
-    private static void PushOperand(ref TextBuffer text, Span<int> starts, ref int count, ExcelDocument? document, ref int pendingExternal)
+    private static void PushOperand(ref TextBuffer text, scoped Span<int> starts, ref int count, ExcelDocument? document, ref int pendingExternal)
     {
         Push(ref text, starts, ref count);
         if (pendingExternal >= 0)
@@ -260,7 +305,7 @@ internal static class FormulaDecompiler
 
     // Makes sure the stack has at least `needed` operands, adding "?" for missing ones before the others, where the
     // missing (earlier) operands would have been.
-    private static void Require(ref TextBuffer text, Span<int> starts, ref int count, int needed)
+    private static void Require(ref TextBuffer text, scoped Span<int> starts, ref int count, int needed)
     {
         while (count < needed)
         {
@@ -277,7 +322,7 @@ internal static class FormulaDecompiler
     }
 
     // Combines the last `argumentCount` operands into a call: NAME(a,b,c).
-    private static void AppendCall(ref TextBuffer text, Span<int> starts, ref int count, ExcelFunction? function, int number, int argumentCount, bool dialog)
+    private static void AppendCall(ref TextBuffer text, scoped Span<int> starts, ref int count, ExcelFunction? function, int number, int argumentCount, bool dialog)
     {
         Require(ref text, starts, ref count, argumentCount);
         int first = count - argumentCount;
@@ -419,7 +464,7 @@ internal static class FormulaDecompiler
             _fromBytes = true;
         }
 
-        public ushort NextWord(ReadOnlySpan<byte> expression, FormulaToken token)
+        public ushort NextWord(scoped ReadOnlySpan<byte> expression, FormulaToken token)
         {
             if (_inPlace)
             {
@@ -505,8 +550,15 @@ internal static class FormulaDecompiler
     // An area. One that spans every column is written as rows, 1:3 or $18:$19, and one that spans every row as columns,
     // A:B; Excel 1.00 shows =A1:IV1 as =1:1 and =$A$1:$IV$16384 as =$1:$16384. A row or column is absolute when its
     // own flag says so.
-    private static void AppendArea(ref TextBuffer text, ushort firstRowWord, ushort lastRowWord, byte firstColumn, byte lastColumn, ExcelCellAddress relativeTo)
+    private static void AppendArea(ref TextBuffer text, ushort firstRowWord, ushort lastRowWord, byte firstColumn, byte lastColumn, bool definition, References references)
     {
+        if (references.R1C1)
+        {
+            AppendAreaR1C1(ref text, firstRowWord, lastRowWord, firstColumn, lastColumn, references.Origin, definition);
+            return;
+        }
+
+        var relativeTo = definition ? references.Origin : default;
         (firstRowWord, firstColumn) = RowWord.Move(firstRowWord, firstColumn, relativeTo.Row, relativeTo.Column);
         (lastRowWord, lastColumn) = RowWord.Move(lastRowWord, lastColumn, relativeTo.Row, relativeTo.Column);
         if (firstColumn == 0 && lastColumn == ExcelCellGrid.MaxColumns - 1)
@@ -547,6 +599,93 @@ internal static class FormulaDecompiler
 
             AppendColumnName(ref text, column);
         }
+    }
+
+    // A reference in R1C1 style: R5C2 for an absolute row and column, R[-1]C[+2] for relative ones, and R or C for
+    // an offset of 0. A cell formula's relative parts are positions, written as offsets from `origin`; a name
+    // definition's are already offsets (spec §11).
+    private static void AppendCellR1C1(ref TextBuffer text, ushort rowWord, byte column, ExcelCellAddress origin, bool offsets)
+    {
+        AppendRowR1C1(ref text, rowWord, origin, offsets);
+        AppendColumnR1C1(ref text, rowWord, column, origin, offsets);
+    }
+
+    // An area in R1C1 style. As in A1 style, one that spans every column is written as rows (R1:R3) and one that
+    // spans every row as columns (C1:C2).
+    private static void AppendAreaR1C1(ref TextBuffer text, ushort firstRowWord, ushort lastRowWord, byte firstColumn, byte lastColumn, ExcelCellAddress origin, bool offsets)
+    {
+        // Unlike A1 style, a single row or column is written once: R[-20], not R[-20]:R[-20].
+        if (firstColumn == 0 && lastColumn == ExcelCellGrid.MaxColumns - 1)
+        {
+            AppendRowR1C1(ref text, firstRowWord, origin, offsets);
+            if (lastRowWord != firstRowWord)
+            {
+                text.Append(':');
+                AppendRowR1C1(ref text, lastRowWord, origin, offsets);
+            }
+        }
+        else if (RowWord.Row(firstRowWord) == 0 && RowWord.Row(lastRowWord) == ExcelCellGrid.MaxRows - 1)
+        {
+            AppendColumnR1C1(ref text, firstRowWord, firstColumn, origin, offsets);
+            if (lastColumn != firstColumn || (lastRowWord & RowWord.ColumnRelative) != (firstRowWord & RowWord.ColumnRelative))
+            {
+                text.Append(':');
+                AppendColumnR1C1(ref text, lastRowWord, lastColumn, origin, offsets);
+            }
+        }
+        else
+        {
+            AppendCellR1C1(ref text, firstRowWord, firstColumn, origin, offsets);
+            text.Append(':');
+            AppendCellR1C1(ref text, lastRowWord, lastColumn, origin, offsets);
+        }
+    }
+
+    private static void AppendRowR1C1(ref TextBuffer text, ushort rowWord, ExcelCellAddress origin, bool offsets)
+    {
+        text.Append('R');
+        int row = RowWord.Row(rowWord);
+        if (!RowWord.IsRowRelative(rowWord))
+        {
+            text.AppendFormatted(row + 1, default);
+        }
+        else
+        {
+            // Excel 1.00 reads a definition's 14-bit row offset with the relative-column flag (bit 14) as its sign
+            // bit, inverted: with an absolute column −1 is R[-1], but with a relative column −3 is R[+16381]
+            // (Relative Names sample; spec Appendix C).
+            AppendOffset(ref text, offsets ? row - (RowWord.IsColumnRelative(rowWord) ? 0 : RowWord.RowMask + 1) : row - origin.Row);
+        }
+    }
+
+    private static void AppendColumnR1C1(ref TextBuffer text, ushort rowWord, byte column, ExcelCellAddress origin, bool offsets)
+    {
+        text.Append('C');
+        if (!RowWord.IsColumnRelative(rowWord))
+        {
+            text.AppendFormatted(column + 1, default);
+        }
+        else
+        {
+            AppendOffset(ref text, offsets ? (sbyte)column : column - origin.Column);
+        }
+    }
+
+    private static void AppendOffset(ref TextBuffer text, int offset)
+    {
+        if (offset == 0)
+        {
+            return;
+        }
+
+        text.Append('[');
+        if (offset > 0)
+        {
+            text.Append('+');
+        }
+
+        text.AppendFormatted(offset, default);
+        text.Append(']');
     }
 
     /// <summary>
@@ -640,110 +779,5 @@ internal static class FormulaDecompiler
         }
 
         text.Append(name);
-    }
-
-    // A text buffer that starts on the stack and grows into pooled arrays.
-    private ref struct TextBuffer
-    {
-        private Span<char> _chars;
-        private char[]? _rented;
-
-        public TextBuffer(Span<char> initial)
-        {
-            _chars = initial;
-            _rented = null;
-            Length = 0;
-        }
-
-        public int Length { get; private set; }
-
-        public void Append(char c)
-        {
-            if (Length == _chars.Length)
-            {
-                Grow(1);
-            }
-
-            _chars[Length++] = c;
-        }
-
-        public void Append(scoped ReadOnlySpan<char> value)
-        {
-            if (Length + value.Length > _chars.Length)
-            {
-                Grow(value.Length);
-            }
-
-            value.CopyTo(_chars[Length..]);
-            Length += value.Length;
-        }
-
-        public void AppendFormatted<T>(T value, scoped ReadOnlySpan<char> format)
-            where T : ISpanFormattable
-        {
-            int written;
-            while (!value.TryFormat(_chars[Length..], out written, format, CultureInfo.InvariantCulture))
-            {
-                Grow(32);
-            }
-
-            Length += written;
-        }
-
-        // Mac OS Roman text, optionally doubling quotes as a formula's string constant does.
-        public void AppendMacRoman(scoped ReadOnlySpan<byte> bytes, bool escapeQuotes)
-        {
-            foreach (byte b in bytes)
-            {
-                char c = MacRoman.GetChar(b);
-                if (escapeQuotes && c == '"')
-                {
-                    Append('"');
-                }
-
-                Append(c);
-            }
-        }
-
-        public void Insert(int index, scoped ReadOnlySpan<char> value)
-        {
-            if (Length + value.Length > _chars.Length)
-            {
-                Grow(value.Length);
-            }
-
-            _chars[index..Length].CopyTo(_chars[(index + value.Length)..]);
-            value.CopyTo(_chars[index..]);
-            Length += value.Length;
-        }
-
-        public void Remove(int index, int count)
-        {
-            _chars[(index + count)..Length].CopyTo(_chars[index..]);
-            Length -= count;
-        }
-
-        public override readonly string ToString() => new(_chars[..Length]);
-
-        public void Dispose()
-        {
-            if (_rented is not null)
-            {
-                System.Buffers.ArrayPool<char>.Shared.Return(_rented);
-                _rented = null;
-            }
-        }
-
-        private void Grow(int needed)
-        {
-            var larger = System.Buffers.ArrayPool<char>.Shared.Rent(Math.Max(_chars.Length * 2, Length + needed));
-            _chars[..Length].CopyTo(larger);
-            if (_rented is not null)
-            {
-                System.Buffers.ArrayPool<char>.Shared.Return(_rented);
-            }
-
-            _chars = _rented = larger;
-        }
     }
 }

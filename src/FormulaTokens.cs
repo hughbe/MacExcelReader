@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
 
+using MacExcelReader.Internal;
+
 namespace MacExcelReader;
 
 /// <summary>
@@ -353,6 +355,48 @@ public static class FormulaTokens
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// Gets the parts of a cell formula that is a single external reference to absolute cells or a name,
+    /// <c>=Budget!$A$1</c> or <c>=Budget!Rate</c> (spec §12.5): the 1-based external-document index of its <c>1A</c> token, the offset of
+    /// the cell, area or name token, and for a name its index in that document's names.
+    /// </summary>
+    internal static bool TryGetExternalLink(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups, out int document, out int referenceOffset, out ushort nameIndex)
+    {
+        document = -1;
+        referenceOffset = -1;
+        nameIndex = 0;
+        var tokens = Enumerate(expression);
+        if (!tokens.MoveNext() || tokens.Current.Code != ExternalSheet || !tokens.MoveNext())
+        {
+            return false;
+        }
+
+        // A name, or a cell or area whose rows and columns are all absolute.
+        var reference = tokens.Current;
+        bool absolute = reference.Code switch
+        {
+            Name => true,
+            0x24 => (BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(reference.Offset + 1)) & RowWord.Flags) == 0,
+            0x25 => ((BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(reference.Offset + 1))
+                | BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(reference.Offset + 3))) & RowWord.Flags) == 0,
+            _ => false,
+        };
+        if (!absolute || !tokens.MoveNext() || tokens.Current.Code != 0x1B || tokens.MoveNext())
+        {
+            return false;
+        }
+
+        int position = 0;
+        document = ReadWord(fixups, ref position);
+        if (reference.Code == Name)
+        {
+            nameIndex = ReadWord(fixups, ref position);
+        }
+
+        referenceOffset = reference.Offset;
+        return true;
     }
 
     internal static void SkipArrayBlock(ReadOnlySpan<byte> data, ref int position)

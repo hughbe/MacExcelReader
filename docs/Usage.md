@@ -323,6 +323,23 @@ Editing a file you read is safe: only the cells you touch are re-encoded, and ev
 model (unidentified fields, bytes left over from memory, embedded code) is written back exactly as it was read. A
 document read and saved without changes is byte-for-byte identical to the original.
 
+## Exporting SYLK
+
+`ExportSylk` writes a worksheet or macro sheet as SYLK, the text format Excel's Save As offers, with the bytes
+Excel 1.00 writes (spec Appendix C): Mac OS Roman text with carriage returns, R1C1 formulas with their current
+values, number formats, styles, column widths, names and links.
+
+```csharp
+var document = ExcelDocument.Load("Expenses");
+document.ExportSylk("Expenses.slk");          // give it Finder type TEXT
+
+var output = new ArrayBufferWriter<byte>();   // or into any IBufferWriter<byte>, without allocating per cell
+document.ExportSylk(output);
+```
+
+The `O` record carries the document's reference style and calculation mode. These are global settings in Excel,
+so its own export shows whatever was in effect when it ran.
+
 ## Charts
 
 ```csharp

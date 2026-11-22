@@ -63,6 +63,9 @@ public sealed class Program
             config.AddCommand<JsonCommand>("json")
                 .WithDescription("Write the whole document as JSON.")
                 .WithExample("json", "Expenses", "-o", "expenses.json");
+            config.AddCommand<SylkCommand>("sylk")
+                .WithDescription("Export the sheet as SYLK, byte for byte as Excel 1.00's Save As does.")
+                .WithExample("sylk", "Expenses", "-o", "Expenses.slk");
         });
 
         return app.Run(args);
@@ -817,6 +820,33 @@ sealed class JsonSettings : FileSettings
     [CommandOption("--empty")]
     [Description("Include empty cells that carry formatting.")]
     public bool Empty { get; init; }
+}
+
+sealed class SylkSettings : FileSettings
+{
+    [CommandOption("-o|--output <FILE>")]
+    [Description("Write to this file instead of the console.")]
+    public string? Output { get; init; }
+}
+
+sealed class SylkCommand : Command<SylkSettings>
+{
+    public override int Execute(CommandContext context, SylkSettings settings, CancellationToken cancellationToken)
+    {
+        var document = ExcelDocument.Load(settings.Input);
+        if (settings.Output is not null)
+        {
+            document.ExportSylk(settings.Output);
+            AnsiConsole.MarkupLine($"Wrote {Program.Escape(settings.Output)}");
+            return 0;
+        }
+
+        // Mac OS Roman with carriage returns: shown as lines, with escapes as they are.
+        var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+        document.ExportSylk(buffer);
+        Console.Write(MacRoman.GetString(buffer.WrittenSpan).Replace('\r', '\n'));
+        return 0;
+    }
 }
 
 sealed class JsonCommand : Command<JsonSettings>
