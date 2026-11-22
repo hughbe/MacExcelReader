@@ -3,6 +3,38 @@
 This describes the files Microsoft Excel 1.00 to 1.5 for the Macintosh save: worksheets, macro sheets and
 charts. It was reverse-engineered from the applications' code and checked against every sample file available.
 
+## Background: how Excel 1.x runs
+
+Most of the format follows from how Excel 1.x was built, and the spec cites Excel's code throughout, so this is
+worth knowing first.
+
+**P-code.** Excel 1.x is mostly not 68000 machine code. Microsoft compiled it to **p-code** ("pseudo-code"), a
+compact byte code for an imaginary stack machine, which let a large program fit a 512K Macintosh. A 68000
+interpreter in the application runs it. An instruction pushes a constant, loads a variable, does arithmetic or
+calls a procedure; a procedure can also drop into 68000 code for speed or to call the Macintosh Toolbox. The
+machine's pointers are 8086-style segment:offset pairs (§1.3), so it was most likely shared with Microsoft's
+software for the IBM PC **(inferred)**.
+
+**Segments and procedures.** The p-code is divided into numbered **segments** (118 in Excel 1.00), each of
+numbered **procedures** (from one to over a hundred). In Excel 1.00 the application's `PCOD` 2 resource holds
+every segment, and `PCOD` 0 holds the table of where each starts together with Excel's global data: the function
+table, built-in names, operator and pattern tables and so on. The interpreter loads a segment from disk when one
+of its procedures is called and unloads the least recently used ones when memory runs short. The spec cites code
+by these numbers: `47.0b` is procedure `0x0B` of segment `0x47`, Excel 1.00's Save, in hexadecimal. Procedures
+change number between releases when one is inserted, so the spec says which release a number is from where it
+matters (Sources, below). A name like `g0812` is a global variable, named by its offset in Excel's global data.
+
+**Memory and the file.** Excel keeps a document in memory as a handful of blocks: the cell table, the cell data,
+the names, the windows and so on. Save mostly writes each block out as it is in memory, one section after another
+(§3), and Open reads them back. That is why a file holds things that only made sense in memory: pointers, the
+interpreter's housekeeping, bytes that were never cleared (all "left over from memory", §1), and even two of
+Excel's own code segments (§4.1). Excel writes through its own 512-byte buffered file stream and records where
+each section starts as a position in that stream (§1.2).
+
+**Where the rules come from.** Each rule in the spec comes from reading the procedure that writes or reads the
+bytes (Save, Open, the formula compiler and so on), from the samples, or from having Excel itself change a file
+and comparing the bytes ([Testing in a real Excel](Testing.md)).
+
 ## Sources
 
 **Code.** The p-code and 68000 code in the applications' `PCOD` resources, disassembled:
@@ -16,7 +48,7 @@ charts. It was reverse-engineered from the applications' code and checked agains
 | Excel 1.06 | `Microsoft Excel 1.06.dsk` (800K HFS) | Every procedure, matched to its 1.04 counterpart. 1.06 keeps 1.04's segment and procedure numbers apart from a few procedures it inserts or drops. |
 | Excel 1.5 (May 1988) | Excel 1.5 folder | Save (`47.0d`), format and token translation (`47.18`), function table and file-number table, version-18 rules. Each 1.5 change the spec names was checked against 1.06's code, the release before it. |
 
-Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
+Code is cited as `segment.procedure` in hexadecimal, for example `0f.00` (see Background).
 
 **Samples.** 37 documents and one workspace file from Microsoft's disks, and 85 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
@@ -104,8 +136,10 @@ the document kind byte (§5) is `0x40`, else `XLBN`.
 
 ### 1.2 Stream positions
 
-The writer is a 512-byte buffered stream. A stream position is stored as a long made of two words, **(block
-number, offset within block)**:
+Several fields say where something starts in the file: the section table (§5) above all. Excel's Save does not
+write straight to the disk but through its own buffer of 512 bytes, the size of a Macintosh disk block, and
+records each position as its stream knows it. A stream position is stored as a long made of two words,
+**(block number, offset within block)**:
 
 ```
 absolute offset = hi_word * 512 + lo_word
@@ -119,8 +153,10 @@ Panes` starts at 0x600 and is stored as `00 02 02 00`, not `00 03 00 00`. Only p
 
 ### 1.3 Packed pointers ("seg:off")
 
-Excel 1.x's p-code uses 8086-style 20-bit pointers: `address = seg * 16 + off` with `off` in 0…15 once
-normalised. Several structures were dumped from memory with such pointers still in them. They are left over
+Excel's p-code machine follows the 8086 (see Background), so its pointers are 8086-style
+**segment:offset** pairs of words, which the interpreter turns into Macintosh addresses: `address = seg * 16 +
+off`, with `off` in 0…15 once normalised. Here "segment" means a 16-byte unit of memory, not a code segment.
+Several structures were saved from memory with such pointers still in them. They are left over
 from memory (above), except in the cell table, where the writer replaces them with section-relative offsets
 (§9).
 
