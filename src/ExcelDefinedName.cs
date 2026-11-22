@@ -4,39 +4,60 @@ using MacExcelReader.Internal;
 namespace MacExcelReader;
 
 /// <summary>
+/// The flags of a defined name (spec §11). Excel's files also carry bits 0x01, 0x02 and 0x80 left over from memory,
+/// which Open discards; they are kept as they are.
+/// </summary>
+[Flags]
+public enum ExcelNameFlags : byte
+{
+    /// <summary>No flags.</summary>
+    None = 0,
+
+    /// <summary>
+    /// The definition is a reference: a cell, an area, or a union of them. Excel sets it on every such name, on
+    /// worksheets and macro sheets alike, so a name used as a macro has it too. <see cref="ExcelDefinedName.SetDefinition(string, ExcelDocument?, ExcelVersion)"/>
+    /// sets it.
+    /// </summary>
+    Reference = 0x04,
+
+    /// <summary>The definition is array-valued, so formulas using the name are marked as using an array function.</summary>
+    Array = 0x20,
+
+    /// <summary>The name is a macro: a command or a function. A shortcut key and a macro kind follow in the file.</summary>
+    Macro = 0x40,
+}
+
+/// <summary>
+/// What kind of macro a defined name is.
+/// </summary>
+public enum ExcelMacroKind
+{
+    /// <summary>Not a macro.</summary>
+    None,
+
+    /// <summary>A command macro, listed in Macro &gt; Run and run with its shortcut key.</summary>
+    Command,
+
+    /// <summary>A function macro, called from formulas.</summary>
+    Function,
+}
+
+/// <summary>
 /// A defined name (spec §11).
 /// </summary>
 public sealed class ExcelDefinedName
 {
-    /// <summary>
-    /// Flag: the definition is a reference: a cell, an area, or a union of them. Excel sets it on every such name,
-    /// on worksheets and macro sheets alike, so a name used as a macro has it too (spec §11).
-    /// <see cref="SetDefinition(string, ExcelDocument?, ExcelVersion)"/> sets it.
-    /// </summary>
-    public const byte ReferenceFlag = 0x04;
-
-    /// <summary>Flag: the definition is array-valued.</summary>
-    public const byte ArrayFlag = 0x20;
-
-    /// <summary>
-    /// Flag: a macro, function or command. Two bytes follow the flags: the shortcut key and the macro kind
-    /// (<see cref="MacroKind"/>). Excel 1.03's DEFINE.NAME sets it for both kinds (spec §11).
-    /// </summary>
-    public const byte MacroFlag = 0x40;
-
-    /// <summary>Macro kind bit: a command macro, listed in Macro > Run.</summary>
-    public const byte CommandKind = 0x40;
-
-    /// <summary>Macro kind bit: a function macro, called from formulas.</summary>
-    public const byte FunctionKind = 0x80;
+    // Bits of the macro-kind byte (spec §11); its low nibble is left over from memory.
+    private const byte CommandBit = 0x40;
+    private const byte FunctionBit = 0x80;
 
     /// <summary>
     /// Creates a name.
     /// </summary>
     /// <param name="name">The name, 1–255 characters.</param>
     /// <param name="definition">The definition as a parsed expression; empty for an undefined name.</param>
-    /// <param name="flags">The flags byte.</param>
-    public ExcelDefinedName(string name, byte[]? definition = null, byte flags = 0)
+    /// <param name="flags">The flags.</param>
+    public ExcelDefinedName(string name, byte[]? definition = null, ExcelNameFlags flags = ExcelNameFlags.None)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
         Name = name;
@@ -53,23 +74,49 @@ public sealed class ExcelDefinedName
     /// </summary>
     public byte[] Definition { get; set; }
 
-    /// <summary>Gets or sets the flags byte.</summary>
-    public byte Flags { get; set; }
-
-    /// <summary>Gets or sets the command macro's shortcut key, typed with Option-Command; 0 for none (used when <see cref="MacroFlag"/> is set).</summary>
-    public byte ShortcutKey { get; set; }
+    /// <summary>Gets or sets the flags.</summary>
+    public ExcelNameFlags Flags { get; set; }
 
     /// <summary>
-    /// Gets or sets the macro-kind byte that follows the shortcut key: <see cref="CommandKind"/> or
-    /// <see cref="FunctionKind"/>. Excel's own files have bytes left over from memory in the low nibble, which Open discards.
+    /// Gets or sets what kind of macro the name is. Setting <see cref="ExcelMacroKind.Command"/> or
+    /// <see cref="ExcelMacroKind.Function"/> sets <see cref="ExcelNameFlags.Macro"/>, and <see cref="ExcelMacroKind.None"/>
+    /// clears it.
     /// </summary>
-    public byte MacroKind { get; set; }
+    public ExcelMacroKind MacroKind
+    {
+        get => (Flags & ExcelNameFlags.Macro) == 0 ? ExcelMacroKind.None
+            : (RawMacroKind & FunctionBit) != 0 ? ExcelMacroKind.Function
+            : ExcelMacroKind.Command;
+        set
+        {
+            if (value == ExcelMacroKind.None)
+            {
+                Flags &= ~ExcelNameFlags.Macro;
+                return;
+            }
 
-    /// <summary>Gets whether this is a command macro.</summary>
-    public bool IsCommand => (Flags & MacroFlag) != 0 && (MacroKind & FunctionKind) == 0;
+            Flags |= ExcelNameFlags.Macro;
+            RawMacroKind = (byte)((RawMacroKind & 0x0F) | (value == ExcelMacroKind.Function ? FunctionBit : CommandBit));
+        }
+    }
 
-    /// <summary>Gets whether this is a function macro defined with its kind (Excel's DEFINE.NAME with type 1).</summary>
-    public bool IsFunctionMacro => (Flags & MacroFlag) != 0 && (MacroKind & FunctionKind) != 0;
+    /// <summary>
+    /// Gets or sets a command macro's shortcut key, typed with Option-Command, or null for none.
+    /// </summary>
+    public char? ShortcutKey
+    {
+        get => RawShortcutKey == 0 ? null : MacRoman.GetChar(RawShortcutKey);
+        set => RawShortcutKey = value is { } key ? MacRoman.GetByte(key) : (byte)0;
+    }
+
+    /// <summary>Gets or sets the shortcut-key byte as stored, a Mac OS Roman character or 0.</summary>
+    public byte RawShortcutKey { get; set; }
+
+    /// <summary>
+    /// Gets or sets the macro-kind byte as stored: bit 0x40 for a command, 0x80 for a function, and a low nibble left
+    /// over from memory in Excel's own files, which Open discards. <see cref="MacroKind"/> reads it.
+    /// </summary>
+    public byte RawMacroKind { get; set; }
 
     /// <summary>
     /// Gets the definition as A1-style text, without '=', with its relative references as Excel shows them while
@@ -85,17 +132,22 @@ public sealed class ExcelDefinedName
     /// one row up and one column left of each cell that uses it.
     /// </summary>
     public string GetDefinitionText(ExcelDocument? document, ExcelCellAddress relativeTo)
-        => FormulaDecompiler.Decompile(Definition, [], document, fixupsInPlace: true, ArrayConstants, relativeTo);
+        => FormulaDecompiler.Decompile(Definition, [], document, fixupsInPlace: true, _arrayConstants, relativeTo);
 
     /// <summary>
     /// Gets the data of the array constants (<c>0x20</c> tokens) in the definition, one block per token in order
     /// (spec §12.5). They are stored after the list of names (spec §11).
     /// </summary>
-    public List<byte[]> ArrayConstants { get; } = [];
+    public List<byte[]> ArrayConstants => _arrayConstants ??= [];
+
+    internal bool HasArrayConstants => _arrayConstants is { Count: > 0 };
+
+    // Created on first use: most names have no array constants.
+    private List<byte[]>? _arrayConstants;
 
     /// <summary>
     /// Sets the definition from formula text, such as <c>=$A$1:$B$5</c> or <c>={1,2,3}</c>, and sets or clears
-    /// <see cref="ReferenceFlag"/> to match it.
+    /// <see cref="ExcelNameFlags.Reference"/> to match it.
     /// </summary>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
     public void SetDefinition(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
@@ -105,7 +157,7 @@ public sealed class ExcelDefinedName
     /// Sets the definition from formula text whose relative references are relative to
     /// <paramref name="relativeTo"/>, as when Excel defines a name with that cell active: <c>=B1</c> with C2 as
     /// <paramref name="relativeTo"/> refers to the cell one row up and one column left of each cell that uses the
-    /// name (spec §11). Sets or clears <see cref="ReferenceFlag"/> to match the definition.
+    /// name (spec §11). Sets or clears <see cref="ExcelNameFlags.Reference"/> to match the definition.
     /// </summary>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
     public void SetDefinition(string text, ExcelCellAddress relativeTo, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
@@ -115,7 +167,7 @@ public sealed class ExcelDefinedName
         Definition = definition;
         ArrayConstants.Clear();
         ArrayConstants.AddRange(arrays);
-        Flags = IsReference(definition) ? (byte)(Flags | ReferenceFlag) : (byte)(Flags & ~ReferenceFlag);
+        Flags = IsReference(definition) ? Flags | ExcelNameFlags.Reference : Flags & ~ExcelNameFlags.Reference;
     }
 
     // Turns the relative parts of the definition's references, parsed as cell indices, into offsets from relativeTo.
@@ -173,7 +225,7 @@ public sealed class ExcelDefinedName
         int definitionLength = reader.ReadByte();
         byte flags = reader.ReadByte();
         byte key = 0, extra = 0;
-        if ((flags & MacroFlag) != 0)
+        if ((flags & (byte)ExcelNameFlags.Macro) != 0)
         {
             key = reader.ReadByte();
             extra = reader.ReadByte();
@@ -185,30 +237,30 @@ public sealed class ExcelDefinedName
             throw new ExcelFormatException("A defined name's two definition lengths disagree.");
         }
 
-        var name = MacRoman.GetString(reader.ReadBytes(nameLength));
-        return new ExcelDefinedName(name, definition, flags) { ShortcutKey = key, MacroKind = extra };
+        var name = MacRoman.GetString(reader.ReadSpan(nameLength));
+        return new ExcelDefinedName(name, definition, (ExcelNameFlags)flags) { RawShortcutKey = key, RawMacroKind = extra };
     }
 
     internal void Write(BigEndianWriter writer)
     {
-        var nameBytes = MacRoman.GetBytes(Name);
-        if (nameBytes.Length is 0 or > 255 || Definition.Length > 255)
+        // Mac OS Roman has one byte per character.
+        if (Name.Length is 0 or > 255 || Definition.Length > 255)
         {
             throw new InvalidOperationException($"Name '{Name}' or its definition is too long.");
         }
 
-        writer.WriteByte((byte)nameBytes.Length);
+        writer.WriteByte((byte)Name.Length);
         writer.WriteByte((byte)Definition.Length);
-        writer.WriteByte(Flags);
-        if ((Flags & MacroFlag) != 0)
+        writer.WriteByte((byte)Flags);
+        if ((Flags & ExcelNameFlags.Macro) != 0)
         {
-            writer.WriteByte(ShortcutKey);
-            writer.WriteByte(MacroKind);
+            writer.WriteByte(RawShortcutKey);
+            writer.WriteByte(RawMacroKind);
         }
 
         writer.WriteBytes(Definition);
         writer.WriteByte((byte)Definition.Length);
-        writer.WriteBytes(nameBytes);
+        writer.WriteMacRoman(Name);
     }
 
     /// <inheritdoc/>

@@ -73,15 +73,22 @@ internal sealed class BigEndianReader
     }
 
     /// <summary>
-    /// Reads a Pascal string (a length byte followed by that many bytes) and returns the raw bytes.
+    /// Reads bytes without copying them.
     /// </summary>
-    public byte[] ReadPascalBytes()
+    public ReadOnlySpan<byte> ReadSpan(int count)
     {
-        var length = ReadByte();
-        return ReadBytes(length);
+        Require(count);
+        var result = _data.AsSpan(Position, count);
+        Position += count;
+        return result;
     }
 
-    public string ReadPascalString() => MacRoman.GetString(ReadPascalBytes());
+    /// <summary>
+    /// Reads a Pascal string (a length byte followed by that many bytes) and returns the raw bytes, without copying.
+    /// </summary>
+    public ReadOnlySpan<byte> ReadPascalSpan() => ReadSpan(ReadByte());
+
+    public string ReadPascalString() => MacRoman.GetString(ReadPascalSpan());
 
     public void Skip(int count)
     {

@@ -29,7 +29,10 @@ public sealed class ExcelCellGrid
 
     private const int EntrySize = 6;
 
-    private readonly List<ExcelCell?[]?> _rows = [];
+    // The created cells, row by row; null until the first is created, and a row's array null until a cell in it
+    // is, so reading a document does not allocate per row.
+    private ExcelCell?[]?[]? _rows;
+    private int _rowCount;
 
     // The file the grid was read from, or null for a grid built in memory.
     private byte[]? _source;
@@ -39,7 +42,7 @@ public sealed class ExcelCellGrid
     private int _sourceColumns;
 
     /// <summary>Gets the number of rows.</summary>
-    public int RowCount => _rows.Count;
+    public int RowCount => _rowCount;
 
     /// <summary>Gets the number of columns.</summary>
     public int ColumnCount { get; private set; }
@@ -71,6 +74,16 @@ public sealed class ExcelCellGrid
     }
 
     /// <summary>
+    /// Gets a cell by address, creating it and growing the grid as needed.
+    /// </summary>
+    public ExcelCell this[ExcelCellAddress address] => this[address.Row, address.Column];
+
+    /// <summary>
+    /// Gets a cell by address, or null if it is outside the grid. Never grows the grid.
+    /// </summary>
+    public ExcelCell? Find(ExcelCellAddress address) => Find(address.Row, address.Column);
+
+    /// <summary>
     /// Gets a cell by A1-style address, or null if it is outside the grid. Never grows the grid.
     /// </summary>
     public ExcelCell? Find(string address)
@@ -95,7 +108,7 @@ public sealed class ExcelCellGrid
             return ExcelCellType.Empty;
         }
 
-        var cell = _rows[row]?[column];
+        var cell = _rows?[row]?[column];
         if (cell is not null)
         {
             return cell.Type;
@@ -105,35 +118,34 @@ public sealed class ExcelCellGrid
     }
 
     /// <summary>
-    /// Gets the cells that have a value, in row-major order. Only those cells are created.
+    /// Gets the cells that have a value, in row-major order, as <see cref="ExcelCellRef"/> views read straight from
+    /// the cell table: a <c>foreach</c> over them allocates nothing, and no <see cref="ExcelCell"/> is created unless
+    /// you call <see cref="ExcelCellRef.GetCell"/>.
     /// </summary>
-    public IEnumerable<(int Row, int Column, ExcelCell Cell)> NonEmptyCells
-    {
-        get
-        {
-            for (int r = 0; r < _rows.Count; r++)
-            {
-                for (int c = 0; c < ColumnCount; c++)
-                {
-                    if (GetCellType(r, c) != ExcelCellType.Empty)
-                    {
-                        yield return (r, c, GetCell(r, c));
-                    }
-                }
-            }
-        }
-    }
+    public NonEmptyCellCollection NonEmptyCells => new(this);
 
     /// <summary>
-    /// Enumerates the cells that have a value as lightweight <see cref="ExcelCellRef"/> views, in row-major
-    /// order, without allocating. Use this to scan large sheets.
+    /// The cells of a grid that have a value. <c>foreach</c> uses its struct enumerator; LINQ works too, through
+    /// <see cref="IEnumerable{T}"/>, at the cost of boxing the enumerator.
     /// </summary>
-    public NonEmptyEnumerator EnumerateNonEmpty() => new(this);
+    public readonly struct NonEmptyCellCollection : IEnumerable<ExcelCellRef>
+    {
+        private readonly ExcelCellGrid _grid;
+
+        internal NonEmptyCellCollection(ExcelCellGrid grid) => _grid = grid;
+
+        /// <summary>Gets an enumerator over the cells that have a value.</summary>
+        public NonEmptyEnumerator GetEnumerator() => new(_grid);
+
+        IEnumerator<ExcelCellRef> IEnumerable<ExcelCellRef>.GetEnumerator() => GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 
     /// <summary>
     /// An allocation-free enumerator over the cells that have a value.
     /// </summary>
-    public struct NonEmptyEnumerator
+    public struct NonEmptyEnumerator : IEnumerator<ExcelCellRef>
     {
         private readonly ExcelCellGrid _grid;
         private int _row;
@@ -150,8 +162,7 @@ public sealed class ExcelCellGrid
         /// <summary>Gets the current cell.</summary>
         public ExcelCellRef Current { get; private set; }
 
-        /// <summary>Returns this enumerator.</summary>
-        public readonly NonEmptyEnumerator GetEnumerator() => this;
+        readonly object System.Collections.IEnumerator.Current => Current;
 
         /// <summary>Advances to the next cell that has a value.</summary>
         public bool MoveNext()
@@ -176,6 +187,19 @@ public sealed class ExcelCellGrid
 
             return false;
         }
+
+        /// <summary>Starts again from the first cell.</summary>
+        public void Reset()
+        {
+            _row = 0;
+            _column = -1;
+            Current = default;
+        }
+
+        /// <inheritdoc/>
+        public readonly void Dispose()
+        {
+        }
     }
 
     /// <summary>
@@ -183,7 +207,7 @@ public sealed class ExcelCellGrid
     /// </summary>
     internal void GetWords(int row, int column, out ushort word0, out ushort word1, out ushort word2)
     {
-        var cell = _rows[row]?[column];
+        var cell = _rows?[row]?[column];
         if (cell is not null)
         {
             word0 = cell.Word0;
@@ -212,7 +236,7 @@ public sealed class ExcelCellGrid
     internal bool TryGetRawData(int row, int column, out ReadOnlySpan<byte> data)
     {
         data = default;
-        if (_rows[row]?[column] is not null || !IsSourcePosition(row, column))
+        if (_rows?[row]?[column] is not null || !IsSourcePosition(row, column))
         {
             return false;
         }
@@ -234,7 +258,7 @@ public sealed class ExcelCellGrid
     public int CountNonEmpty()
     {
         int count = 0;
-        for (int r = 0; r < _rows.Count; r++)
+        for (int r = 0; r < _rowCount; r++)
         {
             for (int c = 0; c < ColumnCount; c++)
             {
@@ -259,27 +283,33 @@ public sealed class ExcelCellGrid
         ArgumentOutOfRangeException.ThrowIfGreaterThan(columns, MaxColumns);
         if (columns > ColumnCount)
         {
-            for (int r = 0; r < _rows.Count; r++)
+            for (int r = 0; r < _rowCount; r++)
             {
-                if (_rows[r] is { } row)
+                if (_rows?[r] is { } row)
                 {
                     var grown = new ExcelCell?[columns];
                     row.CopyTo(grown, 0);
-                    _rows[r] = grown;
+                    _rows![r] = grown;
                 }
             }
 
             ColumnCount = columns;
         }
 
-        while (_rows.Count < rows)
+        if (_rowCount < rows)
         {
-            _rows.Add(null);
+            if (_rows is not null && _rows.Length < rows)
+            {
+                Array.Resize(ref _rows, Math.Max(rows, Math.Min(MaxRows, _rows.Length * 2)));
+            }
+
+            _rowCount = rows;
         }
     }
 
     private ExcelCell GetCell(int row, int column)
     {
+        _rows ??= new ExcelCell?[]?[_rowCount];
         var cells = _rows[row] ??= new ExcelCell?[ColumnCount];
         return cells[column] ??= CreateCell(row, column);
     }
@@ -330,12 +360,8 @@ public sealed class ExcelCellGrid
             throw new ExcelFormatException("The cell table runs past the end of the file.");
         }
 
-        _rows.Clear();
-        _rows.Capacity = rows;
-        for (int r = 0; r < rows; r++)
-        {
-            _rows.Add(null);
-        }
+        _rows = null;
+        _rowCount = rows;
 
         _source = source;
         _tableStart = tableStart;
@@ -353,7 +379,7 @@ public sealed class ExcelCellGrid
     {
         word0 = word1 = word2 = 0;
         data = default;
-        if (_rows[row]?[column] is not null || !IsSourcePosition(row, column))
+        if (_rows?[row]?[column] is not null || !IsSourcePosition(row, column))
         {
             return false;
         }

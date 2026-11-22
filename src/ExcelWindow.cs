@@ -4,15 +4,6 @@ using MacExcelReader.Internal;
 namespace MacExcelReader;
 
 /// <summary>
-/// A cell range used in a window's selection: first and last row, first and last column.
-/// </summary>
-/// <param name="FirstRow">The first row.</param>
-/// <param name="LastRow">The last row.</param>
-/// <param name="FirstColumn">The first column.</param>
-/// <param name="LastColumn">The last column.</param>
-public readonly record struct ExcelRange(ushort FirstRow, ushort LastRow, byte FirstColumn, byte LastColumn);
-
-/// <summary>
 /// A saved window (spec §13).
 /// </summary>
 public sealed class ExcelWindow
@@ -176,7 +167,10 @@ public sealed class ExcelWindow
         int count = reader.ReadUInt16();
         for (int i = 0; i < count; i++)
         {
-            window.Selection.Add(new ExcelRange(reader.ReadUInt16(), reader.ReadUInt16(), reader.ReadByte(), reader.ReadByte()));
+            // On disk: first row word, last row word, first column byte, last column byte.
+            ushort firstRow = reader.ReadUInt16(), lastRow = reader.ReadUInt16();
+            byte firstColumn = reader.ReadByte(), lastColumn = reader.ReadByte();
+            window.Selection.Add(new ExcelRange(firstRow, firstColumn, lastRow, lastColumn));
         }
 
         return window;
@@ -221,10 +215,12 @@ public sealed class ExcelWindow
         writer.WriteUInt16((ushort)Selection.Count);
         foreach (var range in Selection)
         {
-            writer.WriteUInt16(range.FirstRow);
-            writer.WriteUInt16(range.LastRow);
-            writer.WriteByte(range.FirstColumn);
-            writer.WriteByte(range.LastColumn);
+            // A selection read from a file is written back as it was, whatever it holds.
+            range.ValidateStorable(nameof(Selection));
+            writer.WriteUInt16((ushort)range.FirstRow);
+            writer.WriteUInt16((ushort)range.LastRow);
+            writer.WriteByte((byte)range.FirstColumn);
+            writer.WriteByte((byte)range.LastColumn);
         }
     }
 }

@@ -33,4 +33,7 @@
     <None Include="../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="MacExcelReader.Tests" />
+  </ItemGroup>
 </Project>

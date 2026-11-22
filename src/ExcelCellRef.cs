@@ -4,14 +4,14 @@ using MacExcelReader.Internal;
 namespace MacExcelReader;
 
 /// <summary>
-/// A lightweight, allocation-free view of a cell, produced by <see cref="ExcelCellGrid.EnumerateNonEmpty"/>.
+/// A lightweight, allocation-free view of a cell, produced by <see cref="ExcelCellGrid.NonEmptyCells"/>.
 /// It reads directly from the file's cell table and only creates an <see cref="ExcelCell"/> when
 /// <see cref="GetCell"/> is called.
 /// </summary>
 /// <example>
 /// <code>
 /// double total = 0;
-/// foreach (var cell in document.Cells.EnumerateNonEmpty())
+/// foreach (var cell in document.Cells.NonEmptyCells)
 /// {
 ///     if (cell.TryGetNumber(out double value))
 ///     {
@@ -59,10 +59,58 @@ public readonly struct ExcelCellRef
     public ushort RawAttributes => _word2;
 
     /// <summary>Gets whether the cell is bold.</summary>
-    public bool Bold => (_word2 & 1) != 0;
+    public bool Bold => CellWords.Has(_word2, CellWords.BoldBit);
 
     /// <summary>Gets whether the cell is italic.</summary>
-    public bool Italic => (_word2 & 2) != 0;
+    public bool Italic => CellWords.Has(_word2, CellWords.ItalicBit);
+
+    /// <summary>Gets whether the cell has a left border.</summary>
+    public bool LeftBorder => CellWords.Has(_word2, CellWords.LeftBorderBit);
+
+    /// <summary>Gets whether the cell has a right border.</summary>
+    public bool RightBorder => CellWords.Has(_word2, CellWords.RightBorderBit);
+
+    /// <summary>Gets whether the cell has a top border.</summary>
+    public bool TopBorder => CellWords.Has(_word2, CellWords.TopBorderBit);
+
+    /// <summary>Gets whether the cell has a bottom border.</summary>
+    public bool BottomBorder => CellWords.Has(_word2, CellWords.BottomBorderBit);
+
+    /// <summary>Gets whether the cell is locked when the document is protected.</summary>
+    public bool IsLocked => CellWords.Has(_word2, CellWords.LockedBit);
+
+    /// <summary>Gets whether the cell is hidden when the document is protected.</summary>
+    public bool IsHidden => CellWords.Has(_word2, CellWords.HiddenBit);
+
+    /// <summary>
+    /// Gets the cell's value, read from the file without creating the cell: allocation-free apart from text.
+    /// </summary>
+    public ExcelValue Value
+    {
+        get
+        {
+            switch (Type)
+            {
+                case ExcelCellType.Integer:
+                    return ExcelValue.FromNumber(_word0);
+                case ExcelCellType.BooleanOrError:
+                    return (_word0 >> 8) != 0 ? ExcelValue.FromErrorCode((byte)_word0) : ExcelValue.FromBoolean((byte)_word0 != 0);
+                case ExcelCellType.Number:
+                    return _grid.TryGetRawData(Row, Column, out var number) && number.Length >= 8
+                        ? ExcelValue.FromNumber(BinaryPrimitives.ReadDoubleBigEndian(number))
+                        : GetCell().Value;
+                case ExcelCellType.Text:
+                    return _grid.TryGetRawData(Row, Column, out var text) && text.Length >= 1 + text[0]
+                        ? ExcelValue.FromText(MacRoman.GetString(text.Slice(1, text[0])))
+                        : GetCell().Value;
+                case ExcelCellType.NumericFormula:
+                case ExcelCellType.Formula:
+                    return _grid.TryGetRawData(Row, Column, out var record) ? ExcelFormula.ReadResult(record) : GetCell().Value;
+                default:
+                    return ExcelValue.Empty;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets the numeric value of an integer, number or numeric-formula cell without allocating.
@@ -87,24 +135,6 @@ public readonly struct ExcelCellRef
                 value = 0;
                 return false;
         }
-    }
-
-    /// <summary>
-    /// Gets the text of a text cell, or null for other types. Allocates only the string.
-    /// </summary>
-    public string? GetText()
-    {
-        if (Type != ExcelCellType.Text)
-        {
-            return null;
-        }
-
-        if (_grid.TryGetRawData(Row, Column, out var data) && data.Length >= 1 && data.Length >= 1 + data[0])
-        {
-            return MacRoman.GetString(data.Slice(1, data[0]));
-        }
-
-        return GetCell().TextValue;
     }
 
     /// <summary>

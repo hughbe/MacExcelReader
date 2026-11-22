@@ -20,4 +20,17 @@ internal static class CellWords
     public static int NumberFormat(ushort word1) => word1 & NumberFormatMask;
 
     public static ushort WithNumberFormat(ushort word1, int format) => (ushort)((word1 & ~NumberFormatMask) | format);
+
+    // Bits of the third word (spec §9).
+    public const int BoldBit = 0;
+    public const int ItalicBit = 1;
+    public const int LeftBorderBit = 2;
+    public const int RightBorderBit = 3;
+    public const int TopBorderBit = 4;
+    public const int BottomBorderBit = 5;
+    public const int ArrayFunctionBit = 13;
+    public const int LockedBit = 14;
+    public const int HiddenBit = 15;
+
+    public static bool Has(ushort word2, int bit) => (word2 & (1 << bit)) != 0;
 }

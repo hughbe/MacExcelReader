@@ -192,6 +192,12 @@ public sealed class ExcelWorkspace
     /// <summary>Loads a workspace file.</summary>
     public static ExcelWorkspace Load(string path) => Read(File.ReadAllBytes(path));
 
+    /// <summary>
+    /// Loads a workspace file asynchronously.
+    /// </summary>
+    public static async Task<ExcelWorkspace> LoadAsync(string path, CancellationToken cancellationToken = default)
+        => Read(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+
     /// <summary>Serialises the workspace.</summary>
     public byte[] ToArray()
     {

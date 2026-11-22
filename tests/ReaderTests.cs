@@ -22,7 +22,7 @@ public class ReaderTests
         Assert.Equal(columns, document.Cells.ColumnCount);
         Assert.Equal(nonEmpty, document.Cells.CountNonEmpty());
         Assert.Equal(nonEmpty, document.Cells.NonEmptyCells.Count());
-        Assert.Equal(formulas, document.Cells.NonEmptyCells.Count(c => c.Cell.Formula is not null));
+        Assert.Equal(formulas, document.Cells.NonEmptyCells.Count(c => c.Type is ExcelCellType.Formula or ExcelCellType.NumericFormula));
     }
 
     [Theory]
@@ -42,7 +42,7 @@ public class ReaderTests
         }
 
         int count = 0;
-        foreach (var cell in fromBytes.Cells.EnumerateNonEmpty())
+        foreach (var cell in fromBytes.Cells.NonEmptyCells)
         {
             count++;
             var full = cell.GetCell();
@@ -50,10 +50,8 @@ public class ReaderTests
             Assert.Equal(full.NumberFormat, cell.NumberFormat);
             Assert.Equal(full.TryGetNumber(out double a), cell.TryGetNumber(out double b));
             Assert.Equal(a, b);
-            if (cell.Type == ExcelCellType.Text)
-            {
-                Assert.Equal(full.TextValue, cell.GetText());
-            }
+            Assert.Equal(full.Value, cell.Value);
+            Assert.Equal(ExcelValueFormatter.FormatCell(full, fromBytes), ExcelValueFormatter.FormatCell(cell, fromBytes));
         }
 
         Assert.Equal(nonEmpty, count);
@@ -152,11 +150,11 @@ public class ReaderTests
         var document = ExcelDocument.Read(bytes);
         Assert.Throws<ExcelFormatException>(() => document.Cells["A1"].NumberValue);
         Assert.Throws<ExcelFormatException>(() => document.Cells["A1"].TryGetNumber(out _));
-        var references = document.Cells.EnumerateNonEmpty();
+        var references = document.Cells.NonEmptyCells.GetEnumerator();
         Assert.True(references.MoveNext());
         var reference = references.Current;
         Assert.Throws<ExcelFormatException>(() => reference.TryGetNumber(out _));
-        Assert.Throws<ExcelFormatException>(() => document.Cells["A1"].Value);
+        Assert.Throws<ExcelFormatException>(() => _ = document.Cells["A1"].Value);
         Assert.Throws<ExcelFormatException>(() => document.ToArray());
     }
 
@@ -245,8 +243,8 @@ public class ReaderTests
         var document = Load("DB.FORM.xlm");
         Assert.Equal(40, document.Names.Count);
         var add = document.Names.Single(n => n.Name == "ADD");
-        Assert.True(add.IsCommand);
-        Assert.Equal((byte)'a', add.ShortcutKey);
+        Assert.Equal(ExcelMacroKind.Command, add.MacroKind);
+        Assert.Equal('a', add.ShortcutKey);
         Assert.Equal("$A$34", add.GetDefinitionText(document));
         Assert.Equal("=GET.SELECTION()", document.Cells["A28"].Formula!.ToText(document));
         Assert.Equal("=ECHO(TRUE)", document.Cells["B34"].Formula!.ToText(document));

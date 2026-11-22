@@ -96,10 +96,16 @@ public sealed class ChartText
     /// Gets an arrow's line: its pattern (memory offset 17), which is <see cref="ChartPattern.None"/> for text, and
     /// its shaft weight.
     /// </summary>
-    public ChartLineFormat ArrowLine => new(Record, 14);
+    public ChartLineFormat ArrowLine => _arrowLine ??= new(Record, 14);
+
+
+    private ChartLineFormat? _arrowLine;
 
     /// <summary>Gets the text box's area format: border, background and the box Excel last drew it in.</summary>
-    public ChartAreaFormat Area => new(Record, 20);
+    public ChartAreaFormat Area => _area ??= new(Record, 20);
+
+
+    private ChartAreaFormat? _area;
 
     /// <summary>Gets or sets an arrow's head width.</summary>
     public ArrowHeadWidth HeadWidth { get => (ArrowHeadWidth)((Word(18) >> 12) & 3); set => SetWord(18, (ushort)((Word(18) & ~0x3000) | (((int)value & 3) << 12))); }

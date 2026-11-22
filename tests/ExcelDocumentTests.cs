@@ -33,8 +33,9 @@ public class ExcelDocumentTests
     public void Read_Sample_DecompilesEveryFormula(string name)
     {
         var document = ExcelDocument.Load(SamplePath(name));
-        foreach (var (_, _, cell) in document.Cells.NonEmptyCells)
+        foreach (var entry in document.Cells.NonEmptyCells)
         {
+            var cell = entry.GetCell();
             if (cell.Formula is { } formula)
             {
                 var text = formula.ToText(document);
@@ -66,7 +67,7 @@ public class ExcelDocumentTests
         var window = Assert.Single(document.Windows);
         Assert.Equal(3, window.ActiveColumn);
         Assert.Equal(4, window.ActiveRow);
-        Assert.Equal(new ExcelRange(4, 4, 3, 3), Assert.Single(window.Selection));
+        Assert.Equal(ExcelRange.Parse("D5"), Assert.Single(window.Selection));
     }
 
     [Fact]
@@ -95,8 +96,8 @@ public class ExcelDocumentTests
         Assert.Equal("=ROW(ACTIVE.CELL())", document.Cells[27, 1].Formula!.ToText(document));
 
         var replace = document.Names.Single(n => n.Name == "REPLACE");
-        Assert.True(replace.IsCommand);
-        Assert.Equal((byte)'r', replace.ShortcutKey);
+        Assert.Equal(ExcelMacroKind.Command, replace.MacroKind);
+        Assert.Equal('r', replace.ShortcutKey);
         Assert.Equal("$B$19", replace.GetDefinitionText(document));
     }
 
@@ -208,6 +209,7 @@ public class ExcelDocumentTests
         Assert.Equal(208, ExcelFunctions.Count);
         Assert.Equal("IF", ExcelFunctions.Get(1)!.Name);
         Assert.Equal("ACTIVE.CELL", ExcelFunctions.Get(169)!.Name);
-        Assert.Equal(4, ExcelFunctions.FindNumber("sum"));
+        Assert.True(ExcelFunctions.TryFindNumber("sum", out int sum));
+        Assert.Equal(4, sum);
     }
 }

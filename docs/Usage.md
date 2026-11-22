@@ -44,6 +44,7 @@ var document = ExcelDocument.Load("Expenses");          // from a path
 var fromBytes = ExcelDocument.Read(bytes);              // copies the array
 var fromStream = ExcelDocument.Read(stream);
 var noCopy = ExcelDocument.Read(bytes, copyData: false); // you hand the array over
+var later = await ExcelDocument.LoadAsync("Expenses");   // ReadAsync, SaveAsync and WriteAsync too
 ```
 
 `Read(byte[])` copies the bytes so you can reuse the array. Pass `copyData: false` to skip the copy; the
@@ -72,7 +73,25 @@ switch (cell.Type)
     case ExcelCellType.Formula: var f = cell.Formula!; break;
 }
 
-object? value = cell.Value;   // ushort, double, string, bool, ExcelError, or null
+ExcelValue value = cell.Value;   // a number, text, TRUE or FALSE, an error, or empty
+switch (value.Kind)
+{
+    case ExcelValueKind.Number:  double n = value.Number; break;
+    case ExcelValueKind.Text:    string t = value.Text; break;
+    case ExcelValueKind.Boolean: bool b = value.Boolean; break;
+    case ExcelValueKind.Error:   ExcelError e = value.Error; break;
+}
+
+Console.WriteLine(value);   // as Excel shows it with General: 12.5, TRUE, #N/A
+```
+
+`ExcelValue` is a struct, so reading a value does not allocate, apart from decoding text. Numbers, text and TRUE or
+FALSE convert to it implicitly, and errors through `ExcelValue.FromError`:
+
+```csharp
+cell.SetValue(12.5);
+cell.SetValue("Total");
+cell.SetValue(ExcelValue.FromError(ExcelError.NotAvailable));
 ```
 
 `Integer` cells hold whole numbers from 0 to 65535; Excel stores a typed whole number in that range this way to
@@ -89,16 +108,15 @@ Each cell also has its formatting: `NumberFormat` (0–63; 0–18 are built in),
 
 ### Iterating
 
-```csharp
-// Creates an ExcelCell for each cell with a value.
-foreach (var (row, column, c) in document.Cells.NonEmptyCells) { ... }
+`NonEmptyCells` gives each cell with a value as an `ExcelCellRef`: a lightweight view read straight from the
+file, with the cell's address, type, value and formatting. A `foreach` over it allocates nothing; LINQ works too.
 
-// Allocation-free: lightweight views read straight from the file.
-foreach (var c in document.Cells.EnumerateNonEmpty())
+```csharp
+foreach (var c in document.Cells.NonEmptyCells)
 {
     if (c.TryGetNumber(out double v)) total += v;
-    string? text = c.GetText();
-    ExcelCell full = c.GetCell();   // when you need everything
+    ExcelValue value = c.Value;
+    ExcelCell full = c.GetCell();   // to change the cell, or read its formula
 }
 
 int count = document.Cells.CountNonEmpty();
@@ -115,7 +133,7 @@ string shown = ExcelValueFormatter.FormatCell(cell, document); // "1/1/84", "$1,
 string drawn = ExcelValueFormatter.FormatCell(cell, document, column: 2); // fitted to column C: "1.2E+08", "#####"…
 ExcelNumberFormat format = document.GetNumberFormat(cell.NumberFormat)!;
 string text = format.ToText();                                 // "00-00-000", as the Format Number dialog shows it
-string fmt = ExcelValueFormatter.GetBuiltInFormat(10);        // "m/d/yy"
+string fmt = ExcelNumberFormat.BuiltIn[10].ToText();         // "m/d/yy"
 DateTime date = ExcelValueFormatter.ToDateTime(29220);        // 1984-01-01
 double serial = ExcelValueFormatter.ToSerial(DateTime.Today);
 ```
@@ -127,7 +145,7 @@ Excel 1.x for Macintosh uses the **1904 date system**: serial 0 is 1 January 190
 ```csharp
 var formula = cell.Formula!;
 string text = formula.ToText(document);     // "=IF(NOT(B19),RETURN())"
-ExcelFormulaResult result = formula.Result; // Kind: Number, Text, Boolean or Error
+ExcelValue result = formula.Result;         // the value Excel last calculated
 ```
 
 Passing the document lets the decompiler resolve defined names and external documents. Formulas are stored
@@ -146,7 +164,7 @@ Array formulas decompile from the cell that holds the shared formula, as `{=TREN
 
 Functions are identified by number (spec Appendix A). `ExcelFunctions.Get(n)` gives the name, argument
 counts and types, flags and the release that introduced it; `ExcelFunctions.Get(n, ExcelVersion.Excel150)`
-gives a particular release's rules, and `ExcelFunctions.FindNumber("SUM")` goes the other way.
+gives a particular release's rules, and `ExcelFunctions.TryFindNumber("SUM", out int number)` goes the other way.
 
 ### Writing a formula
 
@@ -188,7 +206,7 @@ releases they cannot read it.
 **Array formulas** cover a range of cells:
 
 ```csharp
-document.SetArrayFormula(new ExcelRange(FirstRow: 0, LastRow: 4, FirstColumn: 2, LastColumn: 2), "{=B1:B5*2}");
+document.SetArrayFormula(ExcelRange.Parse("C1:C5"), "{=B1:B5*2}");
 ```
 
 Pass the document whenever the formula uses names or external references; otherwise `null` is fine.
@@ -255,7 +273,7 @@ A formula that uses a defined name passes the name's 1-based index as a fix-up w
 foreach (var name in document.Names)
 {
     Console.WriteLine($"{name.Name} = {name.GetDefinitionText(document)}");
-    if (name.IsCommand) Console.WriteLine($"  Option-Command-{(char)name.ShortcutKey}");
+    if (name.MacroKind == ExcelMacroKind.Command) Console.WriteLine($"  Option-Command-{name.ShortcutKey}");
 }
 ```
 
@@ -277,8 +295,8 @@ state.Iteration; state.MaxIterations; state.MaxChange;
 state.GetColumnWidth(0); state.SetColumnWidth(0, 100);   // 0 hides a column
 state.StandardFont; state.StandardFontSize;
 
-state.IsProtected = true;
-state.PasswordHash = ExcelPassword.Hash("secret");
+document.Protect("secret");     // as Protect Document does; the password is optional
+document.Unprotect("secret");   // false, leaving it protected, for a wrong password
 ```
 
 `document.Windows` holds the saved windows (position, active cell, selection, display options and splits),
@@ -356,11 +374,11 @@ Reading is lazy:
   It creates no cell objects.
 - A **cell** is created the first time you access it; its **text or formula** is decoded the first time you
   read its value. Numbers are read straight from the buffer each time.
-- **`EnumerateNonEmpty`** scans the cell table without creating anything.
+- **`NonEmptyCells`** scans the cell table without creating anything.
 - **Saving** copies untouched cells byte-for-byte instead of re-encoding them.
 
-To get the most out of it: use `TryGetNumber` instead of `Value` (no boxing), `EnumerateNonEmpty` for scans,
-and `Read(bytes, copyData: false)` when you own the buffer. See [the README](../README.md#performance) for
+To get the most out of it: walk `NonEmptyCells` and read `Value` or `TryGetNumber` from the `ExcelCellRef` rather
+than calling `GetCell()`, and use `Read(bytes, copyData: false)` when you own the buffer. See [the README](../README.md#performance) for
 benchmark numbers.
 
 ## Errors

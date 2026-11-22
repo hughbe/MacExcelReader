@@ -8,16 +8,7 @@ namespace MacExcelReader;
 /// </summary>
 public static class ExcelValueFormatter
 {
-    /// <summary>The number of built-in formats.</summary>
-    public const int BuiltInFormatCount = 19;
-
     private static readonly DateTime s_epoch = new(1904, 1, 1);
-
-    /// <summary>
-    /// Gets the text of a built-in format, such as "#,##0.00", or null for a user-defined index.
-    /// </summary>
-    public static string? GetBuiltInFormat(int index)
-        => index >= 0 && index < BuiltInFormatCount ? ExcelNumberFormat.BuiltIn[index].ToText() : null;
 
     /// <summary>
     /// Gets whether a format index is a date format the way Excel decides it (<c>34.04</c> in 1.00; spec §7): one of
@@ -26,7 +17,7 @@ public static class ExcelValueFormatter
     /// </summary>
     public static bool IsDateFormat(int index, ExcelDocument? document = null)
         => index is >= 10 and <= 18
-            || (index >= BuiltInFormatCount && document?.GetNumberFormat(index)?.IsDate == true);
+            || (index >= ExcelNumberFormat.BuiltInCount && document?.GetNumberFormat(index)?.IsDate == true);
 
     /// <summary>
     /// Converts a 1904-system serial number to a date and time.
@@ -46,7 +37,7 @@ public static class ExcelValueFormatter
     {
         var format = formatIndex < 0 ? null
             : document is not null ? document.GetNumberFormat(formatIndex)
-            : formatIndex < BuiltInFormatCount ? ExcelNumberFormat.BuiltIn[formatIndex] : null;
+            : formatIndex < ExcelNumberFormat.BuiltInCount ? ExcelNumberFormat.BuiltIn[formatIndex] : null;
         return format?.Format(value) ?? FormatGeneral(value);
     }
 
@@ -157,6 +148,38 @@ public static class ExcelValueFormatter
             return (string.Empty, 1);
         }
 
+        // .NET gives the first 41 significant digits correctly rounded: d.dddd…E±x. They settle the 14 Excel keeps,
+        // unless the 15th starts an apparent exact tie, 5 and then zeros, which the exact conversion has to decide.
+        Span<char> text = stackalloc char[64];
+        magnitude.TryFormat(text, out int length, "E40", System.Globalization.CultureInfo.InvariantCulture);
+        Span<char> digits = stackalloc char[41];
+        digits[0] = text[0];
+        text.Slice(2, 40).CopyTo(digits[1..]);
+        if (digits[14] == '5' && !digits[15..].ContainsAnyExcept('0'))
+        {
+            return Num2StrExact(magnitude);
+        }
+
+        int exponent = int.Parse(text[43..length], System.Globalization.CultureInfo.InvariantCulture) + 1;
+        long kept = long.Parse(digits[..14], System.Globalization.CultureInfo.InvariantCulture);
+        if (digits[14] >= '5')
+        {
+            kept++;
+            if (kept == 100_000_000_000_000)
+            {
+                kept = 10_000_000_000_000;
+                exponent++;
+            }
+        }
+
+        Span<char> result = stackalloc char[14];
+        kept.TryFormat(result, out _, default, System.Globalization.CultureInfo.InvariantCulture);
+        return (new string(result.TrimEnd('0')), exponent);
+    }
+
+    // The same conversion done exactly, for a value whose 15th digit may be an exact tie.
+    private static (string Digits, int Exponent) Num2StrExact(double magnitude)
+    {
         long bits = BitConverter.DoubleToInt64Bits(magnitude);
         int binaryExponent = (int)((bits >> 52) & 0x7FF);
         long mantissa = bits & 0xFFFFFFFFFFFFFL;
@@ -243,13 +266,21 @@ public static class ExcelValueFormatter
     }
 
     /// <summary>
-    /// Formats a cell's value for display using its number format; logical values show as TRUE/FALSE and errors as
-    /// their error text. Pass the document to use its user-defined formats, including Excel 1.5's text sections.
+    /// Formats a cell's value for display using its number format; TRUE, FALSE and errors show as they are. Pass the
+    /// document to use its user-defined formats, including Excel 1.5's text sections.
     /// </summary>
     public static string FormatCell(ExcelCell cell, ExcelDocument? document = null)
     {
-        return FormatCellCore(cell, document, null);
+        ArgumentNullException.ThrowIfNull(cell);
+        return FormatValue(cell.Value, cell.NumberFormat, document, null);
     }
+
+    /// <summary>
+    /// Formats a cell's value for display, as <see cref="FormatCell(ExcelCell, ExcelDocument?)"/> does, without
+    /// creating the cell.
+    /// </summary>
+    public static string FormatCell(ExcelCellRef cell, ExcelDocument? document = null)
+        => FormatValue(cell.Value, cell.NumberFormat, document, null);
 
     /// <summary>
     /// Formats a cell's value as Excel 1.00 shows it in its column (spec §7): General fits the column, fills repeat
@@ -262,40 +293,42 @@ public static class ExcelValueFormatter
     {
         ArgumentNullException.ThrowIfNull(cell);
         ArgumentNullException.ThrowIfNull(document);
-        int digit = cell.Bold ? document.State.BoldDigitWidth : document.State.DigitWidth;
-        return FormatCellCore(cell, document, document.State.GetColumnWidth(column) / Math.Max(1, digit));
+        return FormatValue(cell.Value, cell.NumberFormat, document, ColumnDigits(document, column, cell.Bold));
     }
 
-    private static string FormatCellCore(ExcelCell cell, ExcelDocument? document, int? width)
+    /// <summary>
+    /// Formats a cell's value as Excel 1.00 shows it in its column, as
+    /// <see cref="FormatCell(ExcelCell, ExcelDocument, int)"/> does, without creating the cell.
+    /// </summary>
+    public static string FormatCell(ExcelCellRef cell, ExcelDocument document, int column)
     {
-        ArgumentNullException.ThrowIfNull(cell);
-        if (cell.TryGetNumber(out double number))
-        {
-            if (width is not { } columns)
-            {
-                return Format(number, cell.NumberFormat, document);
-            }
+        ArgumentNullException.ThrowIfNull(document);
+        return FormatValue(cell.Value, cell.NumberFormat, document, ColumnDigits(document, column, cell.Bold));
+    }
 
-            var format = document?.GetNumberFormat(cell.NumberFormat) ?? ExcelNumberFormat.BuiltIn[0];
-            return format.Format(number, columns);
+    private static int ColumnDigits(ExcelDocument document, int column, bool bold)
+        => document.State.GetColumnWidth(column) / Math.Max(1, (int)(bold ? document.State.BoldDigitWidth : document.State.DigitWidth));
+
+    private static string FormatValue(ExcelValue value, int numberFormat, ExcelDocument? document, int? width)
+    {
+        switch (value.Kind)
+        {
+            case ExcelValueKind.Number:
+                if (width is not { } columns)
+                {
+                    return Format(value.Number, numberFormat, document);
+                }
+
+                var format = document?.GetNumberFormat(numberFormat) ?? ExcelNumberFormat.BuiltIn[0];
+                return format.Format(value.Number, columns);
+            case ExcelValueKind.Text:
+                // Excel 1.5's text section, when the format has one.
+                return document?.GetNumberFormat(numberFormat)?.Format(value.Text) ?? value.Text;
+            case ExcelValueKind.Empty:
+                return string.Empty;
+            default:
+                // TRUE, FALSE and errors show as they are, whatever the cell's format.
+                return value.ToString();
         }
-
-        // TRUE, FALSE and errors show as they are, whatever the cell's format.
-        if (cell.Type == ExcelCellType.BooleanOrError)
-        {
-            return cell.IsError ? cell.Error.ToText() : BooleanText.Of(cell.BooleanValue);
-        }
-
-        if (cell.Formula?.Result is { Kind: ExcelFormulaResultKind.Error } result)
-        {
-            return result.Error.ToText();
-        }
-
-        return cell.Value switch
-        {
-            bool b => BooleanText.Of(b),
-            string s => document?.GetNumberFormat(cell.NumberFormat)?.Format(s) ?? s,
-            _ => string.Empty,
-        };
     }
 }

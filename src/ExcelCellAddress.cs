@@ -74,5 +74,10 @@ public readonly record struct ExcelCellAddress(int Row, int Column)
     /// <summary>
     /// Formats the address in A1 notation.
     /// </summary>
-    public override string ToString() => FormulaDecompiler.ColumnName(Column) + (Row + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public override string ToString() => ColumnName(Column) + (Row + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Gets the letters of a zero-based column index: 0 is A, 25 is Z, 26 is AA and 255, the last column, is IV.
+    /// </summary>
+    public static string ColumnName(int column) => FormulaDecompiler.ColumnName(column);
 }

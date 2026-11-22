@@ -166,17 +166,19 @@ public sealed class ExcelCell
     public ExcelFormula? Formula => Type is ExcelCellType.Formula or ExcelCellType.NumericFormula ? DecodeFormula() : null;
 
     /// <summary>
-    /// Gets the cell's value: a <see cref="ushort"/>, <see cref="double"/>, <see cref="string"/>,
-    /// <see cref="bool"/>, an <see cref="ExcelError"/>, the formula's current value, or null for an empty cell.
+    /// Gets the cell's value: a number (integer and number cells), text, TRUE or FALSE, an error, a formula's
+    /// current value, or <see cref="ExcelValue.Empty"/>. Reading it does not allocate, apart from decoding text.
     /// </summary>
-    public object? Value => Type switch
+    public ExcelValue Value => Type switch
     {
-        ExcelCellType.Integer => IntegerValue,
-        ExcelCellType.BooleanOrError => IsError ? Error : BooleanValue,
-        ExcelCellType.Number => ReadNumber(),
-        ExcelCellType.Text => DecodeText(),
-        ExcelCellType.NumericFormula or ExcelCellType.Formula => DecodeFormula().Result.Value,
-        _ => null,
+        ExcelCellType.Integer => ExcelValue.FromNumber(Word0),
+        ExcelCellType.BooleanOrError => IsError ? ExcelValue.FromErrorCode((byte)Word0) : ExcelValue.FromBoolean(BooleanValue),
+        ExcelCellType.Number => ExcelValue.FromNumber(ReadNumber()),
+        ExcelCellType.Text => ExcelValue.FromText(DecodeText()),
+        ExcelCellType.NumericFormula or ExcelCellType.Formula => _payload is byte[] source
+            ? ExcelFormula.ReadResult(source.AsSpan(_dataOffset))
+            : DecodeFormula().Result,
+        _ => ExcelValue.Empty,
     };
 
     /// <summary>
@@ -225,18 +227,38 @@ public sealed class ExcelCell
     }
 
     /// <summary>
-    /// Sets a numeric value as Excel does: a whole number from 0 to 65535 in the compact integer form, anything else,
-    /// negative numbers included, as a number.
+    /// Sets a constant value as Excel stores one typed into the cell: a whole number from 0 to 65535 in the compact
+    /// integer form, any other number (negative ones included) as a number, and text, TRUE, FALSE or an error as
+    /// themselves. The empty value clears the cell, keeping its formatting.
     /// </summary>
-    public void SetValue(double value)
+    public void SetValue(ExcelValue value)
     {
-        if (value == Math.Floor(value) && value >= 0 && value <= ushort.MaxValue && !double.IsNegative(value))
+        switch (value.Kind)
         {
-            SetInteger((ushort)value);
-        }
-        else
-        {
-            SetNumber(value);
+            case ExcelValueKind.Number:
+                double number = value.Number;
+                if (number == Math.Floor(number) && number >= 0 && number <= ushort.MaxValue && !double.IsNegative(number))
+                {
+                    SetInteger((ushort)number);
+                }
+                else
+                {
+                    SetNumber(number);
+                }
+
+                break;
+            case ExcelValueKind.Text:
+                SetText(value.Text);
+                break;
+            case ExcelValueKind.Boolean:
+                SetBoolean(value.Boolean);
+                break;
+            case ExcelValueKind.Error:
+                SetError(value.Error);
+                break;
+            default:
+                Clear();
+                break;
         }
     }
 
@@ -246,7 +268,7 @@ public sealed class ExcelCell
     public void SetText(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        if (MacRoman.GetBytes(value).Length > 255)
+        if (value.Length > 255)   // Mac OS Roman has one byte per character
         {
             throw new ArgumentException("Cell text cannot be longer than 255 characters.", nameof(value));
         }
@@ -264,7 +286,7 @@ public sealed class ExcelCell
         ArgumentNullException.ThrowIfNull(formula);
         ClearValue();
         _payload = formula;
-        Type = formula.Result.Kind == ExcelFormulaResultKind.Number ? ExcelCellType.NumericFormula : ExcelCellType.Formula;
+        Type = formula.Result.Kind == ExcelValueKind.Number ? ExcelCellType.NumericFormula : ExcelCellType.Formula;
     }
 
     /// <summary>
@@ -317,37 +339,37 @@ public sealed class ExcelCell
         set => Word1 = CellWords.WithAlignment(Word1, value);
     }
 
-    private bool GetFlag(int bit) => (Word2 & (1 << bit)) != 0;
+    private bool GetFlag(int bit) => CellWords.Has(Word2, bit);
 
     private void SetFlag(int bit, bool value)
         => Word2 = (ushort)(value ? Word2 | (1 << bit) : Word2 & ~(1 << bit));
 
     /// <summary>Gets or sets whether the cell is hidden when the document is protected.</summary>
-    public bool IsHidden { get => GetFlag(15); set => SetFlag(15, value); }
+    public bool IsHidden { get => GetFlag(CellWords.HiddenBit); set => SetFlag(CellWords.HiddenBit, value); }
 
     /// <summary>Gets or sets whether the cell is locked when the document is protected.</summary>
-    public bool IsLocked { get => GetFlag(14); set => SetFlag(14, value); }
+    public bool IsLocked { get => GetFlag(CellWords.LockedBit); set => SetFlag(CellWords.LockedBit, value); }
 
     /// <summary>Gets or sets whether the cell's formula uses an array-valued function.</summary>
-    public bool UsesArrayFunction { get => GetFlag(13); set => SetFlag(13, value); }
+    public bool UsesArrayFunction { get => GetFlag(CellWords.ArrayFunctionBit); set => SetFlag(CellWords.ArrayFunctionBit, value); }
 
     /// <summary>Gets or sets the bottom border.</summary>
-    public bool BottomBorder { get => GetFlag(5); set => SetFlag(5, value); }
+    public bool BottomBorder { get => GetFlag(CellWords.BottomBorderBit); set => SetFlag(CellWords.BottomBorderBit, value); }
 
     /// <summary>Gets or sets the top border.</summary>
-    public bool TopBorder { get => GetFlag(4); set => SetFlag(4, value); }
+    public bool TopBorder { get => GetFlag(CellWords.TopBorderBit); set => SetFlag(CellWords.TopBorderBit, value); }
 
     /// <summary>Gets or sets the right border.</summary>
-    public bool RightBorder { get => GetFlag(3); set => SetFlag(3, value); }
+    public bool RightBorder { get => GetFlag(CellWords.RightBorderBit); set => SetFlag(CellWords.RightBorderBit, value); }
 
     /// <summary>Gets or sets the left border.</summary>
-    public bool LeftBorder { get => GetFlag(2); set => SetFlag(2, value); }
+    public bool LeftBorder { get => GetFlag(CellWords.LeftBorderBit); set => SetFlag(CellWords.LeftBorderBit, value); }
 
     /// <summary>Gets or sets italic.</summary>
-    public bool Italic { get => GetFlag(1); set => SetFlag(1, value); }
+    public bool Italic { get => GetFlag(CellWords.ItalicBit); set => SetFlag(CellWords.ItalicBit, value); }
 
     /// <summary>Gets or sets bold.</summary>
-    public bool Bold { get => GetFlag(0); set => SetFlag(0, value); }
+    public bool Bold { get => GetFlag(CellWords.BoldBit); set => SetFlag(CellWords.BoldBit, value); }
 
     /// <summary>
     /// Gets the raw attribute word (the third cell-table word).
@@ -358,11 +380,6 @@ public sealed class ExcelCell
     public override string ToString() => Type switch
     {
         ExcelCellType.Empty => string.Empty,
-        _ => Value switch
-        {
-            bool b => BooleanText.Of(b),
-            ExcelError e => e.ToText(),
-            var other => other?.ToString() ?? string.Empty,
-        },
+        _ => Value.ToString(),
     };
 }

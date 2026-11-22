@@ -51,10 +51,10 @@ public class NumberFormatParseTests
             string text = format.ToText();
             bool textOnly = format.SectionCount == 4 && format.IsSingleSection && format.Descriptor[3] < format.Descriptor[2];
             int index = target.AddNumberFormat(textOnly ? text["General;".Length..] : text, version);
-            Assert.Equal(ExcelValueFormatter.BuiltInFormatCount, index);
+            Assert.Equal(ExcelNumberFormat.BuiltInCount, index);
             Assert.Equal(format.Descriptor, target.NumberFormats[0].Descriptor);
             Assert.Equal(format.Body, target.NumberFormats[0].Body);
-            Assert.Equal(document.Version == ExcelDocument.Version18 && format.RequiresVersion18, format.RequiresVersion18);
+            Assert.Equal(document.Version == ExcelFormatVersion.Version18 && format.RequiresVersion18, format.RequiresVersion18);
         }
     }
 
@@ -108,9 +108,9 @@ public class NumberFormatParseTests
         Assert.Equal(7, document.NumberFormats[1].Descriptor.Length);
         Assert.Throws<InvalidOperationException>(() => document.AddNumberFormat("[red]0", ExcelVersion.Excel150));
 
-        document.Version = ExcelDocument.Version18;
+        document.Version = ExcelFormatVersion.Version18;
         var reread = ExcelDocument.CreateWorksheet();
-        reread.Version = ExcelDocument.Version18;
+        reread.Version = ExcelFormatVersion.Version18;
         Assert.Equal(19, reread.AddNumberFormat("[red]0", ExcelVersion.Excel150));
         reread.Cells["A1"].SetNumber(-2);
         reread.Cells["A1"].NumberFormat = 19;

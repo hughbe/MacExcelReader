@@ -117,6 +117,12 @@ public static class FormulaTokens
     public static TokenEnumerator Enumerate(ReadOnlySpan<byte> expression) => new(expression);
 
     /// <summary>
+    /// Gets the A1-style text of a reference token's operands: a row word (bit 15 a relative row, bit 14 a relative
+    /// column, bits 13–0 the row) and a column. In a name definition relative parts are offsets, shown here from A1.
+    /// </summary>
+    public static string ReferenceText(ushort rowWord, byte column) => FormulaDecompiler.CellText(rowWord, column);
+
+    /// <summary>
     /// Returns a copy of a parsed expression with the bytes Excel leaves over from memory set to zero (spec §15.2),
     /// so that two encodings of the same formula compare equal: the pointer bytes of name (<c>23</c>),
     /// external-sheet (<c>1A</c>, <c>1B</c>), array-constant (<c>20</c>) and deleted-reference (<c>2A</c>) tokens, and
@@ -349,7 +355,7 @@ public static class FormulaTokens
         }
     }
 
-    private static void SkipArrayBlock(ReadOnlySpan<byte> data, ref int position)
+    internal static void SkipArrayBlock(ReadOnlySpan<byte> data, ref int position)
     {
         Require(data, position, 1);
         int columns = data[position++];
@@ -383,13 +389,13 @@ public static class FormulaTokens
         }
     }
 
-    private static void Skip(ReadOnlySpan<byte> data, ref int position, int count)
+    internal static void Skip(ReadOnlySpan<byte> data, ref int position, int count)
     {
         Require(data, position, count);
         position += count;
     }
 
-    private static ushort ReadWord(ReadOnlySpan<byte> data, ref int position)
+    internal static ushort ReadWord(ReadOnlySpan<byte> data, ref int position)
     {
         Require(data, position, 2);
         ushort value = BinaryPrimitives.ReadUInt16BigEndian(data.Slice(position));

@@ -104,9 +104,9 @@ public class FormulaParserTests
         var document = ExcelDocument.Read(bytes);
         foreach (var name in document.Names.Where(n => n.Definition.Length > 0))
         {
-            var copy = new ExcelDefinedName(name.Name, flags: (byte)(name.Flags ^ ExcelDefinedName.ReferenceFlag));
+            var copy = new ExcelDefinedName(name.Name, flags: name.Flags ^ ExcelNameFlags.Reference);
             copy.SetDefinition("=" + name.GetDefinitionText(document), document, version);
-            Assert.True((copy.Flags & ExcelDefinedName.ReferenceFlag) == (name.Flags & ExcelDefinedName.ReferenceFlag), $"{name.Name} ={name.GetDefinitionText(document)}");
+            Assert.True((copy.Flags & ExcelNameFlags.Reference) == (name.Flags & ExcelNameFlags.Reference), $"{name.Name} ={name.GetDefinitionText(document)}");
         }
     }
 
@@ -117,8 +117,11 @@ public class FormulaParserTests
         var bytes = File.ReadAllBytes(SampleFile(sample));
         var version = SavedBy(bytes);
         var document = ExcelDocument.Read(bytes);
-        foreach (var (row, column, cell) in document.Cells.NonEmptyCells)
+        foreach (var entry in document.Cells.NonEmptyCells)
         {
+            int row = entry.Row;
+            int column = entry.Column;
+            var cell = entry.GetCell();
             var address = new ExcelCellAddress(row, column);
             // Tables are made by the TABLE command; their text cannot be compiled.
             if (cell.Formula is not { } formula || formula.IsTable || IsKnownException(bytes, formula) || (formula.IsArrayFormula && !formula.IsSharedAnchor))
@@ -359,7 +362,7 @@ public class FormulaParserTests
         Assert.Equal("=Book!A1:B2", external.ToText(document));
         Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=Book!A1:Missing", document));
 
-        document.Names.Add(new ExcelDefinedName("RunMe", flags: ExcelDefinedName.ReferenceFlag));
+        document.Names.Add(new ExcelDefinedName("RunMe", flags: ExcelNameFlags.Reference));
         Assert.True(ExcelFormula.Parse("=RunMe(1)", document).Expression.Length > 0);
     }
 
@@ -367,7 +370,7 @@ public class FormulaParserTests
     public void RejectsBranchOffsetsBeyondEncodingLimit()
     {
         var document = ExcelDocument.CreateWorksheet();
-        document.Names.Add(new ExcelDefinedName("RunMe", flags: ExcelDefinedName.ReferenceFlag));
+        document.Names.Add(new ExcelDefinedName("RunMe", flags: ExcelNameFlags.Reference));
         var huge = "RunMe(" + string.Join(",", Enumerable.Repeat("1", 130)) + ")";
         Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse($"=IF(TRUE,{huge},0)", document));
         Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse($"={huge}:A1", document));

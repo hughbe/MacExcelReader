@@ -60,20 +60,22 @@ using MacExcelReader;
 
 var document = ExcelDocument.Load("Expenses");   // the file's data fork
 
-foreach (var (row, column, cell) in document.Cells.NonEmptyCells)
+// Cells are read straight from the file: walking them allocates nothing.
+foreach (var cell in document.Cells.NonEmptyCells)
 {
-    var address = new ExcelCellAddress(row, column);
-    Console.WriteLine($"{address}: {ExcelValueFormatter.FormatCell(cell, document)}  {cell.Formula?.ToText(document)}");
+    Console.WriteLine($"{cell.Address}: {ExcelValueFormatter.FormatCell(cell, document)}");
 }
 
-Console.WriteLine(document.Cells["C11"].Value);   // 1000
+ExcelValue value = document.Cells["C11"].Value;   // a number, text, TRUE/FALSE, an error, or empty
+Console.WriteLine(value);                         // 1000
+Console.WriteLine(document.Cells["B19"].Formula?.ToText(document));
 ```
 
-### Scan a large sheet without allocating
+### Sum a large sheet without allocating
 
 ```csharp
 double total = 0;
-foreach (var cell in document.Cells.EnumerateNonEmpty())
+foreach (var cell in document.Cells.NonEmptyCells)
 {
     if (cell.TryGetNumber(out double value))
     {
@@ -142,9 +144,8 @@ Measured with BenchmarkDotNet (`benchmarks/`) on an Apple Silicon Mac with .NET 
 | Read DB.FORM (24 KB, 433 cells, 275 formulas) | 6.4 µs | 37 KB |
 | Read large sheet | 56 µs | 854 KB |
 | Read large sheet, `copyData: false` | 11 µs | 27 KB |
-| Read large sheet and sum every number with `EnumerateNonEmpty` | 148 µs | 27 KB |
-| Read large sheet and sum every number via `NonEmptyCells` | 1.5 ms | 2.7 MB |
-| Read large sheet and box every value via `Value` | 2.7 ms | 5.0 MB |
+| Read large sheet, `copyData: false`, and sum every number via `NonEmptyCells` | 148 µs | 27 KB |
+| Read large sheet and create every cell object (`GetCell`) | 1.5 ms | 2.7 MB |
 | Read and re-save Expenses unchanged | 16 µs | 54 KB |
 | Read and re-save the large sheet unchanged | 753 µs | 2.5 MB |
 | Read DB.FORM and decompile all 275 formulas | 52 µs | 205 KB |

@@ -133,19 +133,34 @@ public sealed class Chart
     public (short Top, short Left) DrawingMargins => (unchecked((short)GetWord(14)), unchecked((short)GetWord(16)));
 
     /// <summary>Gets the chart area's format: border, background and the box Excel last drew it in.</summary>
-    public ChartAreaFormat ChartArea => new(Record, 24);
+    public ChartAreaFormat ChartArea => _chartArea ??= new(Record, 24);
+
+
+    private ChartAreaFormat? _chartArea;
 
     /// <summary>Gets the plot area's format; its box is relative to the chart area.</summary>
-    public ChartAreaFormat PlotArea => new(Record, 138);
+    public ChartAreaFormat PlotArea => _plotArea ??= new(Record, 138);
+
+
+    private ChartAreaFormat? _plotArea;
 
     /// <summary>Gets the legend's area format.</summary>
-    public ChartAreaFormat LegendArea => new(Record, 160);
+    public ChartAreaFormat LegendArea => _legendArea ??= new(Record, 160);
+
+
+    private ChartAreaFormat? _legendArea;
 
     /// <summary>Gets the drop lines (line and area charts).</summary>
-    public ChartLineFormat DropLines => new(Record, 254);
+    public ChartLineFormat DropLines => _dropLines ??= new(Record, 254);
+
+
+    private ChartLineFormat? _dropLines;
 
     /// <summary>Gets the hi-lo lines (line charts).</summary>
-    public ChartLineFormat HiLoLines => new(Record, 258);
+    public ChartLineFormat HiLoLines => _hiLoLines ??= new(Record, 258);
+
+
+    private ChartLineFormat? _hiLoLines;
 
     /// <summary>
     /// Gets the number of categories, which Excel 1.00 and 1.03 work out when they draw the chart (header byte 4; 0 in
@@ -171,7 +186,10 @@ public sealed class Chart
     public bool SharesXAxisScale { get => (Record[22] & 0x01) != 0; set => Record[22] = (byte)(value ? Record[22] | 0x01 : Record[22] & ~0x01); }
 
     /// <summary>Gets the chart's default series format (the point-format record at offset 366).</summary>
-    public ChartPointFormat DefaultSeriesFormat => new(Record, 366);
+    public ChartPointFormat DefaultSeriesFormat => _defaultSeriesFormat ??= new(Record, 366);
+
+
+    private ChartPointFormat? _defaultSeriesFormat;
 
     /// <summary>Gets a view of one of the <see cref="PointFormats"/>.</summary>
     public ChartPointFormat GetPointFormat(int index) => new(PointFormats[index], 0);
@@ -230,16 +248,29 @@ public sealed class Chart
     public short FirstSliceAngle { get => unchecked((short)GetWord(12)); set => SetWord(12, unchecked((ushort)value)); }
 
     /// <summary>Gets a view of the category axis record.</summary>
-    public ChartAxis CategoryAxis => new(Record, CategoryAxisOffset);
+    public ChartAxis CategoryAxis => _categoryAxis ??= new(Record, CategoryAxisOffset);
+
+
+    private ChartAxis? _categoryAxis;
 
     /// <summary>Gets a view of the value axis record.</summary>
-    public ChartAxis ValueAxis => new(Record, ValueAxisOffset);
+    public ChartAxis ValueAxis => _valueAxis ??= new(Record, ValueAxisOffset);
+
+
+    private ChartAxis? _valueAxis;
 
     /// <summary>Gets a view of the value-axis scale.</summary>
-    public ChartScale ValueScale => new(Record, ValueScaleOffset);
+    public ChartScale ValueScale => _valueScale ??= new(Record, ValueScaleOffset);
+
+
+    private ChartScale? _valueScale;
 
     /// <summary>Gets a view of the X-axis scale of a scatter chart, or null.</summary>
-    public ChartScale? XScale => XAxisScale is null ? null : new ChartScale(XAxisScale, 0);
+    public ChartScale? XScale => XAxisScale is null ? null
+        : _xScale is { } scale && scale.IsOver(XAxisScale) ? scale : _xScale = new ChartScale(XAxisScale, 0);
+
+    // Kept while XAxisScale is the same array.
+    private ChartScale? _xScale;
 
     /// <summary>Gets or sets the category number the value axis crosses at.</summary>
     public byte ValueAxisCrossesAtCategory { get => Record[132]; set => Record[132] = value; }
@@ -345,13 +376,22 @@ public sealed class ChartAxis
     public TickLabelPosition TickLabelPosition { get => (TickLabelPosition)((Word >> 4) & 0xF); set => SetField(4, (int)value); }
 
     /// <summary>Gets the axis line; <see cref="ChartPattern.None"/> hides the axis.</summary>
-    public ChartLineFormat Line => new(_data, _offset + 12);
+    public ChartLineFormat Line => _line ??= new(_data, _offset + 12);
+
+
+    private ChartLineFormat? _line;
 
     /// <summary>Gets the major gridlines; <see cref="ChartPattern.None"/> hides them.</summary>
-    public ChartLineFormat MajorGridlines => new(_data, _offset + 16);
+    public ChartLineFormat MajorGridlines => _majorGridlines ??= new(_data, _offset + 16);
+
+
+    private ChartLineFormat? _majorGridlines;
 
     /// <summary>Gets the minor gridlines; <see cref="ChartPattern.None"/> hides them.</summary>
-    public ChartLineFormat MinorGridlines => new(_data, _offset + 20);
+    public ChartLineFormat MinorGridlines => _minorGridlines ??= new(_data, _offset + 20);
+
+
+    private ChartLineFormat? _minorGridlines;
 
     /// <summary>Gets where Excel last drew the tick labels, in twips; 0 when the axis has no tick labels.</summary>
     public short TickLabelsAt => unchecked((short)BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + 8)));
@@ -414,7 +454,10 @@ public sealed class ChartAreaFormat
     private void SetWord(int offset, ushort value) => BinaryPrimitives.WriteUInt16BigEndian(_data.AsSpan(_offset + offset), value);
 
     /// <summary>Gets the border: its pattern and weight.</summary>
-    public ChartLineFormat Border => new(_data, _offset);
+    public ChartLineFormat Border => _border ??= new(_data, _offset);
+
+
+    private ChartLineFormat? _border;
 
     /// <summary>Gets or sets the background pattern; <see cref="ChartPattern.None"/> means none.</summary>
     public ChartPattern BackgroundPattern { get => (ChartPattern)_data[_offset + 5]; set => _data[_offset + 5] = (byte)value; }
@@ -457,7 +500,10 @@ public sealed class ChartPointFormat
     }
 
     /// <summary>Gets the line or border: its pattern and weight.</summary>
-    public ChartLineFormat Line => new(_data, _offset);
+    public ChartLineFormat Line => _line ??= new(_data, _offset);
+
+
+    private ChartLineFormat? _line;
 
     /// <summary>Gets or sets whether the line or border is automatic.</summary>
     public bool AutomaticLine { get => (GetWord(2) & 0x0400) != 0; set => SetBit(2, 10, value); }
@@ -510,6 +556,8 @@ public sealed class ChartScale
         _data = data;
         _offset = offset;
     }
+
+    internal bool IsOver(byte[] data) => ReferenceEquals(_data, data);
 
     private double Get(int index) => MicrosoftDecimal.FromBytes(_data.AsSpan(_offset + 8 * index)).ToDouble();
 

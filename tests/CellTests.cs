@@ -8,7 +8,7 @@ public class CellTests
         var cell = new ExcelCell();
         Assert.Equal(ExcelCellType.Empty, cell.Type);
         Assert.False(cell.HasValue);
-        Assert.Null(cell.Value);
+        Assert.True(cell.Value.IsEmpty);
         Assert.True(cell.IsLocked);
         Assert.Equal(0x4000, cell.RawAttributes);
         Assert.False(cell.TryGetNumber(out _));
@@ -102,17 +102,18 @@ public class CellTests
         formula.SetResult("hello");
         cell.SetFormula(formula);
         Assert.Equal(ExcelCellType.Formula, cell.Type);
-        Assert.Equal("hello", cell.Value);
-        Assert.Equal(ExcelFormulaResultKind.Text, formula.Result.Kind);
+        Assert.Equal("hello", cell.Value.Text);
+        Assert.Equal(ExcelValueKind.Text, formula.Result.Kind);
 
         formula.SetResult(false);
-        Assert.Equal(false, formula.Result.Value);
+        Assert.Equal(ExcelValue.FromBoolean(false), formula.Result);
 
-        formula.SetErrorResult(ExcelError.Value);
-        Assert.Equal(ExcelError.Value, formula.Result.Value);
+        formula.SetResult(ExcelValue.FromError(ExcelError.Value));
+        Assert.Equal(ExcelError.Value, formula.Result.Error);
+        Assert.Throws<ArgumentException>(() => formula.SetResult(ExcelValue.Empty));
 
         formula.SetResult(2.5);
-        Assert.Equal(2.5, formula.Result.Value);
+        Assert.Equal(2.5, formula.Result.Number);
     }
 
     [Theory]
@@ -165,7 +166,7 @@ public class CellTests
         Assert.Equal(2, grid.CountNonEmpty());
         Assert.Equal(["B2", "A3"], grid.NonEmptyCells.Select(c => new ExcelCellAddress(c.Row, c.Column).ToString()));
         var refs = new List<string>();
-        foreach (var cell in grid.EnumerateNonEmpty())
+        foreach (var cell in grid.NonEmptyCells)
         {
             refs.Add(cell.Address.ToString());
         }
@@ -188,7 +189,7 @@ public class CellTests
         source.Cells["C2"].SetText("hello");
         var document = ExcelDocument.Read(source.ToArray());
 
-        var refs = document.Cells.EnumerateNonEmpty();
+        var refs = document.Cells.NonEmptyCells.GetEnumerator();
         Assert.True(refs.MoveNext());
         var numberRef = refs.Current;
         Assert.Equal("B2", numberRef.Address.ToString());
@@ -203,9 +204,9 @@ public class CellTests
         Assert.Equal(2.5, value);
 
         Assert.True(refs.MoveNext());
-        Assert.Equal("hello", refs.Current.GetText());
-        Assert.Null(source.Cells["A1"].Value);
-        Assert.Null(numberRef.GetText());
+        Assert.Equal("hello", refs.Current.Value.Text);
+        Assert.True(source.Cells["A1"].Value.IsEmpty);
+        Assert.Equal(2.5, numberRef.Value.Number);
         Assert.False(refs.MoveNext());
     }
 

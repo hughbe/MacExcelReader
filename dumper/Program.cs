@@ -88,6 +88,18 @@ public sealed class Program
     internal static string Hex(ReadOnlySpan<byte> bytes) => bytes.IsEmpty ? "(none)" : Convert.ToHexString(bytes);
 
     internal static string YesNo(bool value) => value ? "yes" : "no";
+
+    // A value as stored: numbers in full ("R"), text as it is, TRUE, FALSE and errors as Excel writes them.
+    internal static string Raw(ExcelValue value)
+        => value.TryGetNumber(out double number) ? number.ToString("R", CultureInfo.InvariantCulture) : value.ToString();
+
+    // A value for the cell table: like Raw, with text quoted and empty shown.
+    internal static string Describe(ExcelValue value) => value.Kind switch
+    {
+        ExcelValueKind.Empty => "(empty)",
+        ExcelValueKind.Text => "\"" + value.Text + "\"",
+        _ => Raw(value),
+    };
 }
 
 class FileSettings : CommandSettings
@@ -111,7 +123,7 @@ sealed class InfoCommand : Command<FileSettings>
 
         var document = ExcelDocument.Load(settings.Input);
         int cells = 0, formulas = 0, text = 0, numbers = 0;
-        foreach (var (_, _, cell) in document.Cells.NonEmptyCells)
+        foreach (var cell in document.Cells.NonEmptyCells)
         {
             cells++;
             switch (cell.Type)
@@ -251,16 +263,20 @@ sealed class ParseCommand : Command<ParseSettings>
             var table = new Table().AddColumn("Field").AddColumn("Value");
             if (settings.Name)
             {
-                var (definition, arrays) = ExcelFormulaParser.ParseNameDefinition(settings.Formula, document, version);
-                expression = definition;
-                table.AddRow("Decompiled", Program.Escape("=" + FormulaDecompiler.Decompile(expression, [], document, fixupsInPlace: true, arrays)));
-                table.AddRow("Array data", Program.Escape(string.Join(" ", arrays.Select(a => Convert.ToHexString(a)))));
+                var name = new ExcelDefinedName("Parsed");
+                name.SetDefinition(settings.Formula, document, version);
+                expression = name.Definition;
+                table.AddRow("Decompiled", Program.Escape("=" + name.GetDefinitionText(document)));
+                table.AddRow("Array data", Program.Escape(string.Join(" ", name.ArrayConstants.Select(a => Convert.ToHexString(a)))));
             }
             else if (settings.Array)
             {
-                var (shared, fixups) = ExcelFormulaParser.ParseArrayFormula(settings.Formula.Trim('{', '}'), document, version);
-                expression = shared;
-                table.AddRow("Fix-ups", Program.Hex(fixups));
+                // Entered on a scratch copy of the sheet, whose anchor cell then holds the shared expression.
+                var scratch = document is null ? ExcelDocument.CreateWorksheet() : ExcelDocument.Read(document.ToArray());
+                scratch.SetArrayFormula(new ExcelRange(0, 0, 0, 0), settings.Formula, version);
+                var anchor = scratch.Cells[0, 0].Formula!;
+                expression = anchor.SharedExpression.ToArray();
+                table.AddRow("Fix-ups", Program.Hex(anchor.SharedFixups));
             }
             else
             {
@@ -309,21 +325,13 @@ sealed class CellCommand : Command<CellSettings>
         table.AddRow("Display", Program.Escape(ExcelValueFormatter.FormatCell(cell, document)));
         table.AddRow("In its column", Program.Escape(ExcelValueFormatter.FormatCell(cell, document, address.Column))
             + $" ({document.State.GetColumnWidth(address.Column)} px, about {document.State.GetColumnWidth(address.Column) / Math.Max(1, (int)(cell.Bold ? document.State.BoldDigitWidth : document.State.DigitWidth))} digits)");
-        table.AddRow("Value", Program.Escape(cell.Value switch
-        {
-            null => "(empty)",
-            string s => "\"" + s + "\"",
-            double d => d.ToString("R", CultureInfo.InvariantCulture),
-            bool b => b ? "TRUE" : "FALSE",
-            ExcelError e => e.ToText(),
-            var other => Convert.ToString(other, CultureInfo.InvariantCulture),
-        }));
+        table.AddRow("Value", Program.Escape(Program.Describe(cell.Value)));
         if (cell.TryGetNumber(out double number) && ExcelValueFormatter.IsDateFormat(cell.NumberFormat, document))
         {
             table.AddRow("As date", ExcelValueFormatter.ToDateTime(number).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
         }
 
-        table.AddRow("Number format", $"{cell.NumberFormat}: {Program.Escape(document.GetNumberFormat(cell.NumberFormat)?.ToText() ?? "(missing)")}{(cell.NumberFormat >= ExcelValueFormatter.BuiltInFormatCount ? " (user-defined)" : string.Empty)}");
+        table.AddRow("Number format", $"{cell.NumberFormat}: {Program.Escape(document.GetNumberFormat(cell.NumberFormat)?.ToText() ?? "(missing)")}{(cell.NumberFormat >= ExcelNumberFormat.BuiltInCount ? " (user-defined)" : string.Empty)}");
         table.AddRow("Alignment", cell.Alignment.ToString());
         table.AddRow("Style", Program.Escape(Style(cell)));
         table.AddRow("Protection", $"locked {Program.YesNo(cell.IsLocked)}, hidden {Program.YesNo(cell.IsHidden)}");
@@ -333,7 +341,7 @@ sealed class CellCommand : Command<CellSettings>
         {
             var result = formula.Result;
             table.AddRow("Formula", Program.Escape(formula.ToText(document)));
-            table.AddRow("Result", $"{result.Kind}: {Program.Escape(Convert.ToString(result.Value, CultureInfo.InvariantCulture))}");
+            table.AddRow("Result", $"{result.Kind}: {Program.Escape(Program.Describe(result))}");
             table.AddRow("Uses array function", Program.YesNo(cell.UsesArrayFunction));
             table.AddRow("Stored row/column", $"row word 0x{formula.StoredRowWord:X4}, column {formula.StoredColumn}");
             table.AddRow("Reserved bytes", Program.Hex(formula.Reserved));
@@ -392,10 +400,10 @@ sealed class CellCommand : Command<CellSettings>
             case 0x2A or 0x2B:
                 return "#REF! (deleted)";
             case 0x24 or 0x2C or 0x31 or 0x37:
-                return FormulaDecompiler.CellText((ushort)((operands[0] << 8) | operands[1]), operands[2]);
+                return FormulaTokens.ReferenceText((ushort)((operands[0] << 8) | operands[1]), operands[2]);
             case 0x25 or 0x2D or 0x32:
-                return FormulaDecompiler.CellText((ushort)((operands[0] << 8) | operands[1]), operands[4]) + ":" +
-                       FormulaDecompiler.CellText((ushort)((operands[2] << 8) | operands[3]), operands[5]);
+                return FormulaTokens.ReferenceText((ushort)((operands[0] << 8) | operands[1]), operands[4]) + ":" +
+                       FormulaTokens.ReferenceText((ushort)((operands[2] << 8) | operands[3]), operands[5]);
             case 0x17:
                 return "\"" + MacRoman.GetString(operands[1..]) + "\"";
             case 0x1E:
@@ -470,7 +478,7 @@ sealed class ExportCommand : Command<ExportSettings>
                 var cell = document.Cells.Find(r, c);
                 string text = cell is null ? string.Empty
                     : settings.Formulas && cell.Formula is { } formula ? formula.ToText(document)
-                    : settings.Raw ? (cell.Value is ExcelError error ? error.ToText() : Convert.ToString(cell.Value, CultureInfo.InvariantCulture) ?? string.Empty)
+                    : settings.Raw ? Program.Raw(cell.Value)
                     : ExcelValueFormatter.FormatCell(cell, document);
                 output.Append(Quote(text, separator));
             }
@@ -530,7 +538,7 @@ sealed class DumpCommand : Command<FileSettings>
 
         header.AddRow("Built-in formats", document.BuiltInFormatCount.ToString(CultureInfo.InvariantCulture));
         header.AddRow("User formats", document.NumberFormats.Count == 0 ? "(none)"
-            : string.Join("; ", document.NumberFormats.Select((f, i) => $"{ExcelValueFormatter.BuiltInFormatCount + i} {f.ToText()}").Select(Program.Escape)));
+            : string.Join("; ", document.NumberFormats.Select((f, i) => $"{ExcelNumberFormat.BuiltInCount + i} {f.ToText()}").Select(Program.Escape)));
         AnsiConsole.Write(header);
 
         var settingsTable = new Table().Title("[bold]Sheet settings[/]").AddColumn("Setting").AddColumn("Value");
@@ -551,7 +559,7 @@ sealed class DumpCommand : Command<FileSettings>
         settingsTable.AddRow("Last non-hidden column", state.LastVisibleColumn.ToString(CultureInfo.InvariantCulture));
         var widths = Enumerable.Range(0, ExcelSheetState.ColumnCount)
             .Where(c => state.GetColumnWidth(c) != 75)
-            .Select(c => $"{FormulaDecompiler.ColumnName(c)}={state.GetColumnWidth(c)}");
+            .Select(c => $"{ExcelCellAddress.ColumnName(c)}={state.GetColumnWidth(c)}");
         settingsTable.AddRow("Column widths", "75 except " + (string.Join(", ", widths) is { Length: > 0 } w ? w : "(none)"));
         AnsiConsole.Write(settingsTable);
 
@@ -595,7 +603,7 @@ sealed class DumpCommand : Command<FileSettings>
             AnsiConsole.Write(table);
         }
 
-        AnsiConsole.MarkupLine($"[bold]Page breaks[/]: columns {Format(document.ColumnPageBreaks.Select(b => FormulaDecompiler.ColumnName(b)))}; rows {Format(document.RowPageBreaks.Select(r => (r + 1).ToString(CultureInfo.InvariantCulture)))}");
+        AnsiConsole.MarkupLine($"[bold]Page breaks[/]: columns {Format(document.ColumnPageBreaks.Select(b => ExcelCellAddress.ColumnName(b)))}; rows {Format(document.RowPageBreaks.Select(r => (r + 1).ToString(CultureInfo.InvariantCulture)))}");
         if (document.PrintSetup is { } print)
         {
             var table = new Table().Title("[bold]Print setup[/]").AddColumn("Field").AddColumn("Value");
@@ -612,8 +620,11 @@ sealed class DumpCommand : Command<FileSettings>
         }
 
         var cells = new Table().Title("[bold]Cells[/]").AddColumn("Cell").AddColumn("Type").AddColumn("Display").AddColumn("Formula");
-        foreach (var (row, column, cell) in document.Cells.NonEmptyCells)
+        foreach (var entry in document.Cells.NonEmptyCells)
         {
+            int row = entry.Row;
+            int column = entry.Column;
+            var cell = entry.GetCell();
             cells.AddRow(new ExcelCellAddress(row, column).ToString(), cell.Type.ToString(),
                 Program.Escape(ExcelValueFormatter.FormatCell(cell, document)), Program.Escape(cell.Formula?.ToText(document)));
         }
@@ -630,10 +641,13 @@ sealed class DumpCommand : Command<FileSettings>
         for (int i = 0; i < document.Names.Count; i++)
         {
             var name = document.Names[i];
-            string kind = name.IsCommand ? (name.ShortcutKey == 0 ? "command" : $"command (Option-⌘-{(char)name.ShortcutKey})")
-                : name.IsFunctionMacro ? "function macro"
-                : name.Definition.Length == 0 ? "undefined"
-                : (name.Flags & ExcelDefinedName.ReferenceFlag) != 0 ? "reference" : "formula";
+            string kind = name.MacroKind switch
+            {
+                ExcelMacroKind.Command => name.ShortcutKey is { } key ? $"command (Option-⌘-{key})" : "command",
+                ExcelMacroKind.Function => "function macro",
+                _ => name.Definition.Length == 0 ? "undefined"
+                    : (name.Flags & ExcelNameFlags.Reference) != 0 ? "reference" : "formula",
+            };
             names.AddRow((i + 1).ToString(CultureInfo.InvariantCulture), Program.Escape(name.Name), Program.Escape(kind),
                 Program.Escape(name.Definition.Length == 0 ? string.Empty : "=" + name.GetDefinitionText(document)));
         }
@@ -807,6 +821,16 @@ sealed class JsonSettings : FileSettings
 
 sealed class JsonCommand : Command<JsonSettings>
 {
+    // A cell value as JSON: a number, a string, true or false, an error's text such as "#N/A", or null.
+    private static object? JsonValue(ExcelValue value) => value.Kind switch
+    {
+        ExcelValueKind.Number => value.Number,
+        ExcelValueKind.Text => value.Text,
+        ExcelValueKind.Boolean => value.Boolean,
+        ExcelValueKind.Error => value.Error.ToText(),
+        _ => null,
+    };
+
     public override int Execute(CommandContext context, JsonSettings settings, CancellationToken cancellationToken)
     {
         var options = new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
@@ -848,7 +872,7 @@ sealed class JsonCommand : Command<JsonSettings>
                 {
                     address = new ExcelCellAddress(r, c).ToString(),
                     type = cell.Type.ToString(),
-                    value = cell.Value is ExcelError error ? error.ToText() : cell.Value,
+                    value = JsonValue(cell.Value),
                     display = ExcelValueFormatter.FormatCell(cell, document),
                     formula = cell.Formula?.ToText(document),
                     numberFormat = cell.NumberFormat,
@@ -881,16 +905,16 @@ sealed class JsonCommand : Command<JsonSettings>
                 standardFont = state.StandardFont,
                 standardFontSize = state.StandardFontSize,
                 columnWidths = Enumerable.Range(0, ExcelSheetState.ColumnCount).Where(i => state.GetColumnWidth(i) != 75)
-                    .ToDictionary(i => FormulaDecompiler.ColumnName(i), i => (int)state.GetColumnWidth(i)),
+                    .ToDictionary(i => ExcelCellAddress.ColumnName(i), i => (int)state.GetColumnWidth(i)),
             },
             numberFormats = document.NumberFormats.Select(f => new { text = f.ToText(), bytes = Convert.ToHexString(f.Descriptor) + " " + Convert.ToHexString(f.Body) }),
             externalDocuments = document.ExternalDocuments.Select(d => new { name = d.Name, names = d.Names }),
             names = document.Names.Select(n => new
             {
                 name = n.Name,
-                flags = n.Flags,
-                command = n.IsCommand,
-                shortcutKey = n.IsCommand ? ((char)n.ShortcutKey).ToString() : null,
+                flags = (byte)n.Flags,
+                command = n.MacroKind == ExcelMacroKind.Command,
+                shortcutKey = n.MacroKind == ExcelMacroKind.Command ? (n.ShortcutKey ?? '\0').ToString() : null,
                 definition = n.Definition.Length == 0 ? null : "=" + n.GetDefinitionText(document),
             }),
             windows = document.Windows.Select(w => new
