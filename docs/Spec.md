@@ -18,7 +18,7 @@ charts. It was reverse-engineered from the applications' code and checked agains
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 78 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 80 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
