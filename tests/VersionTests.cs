@@ -19,8 +19,9 @@ public class VersionTests
         Assert.Equal(ExcelVersion.Excel150, ExcelFunctions.Get(238)!.IntroducedIn);
         Assert.Null(ExcelFunctions.Get(233));
         Assert.Null(ExcelFunctions.Get(238, ExcelVersion.Excel100));
-        Assert.Equal(-1, ExcelFunctions.FindNumber("GET.DOCUMENT", ExcelVersion.Excel104));
-        Assert.Equal(238, ExcelFunctions.FindNumber("get.document"));
+        Assert.False(ExcelFunctions.TryFindNumber("GET.DOCUMENT", out _, ExcelVersion.Excel104));
+        Assert.True(ExcelFunctions.TryFindNumber("get.document", out int getDocument));
+        Assert.Equal(238, getDocument);
     }
 
     [Fact]
@@ -96,7 +97,7 @@ public class VersionTests
     {
         var bytes = Sample("SIMUL EQUATIONS");
         var document = ExcelDocument.Read(bytes);
-        Assert.Equal(18, document.Version);
+        Assert.Equal(ExcelFormatVersion.Version18, document.Version);
         Assert.Equal(3, document.NumberFormats.Count);
         Assert.All(document.NumberFormats, f => Assert.Equal(9, f.Descriptor.Length));
         Assert.Equal(ExcelWindow.Version18StateSize, Assert.Single(document.Windows).State.Length);
@@ -118,7 +119,7 @@ public class VersionTests
     public void SetArrayFormula_RoundTrips()
     {
         var sheet = ExcelDocument.CreateWorksheet();
-        sheet.SetArrayFormula(new ExcelRange(0, 2, 1, 1), "{=A1:A3*2}");
+        sheet.SetArrayFormula(ExcelRange.Parse("B1:B3"), "{=A1:A3*2}");
         var reread = RoundTrip(sheet);
         foreach (var address in new[] { "B1", "B2", "B3" })
         {
@@ -128,7 +129,7 @@ public class VersionTests
         }
 
         Assert.True(reread.Cells["B1"].Formula!.IsSharedAnchor);
-        Assert.Equal(new ExcelRange(0, 2, 1, 1), reread.Cells["B1"].Formula!.SharedRange);
+        Assert.Equal(ExcelRange.Parse("B1:B3"), reread.Cells["B1"].Formula!.SharedRange);
         Assert.Equal(new ExcelCellAddress(0, 1), reread.Cells["B3"].Formula!.SharedAnchor);
     }
 

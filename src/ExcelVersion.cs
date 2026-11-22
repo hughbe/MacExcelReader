@@ -19,3 +19,18 @@ public enum ExcelVersion
     /// </summary>
     Excel150 = 150,
 }
+
+/// <summary>
+/// The format version in a document's header (spec §2.1).
+/// </summary>
+public enum ExcelFormatVersion : ushort
+{
+    /// <summary>Version 17: written by every Excel 1.x, and readable by every one.</summary>
+    Version17 = 17,
+
+    /// <summary>
+    /// Version 18: written by Excel 1.5 when a document has frozen panes, a gridline colour or a number format only
+    /// it can read. Only Excel 1.5 opens it.
+    /// </summary>
+    Version18 = 18,
+}

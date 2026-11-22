@@ -105,8 +105,9 @@ public class FuzzTests
         try
         {
             var document = ExcelDocument.Read(bytes);
-            foreach (var (_, _, cell) in document.Cells.NonEmptyCells)
+            foreach (var entry in document.Cells.NonEmptyCells)
             {
+                var cell = entry.GetCell();
                 _ = cell.Value;
                 if (cell.Formula is { } formula)
                 {

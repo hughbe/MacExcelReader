@@ -101,9 +101,9 @@ public class FormattingTests
     [Fact]
     public void BuiltInFormatNames()
     {
-        Assert.Equal("General", ExcelValueFormatter.GetBuiltInFormat(0));
-        Assert.Equal("m/d/yy h:mm", ExcelValueFormatter.GetBuiltInFormat(18));
-        Assert.Null(ExcelValueFormatter.GetBuiltInFormat(19));
+        Assert.Equal("General", ExcelNumberFormat.BuiltIn[0].ToText());
+        Assert.Equal("m/d/yy h:mm", ExcelNumberFormat.BuiltIn[18].ToText());
+        Assert.Equal(ExcelNumberFormat.BuiltInCount, ExcelNumberFormat.BuiltIn.Count);
         Assert.True(ExcelValueFormatter.IsDateFormat(10));
         Assert.False(ExcelValueFormatter.IsDateFormat(9));
     }
@@ -121,7 +121,7 @@ public class FormattingTests
         var cell = new ExcelCell();
         cell.SetFormula(formula);
         Assert.Equal("TRUE", ExcelValueFormatter.FormatCell(cell));
-        formula.SetErrorResult(ExcelError.DivideByZero);
+        formula.SetResult(ExcelValue.FromError(ExcelError.DivideByZero));
         Assert.Equal("#DIV/0!", ExcelValueFormatter.FormatCell(cell));
     }
 
@@ -223,8 +223,9 @@ public class FormattingTests
     public void EveryCell_FormatsWithItsDocumentsFormat(string sample)
     {
         var document = ExcelDocument.Read(File.ReadAllBytes(TestData.SampleFile(sample)));
-        foreach (var (_, _, cell) in document.Cells.NonEmptyCells)
+        foreach (var entry in document.Cells.NonEmptyCells)
         {
+            var cell = entry.GetCell();
             Assert.NotNull(ExcelValueFormatter.FormatCell(cell, document));
         }
 
@@ -254,7 +255,7 @@ public class FormattingTests
         Assert.True(ExcelValueFormatter.IsDateFormat(16));
         Assert.False(ExcelValueFormatter.IsDateFormat(9));
         var document = TestData.Load("INVOICE TEMPLATE");
-        int dayMonthYear = document.NumberFormats.FindIndex(f => f.ToText() == "dd mmm yy") + ExcelValueFormatter.BuiltInFormatCount;
+        int dayMonthYear = document.NumberFormats.FindIndex(f => f.ToText() == "dd mmm yy") + ExcelNumberFormat.BuiltInCount;
         Assert.True(ExcelValueFormatter.IsDateFormat(dayMonthYear, document));
         Assert.False(ExcelValueFormatter.IsDateFormat(dayMonthYear));
     }

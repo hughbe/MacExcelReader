@@ -22,10 +22,10 @@ public class ExperimentTests
     {
         // Each formula entered with FORMULA and calculated by Excel 1.03 (spec §12.4).
         var result = Load("Errors").Cells[address].Formula!.Result;
-        Assert.Equal(ExcelFormulaResultKind.Error, result.Kind);
+        Assert.Equal(ExcelValueKind.Error, result.Kind);
         Assert.Equal((ExcelError)code, result.Error);
         Assert.Equal(text, result.Error.ToText());
-        Assert.Equal(result.Error, result.Value);
+        Assert.Equal(text, result.ToString());
     }
 
     [Fact]
@@ -63,8 +63,8 @@ public class ExperimentTests
         // The same sheet with 0x018 = 0 kept its zeros even after CALCULATE.NOW (spec §6).
         var document = Load("Recalculated");
         Assert.Equal(ExcelError.DivideByZero, document.Cells["B2"].Formula!.Result.Error);
-        Assert.Equal(ExcelError.Number, document.Cells["B3"].Value);
-        Assert.Equal(ExcelError.NotAvailable, document.Cells["B4"].Value);
+        Assert.Equal(ExcelError.Number, document.Cells["B3"].Value.Error);
+        Assert.Equal(ExcelError.NotAvailable, document.Cells["B4"].Value.Error);
     }
 
     [Theory]
@@ -128,16 +128,15 @@ public class ExperimentTests
         // DEFINE.NAME("Cmd",C1,2,"q"), DEFINE.NAME("Fn",C2,1) and DEFINE.NAME("Plain",C3) (spec §11).
         var names = Load("Macro Names").Names;
         var command = names.Single(n => n.Name == "Cmd");
-        Assert.True(command.IsCommand);
-        Assert.Equal((byte)'q', command.ShortcutKey);
-        Assert.Equal(0x44, command.MacroKind);   // the low nibble is junk (spec §11)
+        Assert.Equal(ExcelMacroKind.Command, command.MacroKind);
+        Assert.Equal('q', command.ShortcutKey);
+        Assert.Equal(0x44, command.RawMacroKind);   // the low nibble is junk (spec §11)
         var function = names.Single(n => n.Name == "Fn");
-        Assert.True(function.IsFunctionMacro);
-        Assert.Equal(ExcelDefinedName.FunctionKind, function.MacroKind);
+        Assert.Equal(ExcelMacroKind.Function, function.MacroKind);
+        Assert.Equal(0x80, function.RawMacroKind);
         var plain = names.Single(n => n.Name == "Plain");
-        Assert.False(plain.IsCommand);
-        Assert.False(plain.IsFunctionMacro);
-        Assert.All([command, function, plain], n => Assert.NotEqual(0, n.Flags & ExcelDefinedName.ReferenceFlag));
+        Assert.Equal(ExcelMacroKind.None, plain.MacroKind);
+        Assert.All([command, function, plain], n => Assert.True(n.Flags.HasFlag(ExcelNameFlags.Reference)));
     }
 
     [Fact]
@@ -288,8 +287,11 @@ public class ExperimentTests
         Assert.Equal(functionCount, document.FunctionCount);
         Assert.Equal([0], document.ExtraHeader);
         var original = Load(sample.Replace("1.06", "1.04"));
-        foreach (var (row, column, cell) in original.Cells.NonEmptyCells)
+        foreach (var entry in original.Cells.NonEmptyCells)
         {
+            int row = entry.Row;
+            int column = entry.Column;
+            var cell = entry.GetCell();
             if (cell.Formula is { } formula)
             {
                 Assert.Equal(
@@ -409,7 +411,7 @@ public class ExperimentTests
     {
         // Excel 1.5 saves version 18 for colour or @ number formats, a text section, trailing-comma scaling,
         // gridline colours and frozen panes (spec §2.1).
-        Assert.Equal(ExcelDocument.Version18, Load(name).Version);
+        Assert.Equal(ExcelFormatVersion.Version18, Load(name).Version);
     }
 
     [Theory]
@@ -420,7 +422,7 @@ public class ExperimentTests
         // FORMAT.NUMBER("0.0;-0.0"), and Microsoft's version-18 SIMUL EQUATIONS opened and saved in the released
         // Excel 1.5: neither has anything only Excel 1.5 reads, so both save as version 17 (spec §2.1).
         var document = Load(name);
-        Assert.Equal(17, document.Version);
+        Assert.Equal(ExcelFormatVersion.Version17, document.Version);
         Assert.Equal(ExcelWindow.StateSize, document.Windows[0].State.Length);
     }
 
@@ -475,7 +477,7 @@ public class ExperimentTests
     public void Literals_DatesUseThe1904System()
     {
         // Excel 1.00: DATE(1984,1,1) is serial number 29220 (spec §12.3).
-        Assert.Equal(29220.0, Convert.ToDouble(Load("Literals").Cells["C4"].Value));
+        Assert.Equal(29220.0, Load("Literals").Cells["C4"].Value.Number);
     }
 
     [Fact]
@@ -683,8 +685,8 @@ public class ExperimentTests
         // or not the function's type byte has 0x80; SERIES (flag 0x02) is refused, leaving C6 empty.
         var document = Load("Empty Arguments");
         Assert.Equal([0x1E, 0x00, 0x01, 0x16, 0x41, 0x1B], document.Cells["C2"].Formula!.Expression.ToArray());
-        Assert.Equal(1, Convert.ToDouble(document.Cells["C2"].Value));          // ROUND(1,) is ROUND(1,0)
-        Assert.Equal(ExcelError.Value, document.Cells["C3"].Value);            // MID("abc",,1): start 0
+        Assert.Equal(1, document.Cells["C2"].Value.Number);                    // ROUND(1,) is ROUND(1,0)
+        Assert.Equal(ExcelError.Value, document.Cells["C3"].Value.Error);      // MID("abc",,1): start 0
         Assert.Equal(ExcelCellType.Empty, document.Cells["C6"].Type);
     }
 
@@ -770,7 +772,7 @@ public class ExperimentTests
         int compared = 0;
         for (int row = 0; row < document.Cells.RowCount; row++)
         {
-            if (document.Cells.Find(row, 2)?.Formula?.Result is not { Kind: ExcelFormulaResultKind.Text } result)
+            if (document.Cells.Find(row, 2)?.Formula?.Result is not { Kind: ExcelValueKind.Text } result)
             {
                 continue;
             }
@@ -821,7 +823,7 @@ public class ExperimentTests
         var d2 = document.Cells["D2"];
         Assert.True(d2.IsError);
         Assert.Equal(ExcelError.Reference, d2.Error);
-        Assert.Equal(ExcelError.Reference, d2.Value);
+        Assert.Equal(ExcelError.Reference, d2.Value.Error);
         Assert.Equal("#REF!", d2.ToString());
         Assert.Equal("#REF!", ExcelValueFormatter.FormatCell(d2, document));
     }

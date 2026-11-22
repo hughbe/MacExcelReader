@@ -7,7 +7,7 @@ namespace MacExcelReader;
 /// <summary>
 /// Converts parsed expressions (spec §15) to A1-style formula text.
 /// </summary>
-public static class FormulaDecompiler
+internal static class FormulaDecompiler
 {
     /// <summary>
     /// Converts a parsed expression to text, without the leading '='.

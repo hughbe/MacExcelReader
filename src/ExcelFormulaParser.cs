@@ -5,49 +5,10 @@ using MacExcelReader.Internal;
 namespace MacExcelReader;
 
 /// <summary>
-/// The exception thrown when formula text cannot be parsed.
-/// </summary>
-public sealed class ExcelFormulaSyntaxException : FormatException
-{
-    /// <summary>
-    /// Initializes a new instance.
-    /// </summary>
-    public ExcelFormulaSyntaxException(string message, int position)
-        : base($"{message} (at position {position + 1})")
-    {
-        Position = position;
-    }
-
-    /// <summary>Gets the zero-based position in the text where the problem was found.</summary>
-    public int Position { get; }
-}
-
-/// <summary>
 /// Compiles A1-style formula text, such as <c>=SUM($A$1:$A$5)*2</c>, into parsed expressions (spec §15),
 /// choosing token classes and <c>IF</c> jump tokens the way Excel 1.x does.
 /// </summary>
-/// <remarks>
-/// <para>
-/// Supported: numbers, strings, TRUE and FALSE, error values, cell references and areas in A1 notation
-/// (with <c>$</c> for absolute parts), external references (<c>Budget!A1</c>, <c>'My Doc'!A1</c>),
-/// defined names, every Excel 1.x function and macro command, calls to user-defined function macros,
-/// the operators <c>: , % ^ * / + - &amp; = &lt;&gt; &lt; &gt; &lt;= &gt;=</c> and parentheses,
-/// references to the active sheet (<c>!A1</c>) and the dialog-box forms of commands (<c>RUN?()</c>).
-/// </para>
-/// <para>
-/// Like Excel, the parser compiles IF and CHOOSE with jump attributes, SUM with one argument to a SUM
-/// attribute, folds a minus sign into a number constant, starts formulas that call volatile
-/// functions (RAND, NOW, INDEX, …) with a volatile attribute, and wraps ranges built from function results
-/// (<c>INDEX(A1:C3,1,1):C3</c>) in a memory-function token.
-/// </para>
-/// <para>
-/// Excel's own parser was not disassembled in full. The token classes and <c>IF</c> encoding are derived from
-/// Excel's function table and from every formula in the sample documents, all of which this parser
-/// reproduces byte for byte (apart from bytes left over from memory inside name tokens, which Excel rebuilds when
-/// it opens a file).
-/// </para>
-/// </remarks>
-public static class ExcelFormulaParser
+internal static class ExcelFormulaParser
 {
     /// <summary>
     /// Parses formula text into a formula for a cell. A leading '=' is optional.
@@ -74,7 +35,7 @@ public static class ExcelFormulaParser
     /// external-document indices are stored inside the tokens, as name definitions require.
     /// </summary>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
-    public static (byte[] Definition, List<byte[]> ArrayConstants) ParseNameDefinition(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
+    internal static (byte[] Definition, List<byte[]> ArrayConstants) ParseNameDefinition(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
     {
         var (expression, _, arrays) = CompileFull(text, document, definition: true, version, arrayFormula: false);
         return (expression, arrays ?? []);
@@ -84,7 +45,7 @@ public static class ExcelFormulaParser
     /// Parses the formula of an array formula (without the braces) into the shared expression and its fix-ups.
     /// Use <see cref="ExcelDocument.SetArrayFormula"/> to put an array formula on a sheet.
     /// </summary>
-    public static (byte[] Expression, byte[] Fixups) ParseArrayFormula(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
+    internal static (byte[] Expression, byte[] Fixups) ParseArrayFormula(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
         => Compile(text, document, definition: false, version, arrayFormula: true);
 
     private static (byte[] Expression, byte[] Fixups) Compile(string text, ExcelDocument? document, bool definition, ExcelVersion version, bool arrayFormula = false)
@@ -863,8 +824,7 @@ public static class ExcelFormulaParser
             var arguments = ParseArguments();
 
             bool dialog = name.Text.EndsWith('?') && name.Text.Length > 1;
-            int number = ExcelFunctions.FindNumber(dialog ? name.Text[..^1] : name.Text, _version);
-            if (number >= 0)
+            if (ExcelFunctions.TryFindNumber(dialog ? name.Text[..^1] : name.Text, out int number, _version))
             {
                 var function = ExcelFunctions.Get(number, _version)!;
                 HighestFunction = Math.Max(HighestFunction, number);

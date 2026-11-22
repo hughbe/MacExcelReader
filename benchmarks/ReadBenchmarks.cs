@@ -24,8 +24,8 @@ public class ReadBenchmarks
         _large = CreateLargeWorksheet(2000, 20);
         _dbFormDocument = ExcelDocument.Read(_dbForm);
         _dbFormTexts = _dbFormDocument.Cells.NonEmptyCells
-            .Where(c => c.Cell.Formula is not null)
-            .Select(c => c.Cell.Formula!.ToText(_dbFormDocument))
+            .Where(c => c.Type is ExcelCellType.Formula or ExcelCellType.NumericFormula)
+            .Select(c => c.GetCell().Formula!.ToText(_dbFormDocument))
             .ToArray();
     }
 
@@ -89,13 +89,13 @@ public class ReadBenchmarks
     public ExcelDocument ReadLarge() => ExcelDocument.Read(_large);
 
     [Benchmark]
-    public int ReadLargeAndSumValues()
+    public int ReadLargeAndReadEveryValue()
     {
         var document = ExcelDocument.Read(_large);
         int count = 0;
-        foreach (var (_, _, cell) in document.Cells.NonEmptyCells)
+        foreach (var cell in document.Cells.NonEmptyCells)
         {
-            if (cell.Value is not null)
+            if (!cell.Value.IsEmpty)
             {
                 count++;
             }
@@ -109,7 +109,7 @@ public class ReadBenchmarks
     {
         var document = ExcelDocument.Read(_large);
         double total = 0;
-        foreach (var (_, _, cell) in document.Cells.NonEmptyCells)
+        foreach (var cell in document.Cells.NonEmptyCells)
         {
             if (cell.TryGetNumber(out double value))
             {
@@ -121,11 +121,11 @@ public class ReadBenchmarks
     }
 
     [Benchmark]
-    public double ReadLargeAndSumNumbersNoAllocation()
+    public double ReadLargeAndSumNumbersNoCopy()
     {
         var document = ExcelDocument.Read(_large, copyData: false);
         double total = 0;
-        foreach (var cell in document.Cells.EnumerateNonEmpty())
+        foreach (var cell in document.Cells.NonEmptyCells)
         {
             if (cell.TryGetNumber(out double value))
             {
@@ -134,6 +134,19 @@ public class ReadBenchmarks
         }
 
         return total;
+    }
+
+    [Benchmark]
+    public int ReadLargeAndCreateEveryCell()
+    {
+        var document = ExcelDocument.Read(_large);
+        int count = 0;
+        foreach (var cell in document.Cells.NonEmptyCells)
+        {
+            count += cell.GetCell().HasValue ? 1 : 0;
+        }
+
+        return count;
     }
 
     [Benchmark]
@@ -143,7 +156,7 @@ public class ReadBenchmarks
     public int ReadLargeCountCells() => ExcelDocument.Read(_large).Cells.CountNonEmpty();
 
     [Benchmark]
-    public object? ReadLargeSingleCell() => ExcelDocument.Read(_large).Cells.Find(1500, 10)?.Value;
+    public ExcelValue ReadLargeSingleCell() => ExcelDocument.Read(_large).Cells.Find(1500, 10)?.Value ?? default;
 
     [Benchmark]
     public byte[] RoundTripLarge() => ExcelDocument.Read(_large).ToArray();
@@ -155,7 +168,7 @@ public class ReadBenchmarks
     public int FormatDbFormCells()
     {
         int length = 0;
-        foreach (var (_, _, cell) in _dbFormDocument.Cells.NonEmptyCells)
+        foreach (var cell in _dbFormDocument.Cells.NonEmptyCells)
         {
             length += ExcelValueFormatter.FormatCell(cell, _dbFormDocument).Length;
         }
@@ -168,8 +181,9 @@ public class ReadBenchmarks
     {
         var document = ExcelDocument.Read(_dbForm);
         int length = 0;
-        foreach (var (_, _, cell) in document.Cells.NonEmptyCells)
+        foreach (var entry in document.Cells.NonEmptyCells)
         {
+            var cell = entry.GetCell();
             if (cell.Formula is { } formula)
             {
                 length += formula.ToText(document).Length;

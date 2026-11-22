@@ -101,7 +101,7 @@ sealed class SheetCommand : Command<SheetSettings>
             {
                 if (rows > 0)
                 {
-                    document.SetArrayFormula(new ExcelRange((ushort)row, (ushort)(row + rows - 1), 1, 1), line.Formula!, version);
+                    document.SetArrayFormula(new ExcelRange(row, 1, row + rows - 1, 1), line.Formula!, version);
                 }
                 else
                 {
@@ -180,7 +180,7 @@ sealed class FormulaList
 {
     public List<(string Column, ushort Width)> Widths { get; } = [];
     public List<(string Name, List<string> Names)> Externals { get; } = [];
-    public List<(string Name, string Definition, byte Flags, char Key)> Names { get; } = [];
+    public List<(string Name, string Definition, ExcelMacroKind Kind, char? Key)> Names { get; } = [];
     public List<(string Address, string Formula)> Cells { get; } = [];
     public ushort? RecalculationState { get; private set; }
     public List<Line> Lines { get; } = [];
@@ -230,20 +230,19 @@ sealed class FormulaList
                     list.Externals.Add((words[1] == "!" ? "\0" : words[1], words.Skip(2).ToList()));
                     break;
                 case "name" when words.Count >= 3:
-                    byte flags = 0;
-                    char key = '\0';
+                    var kind = ExcelMacroKind.None;
+                    char? key = null;
                     if (words.Count >= 4 && words[3] == "macro")
                     {
-                        flags = ExcelDefinedName.ReferenceFlag | ExcelDefinedName.MacroFlag;
-                        key = '\x80';   // marks a function macro below
+                        kind = ExcelMacroKind.Function;
                     }
                     else if (words.Count >= 5 && words[3] == "command")
                     {
-                        flags = ExcelDefinedName.ReferenceFlag | ExcelDefinedName.MacroFlag;
+                        kind = ExcelMacroKind.Command;
                         key = words[4][0];
                     }
 
-                    list.Names.Add((words[1], words[2], flags, key));
+                    list.Names.Add((words[1], words[2], kind, key));
                     break;
                 case "recalc" when words.Count == 2:
                     list.RecalculationState = ushort.Parse(words[1]);
@@ -278,13 +277,13 @@ sealed class FormulaList
         }
 
         // Tokens refer to names by position, so add them all, sort them as Excel does, then compile definitions.
-        foreach (var (name, _, flags, key) in Names)
+        foreach (var (name, _, kind, key) in Names)
         {
-            document.Names.Add(new ExcelDefinedName(name, [], flags)
+            // A macro's name refers to its first cell, so it has the reference flag too (spec §11).
+            document.Names.Add(new ExcelDefinedName(name, [], kind == ExcelMacroKind.None ? ExcelNameFlags.None : ExcelNameFlags.Reference)
             {
-                // Excel's DEFINE.NAME writes kind 0x80 for a function macro and 0x40 for a command (spec §11).
-                ShortcutKey = key == '\x80' ? (byte)0 : (byte)key,
-                MacroKind = (flags & ExcelDefinedName.MacroFlag) == 0 ? (byte)0 : key == '\x80' ? ExcelDefinedName.FunctionKind : ExcelDefinedName.CommandKind,
+                MacroKind = kind,
+                ShortcutKey = key,
             });
         }
 

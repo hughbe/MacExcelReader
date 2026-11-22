@@ -11,17 +11,17 @@ public sealed class ExcelDocument
     /// <summary>The magic number at the start of every worksheet and macro sheet.</summary>
     public const ushort Magic = 0x5327;
 
-    /// <summary>The format version every Excel 1.x release writes, and Excel 1.5 unless it needs 18 (spec §2.1).</summary>
-    public const ushort Version17 = 17;
-
-    /// <summary>The format version Excel 1.5 writes when a document needs something only it can read (spec §2.1).</summary>
-    public const ushort Version18 = 18;
-
     /// <summary>
-    /// Gets or sets the format version: 17 (readable by every Excel 1.x) or 18 (written by Excel 1.5 when the
-    /// document uses something only Excel 1.5 can read). See spec §2.1.
+    /// Gets or sets the format version: 17, readable by every Excel 1.x, or 18, written by Excel 1.5 when the
+    /// document uses something only Excel 1.5 can read (spec §2.1).
     /// </summary>
-    public ushort Version { get; set; } = Version17;
+    public ExcelFormatVersion Version
+    {
+        get => _version;
+        set => _version = Enum.IsDefined(value) ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "The format version is 17 or 18.");
+    }
+
+    private ExcelFormatVersion _version = ExcelFormatVersion.Version17;
 
     /// <summary>The code signature every Excel 1.x release writes in header word 4 (spec §4).</summary>
     public const ushort CodeSignature = 0xAB27;
@@ -61,8 +61,16 @@ public sealed class ExcelDocument
     /// <summary>Gets the sheet state block.</summary>
     public ExcelSheetState State { get; }
 
-    /// <summary>Gets or sets whether this is a worksheet or a macro sheet.</summary>
-    public ExcelDocumentKind Kind { get; set; } = ExcelDocumentKind.Worksheet;
+    /// <summary>Gets or sets whether this is a worksheet or a macro sheet. Charts are <see cref="Charts.ChartDocument"/>s.</summary>
+    public ExcelDocumentKind Kind
+    {
+        get => _kind;
+        set => _kind = value is ExcelDocumentKind.Worksheet or ExcelDocumentKind.MacroSheet
+            ? value
+            : throw new ArgumentOutOfRangeException(nameof(value), value, "A document is a worksheet or a macro sheet; charts are ChartDocuments.");
+    }
+
+    private ExcelDocumentKind _kind = ExcelDocumentKind.Worksheet;
 
     /// <summary>Gets or sets the extra header bytes (byte 0 is the system code).</summary>
     public byte[] ExtraHeader { get; set; } = [0];
@@ -82,10 +90,10 @@ public sealed class ExcelDocument
     /// document already has the most formats Excel allows.</exception>
     public int AddNumberFormat(string text, ExcelVersion version = ExcelVersion.Excel100)
     {
-        var format = ExcelNumberFormat.Parse(text, version, Version >= Version18);
-        if (Version < Version18 && ExcelNumberFormat.Parse(text, version).RequiresVersion18)
+        var format = ExcelNumberFormat.Parse(text, version, Version >= ExcelFormatVersion.Version18);
+        if (Version < ExcelFormatVersion.Version18 && ExcelNumberFormat.Parse(text, version).RequiresVersion18)
         {
-            throw new InvalidOperationException($"\"{text}\" can only be read by Excel 1.5: set Version to {Version18} first.");
+            throw new InvalidOperationException($"\"{text}\" can only be read by Excel 1.5: set Version to {ExcelFormatVersion.Version18} first.");
         }
 
         if (ExcelNumberFormat.BuiltIn.Count + NumberFormats.Count >= 64)
@@ -194,6 +202,23 @@ public sealed class ExcelDocument
     public static ExcelDocument Load(string path) => ReadOwned(File.ReadAllBytes(path));
 
     /// <summary>
+    /// Loads a document from a file (its data fork) asynchronously.
+    /// </summary>
+    public static async Task<ExcelDocument> LoadAsync(string path, CancellationToken cancellationToken = default)
+        => ReadOwned(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// Reads a document from a stream asynchronously, from its current position to its end.
+    /// </summary>
+    public static async Task<ExcelDocument> ReadAsync(Stream stream, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        using var copy = stream.CanSeek ? new MemoryStream(checked((int)(stream.Length - stream.Position))) : new MemoryStream();
+        await stream.CopyToAsync(copy, cancellationToken).ConfigureAwait(false);
+        return ReadOwned(copy.Length == copy.Capacity ? copy.GetBuffer() : copy.ToArray());
+    }
+
+    /// <summary>
     /// Reads a document from a stream.
     /// </summary>
     public static ExcelDocument Read(Stream stream)
@@ -256,9 +281,9 @@ public sealed class ExcelDocument
         }
 
         ushort version = reader.ReadUInt16();
-        if (version is not (Version17 or Version18))
+        if (version is not ((ushort)ExcelFormatVersion.Version17 or (ushort)ExcelFormatVersion.Version18))
         {
-            throw new ExcelFormatException($"Unsupported format version {version}; expected {Version17} or {Version18}.");
+            throw new ExcelFormatException($"Unsupported format version {version}; expected 17 or 18.");
         }
 
         ushort signature = reader.ReadUInt16();
@@ -282,10 +307,15 @@ public sealed class ExcelDocument
         var document = new ExcelDocument(new ExcelSheetState(reader.ReadBytes(ExcelSheetState.Size)))
         {
             Signature = signature,
-            Version = version,
+            Version = (ExcelFormatVersion)version,
             HeaderReserved = headerReserved,
             FunctionCount = functionCount,
-            Kind = (ExcelDocumentKind)reader.ReadByte(),
+            Kind = reader.ReadByte() switch
+            {
+                (byte)ExcelDocumentKind.Worksheet => ExcelDocumentKind.Worksheet,
+                (byte)ExcelDocumentKind.MacroSheet => ExcelDocumentKind.MacroSheet,
+                var kind => throw new ExcelFormatException($"Unknown document kind 0x{kind:X2}; expected 0x10 (worksheet) or 0x40 (macro sheet)."),
+            },
         };
 
         foreach (var (length, offset) in segmentInfo)
@@ -352,7 +382,7 @@ public sealed class ExcelDocument
         {
             // Version 17: three section offsets, three lengths and a flag. Version 18 (Excel 1.5) adds a fourth
             // section, for text, so four offsets and four lengths (spec §7).
-            int sections = Version >= Version18 ? 4 : 3;
+            int sections = Version >= ExcelFormatVersion.Version18 ? 4 : 3;
             var descriptor = reader.ReadBytes(2 * sections + 1);
             int bodyLength = 0;
             for (int s = 0; s < sections; s++)
@@ -413,7 +443,7 @@ public sealed class ExcelDocument
                 throw new ExcelFormatException($"Unexpected window marker 0x{marker:X2}.");
             }
 
-            Windows.Add(ExcelWindow.Read(reader, Version >= Version18 ? ExcelWindow.Version18StateSize : ExcelWindow.StateSize));
+            Windows.Add(ExcelWindow.Read(reader, Version >= ExcelFormatVersion.Version18 ? ExcelWindow.Version18StateSize : ExcelWindow.StateSize));
         }
     }
 
@@ -463,6 +493,55 @@ public sealed class ExcelDocument
     }
 
     /// <summary>
+    /// Writes the document to a file (the data fork) asynchronously.
+    /// </summary>
+    public async Task SaveAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var stream = File.Create(path);
+        await using (stream.ConfigureAwait(false))
+        {
+            await WriteAsync(stream, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Writes the document to a stream asynchronously.
+    /// </summary>
+    public async Task WriteAsync(Stream stream, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        await stream.WriteAsync(Serialize().WrittenMemory, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Protects the document, as Protect Document does: locked cells cannot be changed and hidden formulas are not
+    /// shown. A password, if given, is stored as Excel's hash (spec §6.2) and must be given to unprotect it.
+    /// </summary>
+    public void Protect(string? password = null)
+    {
+        State.IsProtected = true;
+        State.PasswordHash = string.IsNullOrEmpty(password) ? (ushort)0 : ExcelPassword.Hash(password);
+    }
+
+    /// <summary>
+    /// Unprotects the document, as Unprotect Document does, if <paramref name="password"/> matches the stored hash
+    /// (or there is none).
+    /// </summary>
+    /// <returns>False, leaving the document protected, if the password is wrong.</returns>
+    public bool Unprotect(string? password = null)
+    {
+        ushort hash = string.IsNullOrEmpty(password) ? (ushort)0 : ExcelPassword.Hash(password);
+        if (State.PasswordHash != 0 && hash != State.PasswordHash)
+        {
+            return false;
+        }
+
+        State.IsProtected = false;
+        State.PasswordHash = 0;
+        return true;
+    }
+
+    /// <summary>
     /// Writes the document to a stream.
     /// </summary>
     public void Write(Stream stream)
@@ -484,10 +563,7 @@ public sealed class ExcelDocument
     public void SetArrayFormula(ExcelRange range, string text, ExcelVersion version = ExcelVersion.Excel100)
     {
         ArgumentNullException.ThrowIfNull(text);
-        if (range.FirstRow > range.LastRow || range.FirstColumn > range.LastColumn)
-        {
-            throw new ArgumentException("The range's first row and column must not be after its last.", nameof(range));
-        }
+        range.Validate(nameof(range));
 
         text = text.Trim();
         if (text.StartsWith('{') && text.EndsWith('}'))
@@ -501,10 +577,10 @@ public sealed class ExcelDocument
         // shared expression and its fix-ups.
         var anchor = new byte[13 + expression.Length + fixups.Length];
         BinaryPrimitives.WriteUInt16BigEndian(anchor, FormulaTokens.SharedAnchorMarker);
-        BinaryPrimitives.WriteUInt16BigEndian(anchor.AsSpan(3), range.FirstRow);
-        BinaryPrimitives.WriteUInt16BigEndian(anchor.AsSpan(5), range.LastRow);
-        anchor[7] = range.FirstColumn;
-        anchor[8] = range.LastColumn;
+        BinaryPrimitives.WriteUInt16BigEndian(anchor.AsSpan(3), (ushort)range.FirstRow);
+        BinaryPrimitives.WriteUInt16BigEndian(anchor.AsSpan(5), (ushort)range.LastRow);
+        anchor[7] = (byte)range.FirstColumn;
+        anchor[8] = (byte)range.LastColumn;
         anchor[12] = (byte)expression.Length;
         expression.CopyTo(anchor, 13);
         fixups.CopyTo(anchor, 13 + expression.Length);
@@ -515,7 +591,7 @@ public sealed class ExcelDocument
             {
                 byte[] trailer = row == range.FirstRow && column == range.FirstColumn
                     ? anchor
-                    : [(byte)(range.FirstRow >> 8), (byte)range.FirstRow, range.FirstColumn];
+                    : [(byte)(range.FirstRow >> 8), (byte)range.FirstRow, (byte)range.FirstColumn];
                 var formula = new ExcelFormula([0x01, 0, 0, 0], trailer);
                 formula.SetResult(0);
                 Cells[row, column].SetFormula(formula);
@@ -552,14 +628,14 @@ public sealed class ExcelDocument
 
         State.SetExtent(rows, columns);
         State.SetNameCounts(
-            Names.Count(n => n.Definition.Length > 0 && (n.Flags & ExcelDefinedName.ReferenceFlag) != 0),
+            Names.Count(n => n.Definition.Length > 0 && (n.Flags & ExcelNameFlags.Reference) != 0),
             ExternalDocuments.FindIndex(d => d.Name == "\0") + 1);
 
         // A document read from a file usually saves to the same size, so a buffer of that size is returned without
         // a copy.
         var writer = new BigEndianWriter(_sourceLength > 0 ? _sourceLength : 4096);
         writer.WriteUInt16(Magic);
-        writer.WriteUInt16(Version);
+        writer.WriteUInt16((ushort)Version);
         writer.WriteUInt16(Signature);
         writer.WriteBytes(HeaderReserved);
         if (CodeSegments.Count != 2)
@@ -598,7 +674,7 @@ public sealed class ExcelDocument
         sections[0] = writer.Position;
         writer.WriteByte(BuiltInFormatCount);
         writer.WriteByte(checked((byte)NumberFormats.Count));
-        int formatSections = Version >= Version18 ? 4 : 3;
+        int formatSections = Version >= ExcelFormatVersion.Version18 ? 4 : 3;
         foreach (var format in NumberFormats)
         {
             if (format.Descriptor is null || format.Descriptor.Length != 2 * formatSections + 1)
@@ -702,7 +778,7 @@ public sealed class ExcelDocument
         sections[6] = writer.Position;
         foreach (var window in Windows)
         {
-            window.Write(writer, Version >= Version18);
+            window.Write(writer, Version >= ExcelFormatVersion.Version18);
         }
 
         writer.WriteByte(0);

@@ -95,7 +95,7 @@ public class FormulaDecompilerTests
     public void UserMacroCall_UsesFirstArgumentAsFunction()
     {
         var document = ExcelDocument.CreateMacroSheet();
-        document.Names.Add(new ExcelDefinedName("MYMACRO", [0x2C, 0x00, 0x00, 0x00], ExcelDefinedName.ReferenceFlag));
+        document.Names.Add(new ExcelDefinedName("MYMACRO", [0x2C, 0x00, 0x00, 0x00], ExcelNameFlags.Reference));
         ushort index = (ushort)document.Names.Count;
 
         // MYMACRO(5): name token, argument, call function 255 with 2 "arguments".

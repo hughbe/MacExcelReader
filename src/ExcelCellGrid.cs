@@ -74,6 +74,16 @@ public sealed class ExcelCellGrid
     }
 
     /// <summary>
+    /// Gets a cell by address, creating it and growing the grid as needed.
+    /// </summary>
+    public ExcelCell this[ExcelCellAddress address] => this[address.Row, address.Column];
+
+    /// <summary>
+    /// Gets a cell by address, or null if it is outside the grid. Never grows the grid.
+    /// </summary>
+    public ExcelCell? Find(ExcelCellAddress address) => Find(address.Row, address.Column);
+
+    /// <summary>
     /// Gets a cell by A1-style address, or null if it is outside the grid. Never grows the grid.
     /// </summary>
     public ExcelCell? Find(string address)
@@ -108,35 +118,34 @@ public sealed class ExcelCellGrid
     }
 
     /// <summary>
-    /// Gets the cells that have a value, in row-major order. Only those cells are created.
+    /// Gets the cells that have a value, in row-major order, as <see cref="ExcelCellRef"/> views read straight from
+    /// the cell table: a <c>foreach</c> over them allocates nothing, and no <see cref="ExcelCell"/> is created unless
+    /// you call <see cref="ExcelCellRef.GetCell"/>.
     /// </summary>
-    public IEnumerable<(int Row, int Column, ExcelCell Cell)> NonEmptyCells
-    {
-        get
-        {
-            for (int r = 0; r < _rowCount; r++)
-            {
-                for (int c = 0; c < ColumnCount; c++)
-                {
-                    if (GetCellType(r, c) != ExcelCellType.Empty)
-                    {
-                        yield return (r, c, GetCell(r, c));
-                    }
-                }
-            }
-        }
-    }
+    public NonEmptyCellCollection NonEmptyCells => new(this);
 
     /// <summary>
-    /// Enumerates the cells that have a value as lightweight <see cref="ExcelCellRef"/> views, in row-major
-    /// order, without allocating. Use this to scan large sheets.
+    /// The cells of a grid that have a value. <c>foreach</c> uses its struct enumerator; LINQ works too, through
+    /// <see cref="IEnumerable{T}"/>, at the cost of boxing the enumerator.
     /// </summary>
-    public NonEmptyEnumerator EnumerateNonEmpty() => new(this);
+    public readonly struct NonEmptyCellCollection : IEnumerable<ExcelCellRef>
+    {
+        private readonly ExcelCellGrid _grid;
+
+        internal NonEmptyCellCollection(ExcelCellGrid grid) => _grid = grid;
+
+        /// <summary>Gets an enumerator over the cells that have a value.</summary>
+        public NonEmptyEnumerator GetEnumerator() => new(_grid);
+
+        IEnumerator<ExcelCellRef> IEnumerable<ExcelCellRef>.GetEnumerator() => GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 
     /// <summary>
     /// An allocation-free enumerator over the cells that have a value.
     /// </summary>
-    public struct NonEmptyEnumerator
+    public struct NonEmptyEnumerator : IEnumerator<ExcelCellRef>
     {
         private readonly ExcelCellGrid _grid;
         private int _row;
@@ -153,8 +162,7 @@ public sealed class ExcelCellGrid
         /// <summary>Gets the current cell.</summary>
         public ExcelCellRef Current { get; private set; }
 
-        /// <summary>Returns this enumerator.</summary>
-        public readonly NonEmptyEnumerator GetEnumerator() => this;
+        readonly object System.Collections.IEnumerator.Current => Current;
 
         /// <summary>Advances to the next cell that has a value.</summary>
         public bool MoveNext()
@@ -178,6 +186,19 @@ public sealed class ExcelCellGrid
             }
 
             return false;
+        }
+
+        /// <summary>Starts again from the first cell.</summary>
+        public void Reset()
+        {
+            _row = 0;
+            _column = -1;
+            Current = default;
+        }
+
+        /// <inheritdoc/>
+        public readonly void Dispose()
+        {
         }
     }
 

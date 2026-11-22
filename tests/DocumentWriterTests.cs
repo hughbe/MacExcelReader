@@ -72,15 +72,15 @@ public class DocumentWriterTests
         logical.SetResult(true);
         document.Cells["A2"].SetFormula(logical);
         var error = new ExcelFormula([0x1C, 42]);
-        error.SetErrorResult(ExcelError.NotAvailable);
+        error.SetResult(ExcelValue.FromError(ExcelError.NotAvailable));
         document.Cells["A3"].SetFormula(error);
 
         var reread = RoundTrip(document);
 
-        Assert.Equal("hi", reread.Cells["A1"].Value);
+        Assert.Equal("hi", reread.Cells["A1"].Value.Text);
         Assert.Equal("=\"hi\"", reread.Cells["A1"].Formula!.ToText());
-        Assert.Equal(true, reread.Cells["A2"].Value);
-        Assert.Equal(ExcelError.NotAvailable, reread.Cells["A3"].Value);
+        Assert.True(reread.Cells["A2"].Value.Boolean);
+        Assert.Equal(ExcelError.NotAvailable, reread.Cells["A3"].Value.Error);
         Assert.Equal(0, reread.Cells["A3"].Formula!.StoredColumn);
         Assert.Equal(2, reread.Cells["A3"].Formula!.StoredRowWord & 0x3FFF);
     }
@@ -89,15 +89,15 @@ public class DocumentWriterTests
     public void Names_CommandMacrosAndDefinitionsRoundTrip()
     {
         var document = ExcelDocument.CreateMacroSheet();
-        document.Names.Add(new ExcelDefinedName("Go", [0x2C, 0x00, 0x04, 0x01], ExcelDefinedName.MacroFlag | ExcelDefinedName.ReferenceFlag)
+        document.Names.Add(new ExcelDefinedName("Go", [0x2C, 0x00, 0x04, 0x01], ExcelNameFlags.Macro | ExcelNameFlags.Reference)
         {
-            ShortcutKey = (byte)'g',
+            ShortcutKey = 'g',
         });
 
         var reread = RoundTrip(document);
         var name = reread.Names.Single(n => n.Name == "Go");
-        Assert.True(name.IsCommand);
-        Assert.Equal((byte)'g', name.ShortcutKey);
+        Assert.Equal(ExcelMacroKind.Command, name.MacroKind);
+        Assert.Equal('g', name.ShortcutKey);
         Assert.Equal("$B$5", name.GetDefinitionText(reread));
     }
 
@@ -217,14 +217,14 @@ public class DocumentWriterTests
         window.DisplayGridlines = false;
         window.HorizontalSplit = 100;
         window.Selection.Clear();
-        window.Selection.Add(new ExcelRange(9, 12, 3, 4));
+        window.Selection.Add(ExcelRange.Parse("D10:E13"));
 
         var reread = RoundTrip(document).Windows[0];
         Assert.Equal(9, reread.ActiveRow);
         Assert.Equal(3, reread.ActiveColumn);
         Assert.False(reread.DisplayGridlines);
         Assert.Equal(100, reread.HorizontalSplit);
-        Assert.Equal(new ExcelRange(9, 12, 3, 4), Assert.Single(reread.Selection));
+        Assert.Equal(ExcelRange.Parse("D10:E13"), Assert.Single(reread.Selection));
     }
 
     [Fact]
@@ -341,8 +341,11 @@ public class DocumentWriterTests
 
         Assert.Equal("Edited", reread.Cells["A1"].TextValue);
         Assert.Equal(99.0, reread.Cells["B23"].Value);
-        foreach (var (row, column, cell) in original.Cells.NonEmptyCells)
+        foreach (var entry in original.Cells.NonEmptyCells)
         {
+            int row = entry.Row;
+            int column = entry.Column;
+            var cell = entry.GetCell();
             if (row == 22 && column == 1)
             {
                 continue;

@@ -86,39 +86,78 @@ public sealed class ExcelFormula
         }
     }
 
-    /// <summary>Gets the formula's current value.</summary>
-    public ExcelFormulaResult Result => new(RawValue, IsTextResult ? TextResult : null);
+    /// <summary>Gets the formula's current value: what Excel last calculated, and shows.</summary>
+    public ExcelValue Result => ExcelValue.FromFormulaBytes(RawValue, IsTextResult ? TextResult : null);
 
-    /// <summary>Sets the current value to a number.</summary>
-    public void SetResult(double value) => SetValue(ExcelFormulaResultKind.Number, value, false, 0, null);
-
-    /// <summary>Sets the current value to text.</summary>
-    public void SetResult(string value)
+    /// <summary>
+    /// Sets the current value: a number, text, TRUE or FALSE, or an error (<see cref="ExcelValue.FromError"/>).
+    /// The library does not calculate, so this is the value Excel shows until it recalculates.
+    /// </summary>
+    /// <exception cref="ArgumentException">The value is empty, which a formula cannot have.</exception>
+    public void SetResult(ExcelValue value)
     {
-        ArgumentNullException.ThrowIfNull(value);
-        SetValue(ExcelFormulaResultKind.Text, 0, false, 0, value);
-    }
-
-    /// <summary>Sets the current value to a logical value.</summary>
-    public void SetResult(bool value) => SetValue(ExcelFormulaResultKind.Boolean, 0, value, 0, null);
-
-    /// <summary>Sets the current value to an error.</summary>
-    public void SetErrorResult(ExcelError error) => SetValue(ExcelFormulaResultKind.Error, 0, false, (byte)error, null);
-
-    private void SetValue(ExcelFormulaResultKind kind, double number, bool boolean, byte errorCode, string? text)
-    {
-        ExcelFormulaResult.Encode(kind, number, boolean, errorCode, _record.AsSpan(0, 8));
+        value.WriteFormulaBytes(_record.AsSpan(0, 8));
         _rawTextOffset = -1;
-        _text = text;
+        _text = value.Kind == ExcelValueKind.Text ? value.Text : null;
     }
 
     /// <summary>
-    /// Parses formula text, such as <c>=SUM(A1:A5)*2</c>, into a formula. See <see cref="ExcelFormulaParser"/>.
+    /// Decodes the current value of a formula record in a file without creating the formula (spec §12.3).
     /// </summary>
+    internal static ExcelValue ReadResult(ReadOnlySpan<byte> record)
+    {
+        if (record.Length < ExpressionOffset)
+        {
+            throw new ExcelFormatException("A formula record runs past the end of the file.");
+        }
+
+        string? text = null;
+        if (record[0] == 0xFF && record[1] == 0xFF && record[2] == 0)
+        {
+            int at = ExpressionOffset + record[14];
+            if (at >= record.Length || at + 1 + record[at] > record.Length)
+            {
+                throw new ExcelFormatException("A formula's text result runs past the end of the file.");
+            }
+
+            text = MacRoman.GetString(record.Slice(at + 1, record[at]));
+        }
+
+        return ExcelValue.FromFormulaBytes(record, text);
+    }
+
+    /// <summary>
+    /// Compiles A1-style formula text, such as <c>=SUM($A$1:$A$5)*2</c>, into a formula (spec §15), choosing token
+    /// classes and <c>IF</c> jump tokens the way Excel 1.x does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Supported: numbers, strings, TRUE and FALSE, error values, cell references and areas in A1 notation
+    /// (with <c>$</c> for absolute parts), external references (<c>Budget!A1</c>, <c>'My Doc'!A1</c>),
+    /// defined names, every Excel 1.x function and macro command, calls to user-defined function macros,
+    /// the operators <c>: , % ^ * / + - &amp; = &lt;&gt; &lt; &gt; &lt;= &gt;=</c> and parentheses,
+    /// references to the active sheet (<c>!A1</c>) and the dialog-box forms of commands (<c>RUN?()</c>).
+    /// </para>
+    /// <para>
+    /// Like Excel, it compiles IF and CHOOSE with jump attributes, SUM with one argument to a SUM
+    /// attribute, folds a minus sign into a number constant, starts formulas that call volatile
+    /// functions (RAND, NOW, INDEX, …) with a volatile attribute, and wraps ranges built from function results
+    /// (<c>INDEX(A1:C3,1,1):C3</c>) in a memory-function token.
+    /// </para>
+    /// <para>
+    /// Excel's own parser was not disassembled in full. The token classes and <c>IF</c> encoding are derived from
+    /// Excel's function table and from every formula in the sample documents, all of which the parser
+    /// reproduces byte for byte (apart from bytes left over from memory inside name tokens, which Excel rebuilds when
+    /// it opens a file).
+    /// </para>
+    /// </remarks>
     /// <param name="text">The formula text; the leading '=' is optional.</param>
     /// <param name="document">Resolves defined names and external documents; may be null if there are none.</param>
+    /// <param name="version">
+    /// The Excel release whose functions and encoding to use. Excel 1.00–1.03 (the default) produce formulas every
+    /// Excel 1.x can read; Excel 1.5 adds functions and encodes a few things differently (spec §15.4).
+    /// </param>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
-    /// <param name="version">The Excel release whose functions and encoding to use (see <see cref="ExcelFormulaParser"/>).</param>
     public static ExcelFormula Parse(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
         => ExcelFormulaParser.Parse(text, document, version);
 
@@ -178,7 +217,7 @@ public sealed class ExcelFormula
     /// </summary>
     public ExcelRange? SharedRange
         => IsSharedAnchor && Fixups.Length >= 13
-            ? new ExcelRange(BinaryPrimitives.ReadUInt16BigEndian(Fixups.Slice(3)), BinaryPrimitives.ReadUInt16BigEndian(Fixups.Slice(5)), Fixups[7], Fixups[8])
+            ? new ExcelRange(BinaryPrimitives.ReadUInt16BigEndian(Fixups.Slice(3)), Fixups[7], BinaryPrimitives.ReadUInt16BigEndian(Fixups.Slice(5)), Fixups[8])
             : null;
 
     /// <summary>

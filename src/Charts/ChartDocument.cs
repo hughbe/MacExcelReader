@@ -93,6 +93,12 @@ public sealed class ChartDocument
     public static ChartDocument Load(string path) => Read(File.ReadAllBytes(path));
 
     /// <summary>
+    /// Loads a chart file asynchronously.
+    /// </summary>
+    public static async Task<ChartDocument> LoadAsync(string path, CancellationToken cancellationToken = default)
+        => Read(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
     /// Reads a chart document from its bytes.
     /// </summary>
     public static ChartDocument Read(byte[] data)
@@ -221,6 +227,12 @@ public sealed class ChartDocument
 
     /// <summary>Writes the chart to a file (Finder type MCBN).</summary>
     public void Save(string path) => File.WriteAllBytes(path, ToArray());
+
+    /// <summary>
+    /// Writes the chart to a file asynchronously.
+    /// </summary>
+    public Task SaveAsync(string path, CancellationToken cancellationToken = default)
+        => File.WriteAllBytesAsync(path, ToArray(), cancellationToken);
 
     /// <summary>
     /// Serialises the chart document.

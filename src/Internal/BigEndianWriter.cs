@@ -16,6 +16,8 @@ internal sealed class BigEndianWriter
 
     public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, Position);
 
+    public ReadOnlyMemory<byte> WrittenMemory => _buffer.AsMemory(0, Position);
+
     public int Position { get; private set; }
 
     private Span<byte> Reserve(int count)

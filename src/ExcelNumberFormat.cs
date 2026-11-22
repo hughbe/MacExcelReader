@@ -28,6 +28,24 @@ public enum ExcelNumberFormatSection
 /// <param name="Body">The tokens.</param>
 public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
 {
+    /// <summary>
+    /// Compares two formats by their bytes: formats that compile to the same descriptor and body are equal.
+    /// </summary>
+    public bool Equals(ExcelNumberFormat? other)
+        => other is not null && Descriptor.AsSpan().SequenceEqual(other.Descriptor) && Body.AsSpan().SequenceEqual(other.Body);
+
+    /// <inheritdoc/>
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.AddBytes(Descriptor);
+        hash.AddBytes(Body);
+        return hash.ToHashCode();
+    }
+
+    /// <summary>The number of built-in formats, numbered 0–18; a document's own formats are numbered from 19.</summary>
+    public const int BuiltInCount = 19;
+
     // Excel 1.5's colour names (STR# 263), in the order of their numbers in a colour token (spec §7).
     internal static readonly string[] ColorNames = ["black", "white", "red", "green", "blue", "yellow", "magenta", "cyan"];
 

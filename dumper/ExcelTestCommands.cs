@@ -183,8 +183,11 @@ sealed class PackCommand : Command<PackSettings>
             var probeRows = new List<(int Row, int Column, ExcelFormula Formula, int Entry)>();
             if (sheet is not null && !settings.NoProbe)
             {
-                foreach (var (r, c, cell) in sheet.Cells.NonEmptyCells)
+                foreach (var entry in sheet.Cells.NonEmptyCells)
                 {
+                    int r = entry.Row;
+                    int c = entry.Column;
+                    var cell = entry.GetCell();
                     if (cell.Formula is { } formula)
                     {
                         string address = new ExcelCellAddress(r, c).ToString();
@@ -267,10 +270,10 @@ sealed class PackCommand : Command<PackSettings>
 
         foreach (string name in names)
         {
-            driver.Names.Add(new ExcelDefinedName(name, [], ExcelDefinedName.ReferenceFlag | ExcelDefinedName.MacroFlag)
+            driver.Names.Add(new ExcelDefinedName(name, [], ExcelNameFlags.Reference)
             {
-                ShortcutKey = name == "Run" ? (byte)'r' : (byte)0,
-                MacroKind = 0x40,
+                MacroKind = ExcelMacroKind.Command,
+                ShortcutKey = name == "Run" ? 'r' : null,
             });
         }
 
@@ -364,8 +367,11 @@ sealed class CheckCommand : Command<CheckSettings>
         int problems = 0, probed = 0;
 
         // What Excel itself made of each formula, from GET.FORMULA.
-        foreach (var (r, c, cell) in ours.Cells.NonEmptyCells)
+        foreach (var entry in ours.Cells.NonEmptyCells)
         {
+            int r = entry.Row;
+            int c = entry.Column;
+            var cell = entry.GetCell();
             if (cell.Formula is not { } formula || !results.TryGetValue(original.Name + "!" + new ExcelCellAddress(r, c), out var result))
             {
                 continue;
@@ -373,9 +379,9 @@ sealed class CheckCommand : Command<CheckSettings>
 
             probed++;
             string intended = formula.ToText(ours);
-            if (result.Formula?.Result is not { } value || value.Kind != ExcelFormulaResultKind.Text)
+            if (result.Formula?.Result is not { } value || value.Kind != ExcelValueKind.Text)
             {
-                AnsiConsole.MarkupLine($"  [red]{new ExcelCellAddress(r, c)}[/] {Markup.Escape(intended)}: GET.FORMULA gave {Markup.Escape(result.Formula is { } f ? (f.Result.Value is ExcelError e ? e.ToText() : f.Result.Value?.ToString() ?? "nothing") : result.Type.ToString())}");
+                AnsiConsole.MarkupLine($"  [red]{new ExcelCellAddress(r, c)}[/] {Markup.Escape(intended)}: GET.FORMULA gave {Markup.Escape(result.Formula is { } f ? f.Result.ToString() : result.Type.ToString())}");
                 problems++;
                 continue;
             }
@@ -399,8 +405,11 @@ sealed class CheckCommand : Command<CheckSettings>
         // The tokens in Excel's re-save, with the bytes left over from memory cleared. After --recompile they are
         // Excel's own compilation of each formula.
         int compared = 0;
-        foreach (var (r, c, cell) in ours.Cells.NonEmptyCells)
+        foreach (var entry in ours.Cells.NonEmptyCells)
         {
+            int r = entry.Row;
+            int c = entry.Column;
+            var cell = entry.GetCell();
             if (cell.Formula is not { } formula || (formula.IsArrayFormula && !formula.IsSharedAnchor) || excel.Cells.Find(r, c)?.Formula is not { } theirs)
             {
                 continue;
@@ -531,7 +540,7 @@ sealed class CheckCommand : Command<CheckSettings>
         {
             if (excel.Names.FirstOrDefault(n => n.Name == name.Name) is { } other)
             {
-                Report($"Name {name.Name} flags, key, key flags", [name.Flags, name.ShortcutKey, name.MacroKind], [other.Flags, other.ShortcutKey, other.MacroKind]);
+                Report($"Name {name.Name} flags, key, key flags", [(byte)name.Flags, name.RawShortcutKey, name.RawMacroKind], [(byte)other.Flags, other.RawShortcutKey, other.RawMacroKind]);
             }
         }
 
@@ -670,7 +679,7 @@ static class R1C1
         {
             string r = Part(m.Groups[1].Value, row, out bool absoluteRow);
             int c = int.Parse(Part(m.Groups[2].Value, column, out bool absoluteColumn), CultureInfo.InvariantCulture);
-            return $"{(absoluteColumn ? "$" : "")}{FormulaDecompiler.ColumnName(c - 1)}{(absoluteRow ? "$" : "")}{r}";
+            return $"{(absoluteColumn ? "$" : "")}{ExcelCellAddress.ColumnName(c - 1)}{(absoluteRow ? "$" : "")}{r}";
         });
 
         // Excel names an external document ':Name' (relative to the current folder).

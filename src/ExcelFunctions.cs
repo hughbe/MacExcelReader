@@ -459,13 +459,19 @@ public static class ExcelFunctions
     }
 
     /// <summary>
-    /// Finds a function number by name (case-insensitive) among the functions of <paramref name="version"/>,
-    /// or returns -1.
+    /// Finds a function's number by name, ignoring case, among the functions of <paramref name="version"/>.
     /// </summary>
-    public static int FindNumber(string name, ExcelVersion version = ExcelVersion.Excel150)
+    /// <returns>True if <paramref name="version"/> has the function.</returns>
+    public static bool TryFindNumber(string name, out int number, ExcelVersion version = ExcelVersion.Excel150)
     {
         ArgumentNullException.ThrowIfNull(name);
-        return s_byName.TryGetValue(name, out int number) && Get(number)!.IntroducedIn <= version ? number : -1;
+        if (s_byName.TryGetValue(name, out number) && Get(number)!.IntroducedIn <= version)
+        {
+            return true;
+        }
+
+        number = -1;
+        return false;
     }
 
     private static readonly Dictionary<string, int> s_byName = BuildNameIndex();
