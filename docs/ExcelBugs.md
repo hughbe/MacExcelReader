@@ -99,8 +99,10 @@ Seen in Excel 1.03; the whole-row and array-formula ones also in Excel 1.5. Thes
 
 Seen in Excel 1.03 under Mini vMac. A sheet written with every formula's result set to 0 and state word
 `0x018` at 0 still showed 0 for `=1/0` and `=SQRT(-1)` after CALCULATE.NOW, in automatic calculation. Excel
-recalculates a loaded formula only when something it depends on changes, or when it opens a file whose state
-word `0x018` is 1 or 2 (§6). A writer that cannot work out the results should set that word.
+recalculates a loaded formula only when something it depends on changes, when it opens a file whose state
+word `0x018` is 1 or 2 (§6), or when the formula's own record has a non-zero link at offset 8 other than `FF FE`,
+which puts it on the list of formulas waiting to be recalculated (§12.3; `Dirty` experiment in Excel 1.00). A
+writer that cannot work out the results should set the state word, or `FF FF` at offset 8 of each formula.
 
 ## TABLE with one argument takes a second input it was not given (Excel 1.00, 1.03)
 
