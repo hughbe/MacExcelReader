@@ -72,16 +72,16 @@ public sealed class ExcelCellGrid
     /// <summary>
     /// Gets a cell by A1-style address, or null if it is outside the grid. Never grows the grid.
     /// </summary>
-    public ExcelCell? TryGet(string address)
+    public ExcelCell? Find(string address)
     {
         var parsed = ExcelCellAddress.Parse(address);
-        return TryGet(parsed.Row, parsed.Column);
+        return Find(parsed.Row, parsed.Column);
     }
 
     /// <summary>
     /// Gets a cell, or null if it is outside the grid. Never grows the grid.
     /// </summary>
-    public ExcelCell? TryGet(int row, int column)
+    public ExcelCell? Find(int row, int column)
         => (uint)row < (uint)RowCount && (uint)column < (uint)ColumnCount ? GetCell(row, column) : null;
 
     /// <summary>

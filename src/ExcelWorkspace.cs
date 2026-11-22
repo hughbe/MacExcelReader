@@ -8,17 +8,11 @@ namespace MacExcelReader;
 /// </summary>
 public sealed class ExcelWorkspaceWindow
 {
-    /// <summary>Window kind: a worksheet.</summary>
-    public const byte WorksheetKind = 0x10;
-
-    /// <summary>Window kind: a chart. A chart window keeps only its rectangle.</summary>
-    public const byte ChartKind = 0x20;
-
-    /// <summary>Window kind: a macro sheet.</summary>
-    public const byte MacroSheetKind = 0x40;
-
-    /// <summary>Gets or sets the kind of document: <see cref="WorksheetKind"/>, <see cref="ChartKind"/> or <see cref="MacroSheetKind"/>.</summary>
-    public byte Kind { get; set; }
+    /// <summary>
+    /// Gets or sets the kind of document, with the values of the document-kind byte (Appendix B). A chart window
+    /// keeps only its rectangle.
+    /// </summary>
+    public ExcelDocumentKind Kind { get; set; }
 
     /// <summary>Gets or sets the document's file name.</summary>
     public string DocumentName { get; set; } = string.Empty;
@@ -164,12 +158,12 @@ public sealed class ExcelWorkspace
             {
                 var entry = new ExcelWorkspaceWindow
                 {
-                    Kind = kind,
+                    Kind = (ExcelDocumentKind)kind,
                     DocumentName = reader.ReadPascalString(),
                     Folder = reader.ReadPascalString(),
                     Directory = reader.ReadUInt16(),
                 };
-                if (kind == ExcelWorkspaceWindow.ChartKind)
+                if ((ExcelDocumentKind)kind == ExcelDocumentKind.Chart)
                 {
                     entry.Window = new ExcelWindow(reader.ReadInt16(), reader.ReadInt16(), reader.ReadInt16(), reader.ReadInt16(), new byte[ExcelWindow.StateSize]);
                 }
@@ -212,11 +206,11 @@ public sealed class ExcelWorkspace
                 throw new InvalidOperationException("A window's kind cannot be 0, which ends the list.");
             }
 
-            writer.WriteByte(entry.Kind);
+            writer.WriteByte((byte)entry.Kind);
             writer.WritePascalString(entry.DocumentName);
             writer.WritePascalString(entry.Folder);
             writer.WriteUInt16(entry.Directory);
-            if (entry.Kind == ExcelWorkspaceWindow.ChartKind)
+            if (entry.Kind == ExcelDocumentKind.Chart)
             {
                 writer.WriteInt16(entry.Window.Top);
                 writer.WriteInt16(entry.Window.Left);

@@ -312,8 +312,9 @@ functions. Between the base count and the count, 1.00's files hold the names of 
 start of section 7 (§14). In released 1.00 the base count and the table length are both 208, so it always
 writes 208 and never a name. Excel 1.01 keeps the flag per document, in state word `0x01C` (§6), and drops
 the names; 1.03 does the same. Excel 1.04's Save (`45.0d` in 1.04 and 1.06) and 1.5's write 208, or one more
-than the highest function number any formula uses if that is higher. Every sample has 208 except `INVOICE MACROS`, which uses
-GET.DOCUMENT (238) and has 239.
+than the highest function number any formula uses if that is higher. Every sample has 208 except
+`INVOICE MACROS` (GET.DOCUMENT, 238, so 239), `Changes 1.04` and `Changes 1.06` (CHANGE.LINK, 208, so 209) and
+`Functions 256 And Up` (292).
 
 ---
 

@@ -62,7 +62,7 @@ public static class ExcelFormulaParser
     /// every Excel 1.x can read; Excel 1.5 adds functions and encodes a few things differently (spec §9.4).
     /// </param>
     /// <exception cref="ExcelFormulaSyntaxException">The text is not a valid formula.</exception>
-    public static ExcelFormula Parse(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
+    internal static ExcelFormula Parse(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
     {
         var (expression, fixups) = Compile(text, document, definition: false, version);
         return new ExcelFormula(expression, fixups);

@@ -408,7 +408,7 @@ public class ExperimentTests
     {
         // Excel 1.5 saves version 18 for colour or @ number formats, a text section, trailing-comma scaling,
         // gridline colours and frozen panes (spec §2.1).
-        Assert.Equal(ExcelDocument.Excel15FormatVersion, Load(name).Version);
+        Assert.Equal(ExcelDocument.Version18, Load(name).Version);
     }
 
     [Theory]
@@ -608,7 +608,7 @@ public class ExperimentTests
         // series format (spec §16.8, §16.9).
         var saved = ChartDocument.Load(SamplePath(name)).Series[0];
         var built = ChartDocument.Create(ChartType.Line);
-        built.Series.Add(ChartSeries.Create(saved.Name, saved.SecondValues.Select(v => v.ToDouble()), saved.SourceDocument, saved.SecondReference));
+        built.Series.Add(ChartSeries.Create(saved.Name, saved.Values.Select(v => v.ToDouble()), saved.SourceDocument, saved.ValuesReference));
         var ours = ChartDocument.Read(built.ToArray()).Series[0];
         var a = ours.Header.ToArray();
         var b = saved.Header.ToArray();

@@ -70,12 +70,12 @@ public sealed class ChartSeries
             SecondLabel = name + ".",
             SourceMarker = "\u001B\u0006",
             SourceDocument = document,
-            FirstReference = categoriesReference ?? string.Empty,
-            SecondReference = valuesReference,
+            CategoriesReference = categoriesReference ?? string.Empty,
+            ValuesReference = valuesReference,
         };
-        series.SecondValues.AddRange(values.Select(MicrosoftDecimal.FromDouble));
-        var x = categories?.ToList() ?? Enumerable.Range(1, series.SecondValues.Count).Select(i => (double)i).ToList();
-        series.FirstValues.AddRange(x.Select(MicrosoftDecimal.FromDouble));
+        series.Values.AddRange(values.Select(MicrosoftDecimal.FromDouble));
+        var x = categories?.ToList() ?? Enumerable.Range(1, series.Values.Count).Select(i => (double)i).ToList();
+        series.CategoryValues.AddRange(x.Select(MicrosoftDecimal.FromDouble));
         return series;
     }
 
@@ -96,14 +96,14 @@ public sealed class ChartSeries
         set => Header[0] = (byte)(value ? Header[0] | 0x04 : Header[0] & ~0x04);
     }
 
-    /// <summary>Gets the first array's numbers (empty for a text series).</summary>
-    public List<MicrosoftDecimal> FirstValues { get; } = [];
+    /// <summary>Gets the category numbers, the first array (empty for a text series; spec §16.9).</summary>
+    public List<MicrosoftDecimal> CategoryValues { get; } = [];
 
-    /// <summary>Gets the first array's strings (text series only).</summary>
-    public List<string> FirstTexts { get; } = [];
+    /// <summary>Gets the category strings, the first array of a text series.</summary>
+    public List<string> CategoryTexts { get; } = [];
 
-    /// <summary>Gets the second array's numbers.</summary>
-    public List<MicrosoftDecimal> SecondValues { get; } = [];
+    /// <summary>Gets the values, the second array.</summary>
+    public List<MicrosoftDecimal> Values { get; } = [];
 
     /// <summary>Gets or sets the series name.</summary>
     public string Name { get; set; } = string.Empty;
@@ -120,15 +120,15 @@ public sealed class ChartSeries
     /// <summary>Gets or sets the name of the source document.</summary>
     public string SourceDocument { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the second reference, as formula text.</summary>
-    public string SecondReference { get; set; } = string.Empty;
+    /// <summary>Gets or sets the reference to the values, as R1C1 formula text without <c>=</c> or the document.</summary>
+    public string ValuesReference { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the first reference, as formula text.</summary>
-    public string FirstReference { get; set; } = string.Empty;
+    /// <summary>Gets or sets the reference to the categories, as R1C1 formula text without <c>=</c> or the document.</summary>
+    public string CategoriesReference { get; set; } = string.Empty;
 
     /// <summary>Gets the four trailing strings (empty in files written by Excel).</summary>
     public string[] TrailingStrings { get; } = [string.Empty, string.Empty, string.Empty, string.Empty];
 
     /// <summary>Gets the number of points.</summary>
-    public int PointCount => Math.Max(SeriesType == 3 ? FirstTexts.Count : FirstValues.Count, SecondValues.Count);
+    public int PointCount => Math.Max(SeriesType == 3 ? CategoryTexts.Count : CategoryValues.Count, Values.Count);
 }

@@ -170,16 +170,64 @@ public class FormattingTests
         {
             ReferenceStyle = ExcelReferenceStyle.A1,
             LastVisibleColumn = 255,
-            RecalculationState = 2,
+            RecalculationState = ExcelRecalculationState.Pending,
             StandardFont = 3,
         };
         Assert.Equal(ExcelReferenceStyle.A1, state.ReferenceStyle);
         Assert.Equal(255, state.LastVisibleColumn);
-        Assert.Equal(2, state.RecalculationState);
+        Assert.Equal(ExcelRecalculationState.Pending, state.RecalculationState);
         Assert.Equal(3, state.StandardFont);
             Assert.Throws<ArgumentException>(() => new ExcelSheetState(new byte[ExcelSheetState.Size - 1]));
 
             Assert.True(ExcelFunctions.Get(53)?.IsMacroOnly ?? false);
             Assert.Throws<ArgumentOutOfRangeException>(() => FormulaDecompiler.ColumnName(-1));
         }
+    
+    [Theory]
+    [InlineData(0, "General")]
+    [InlineData(4, "#,##0.00")]
+    [InlineData(5, "$#,##0 ;($#,##0)")]
+    [InlineData(9, "0.00E+00")]
+    [InlineData(14, "h:mm AM/PM")]
+    [InlineData(18, "m/d/yy h:mm")]
+    public void BuiltInFormats_DecompileToTheirNames(int index, string expected)
+    {
+        // Excel 1.00's FRMT 256 bodies, turned back into text as the Format Number dialog does (spec §7).
+        Assert.Equal(expected, ExcelNumberFormat.BuiltIn[index].ToText());
     }
+
+    [Theory]
+    [InlineData("WEST GERMANY", "00-00-000", 1234.5, "00-01-235")]
+    [InlineData("INSTRUMENT DATA", "### ##0.00", 1234.5, "1 234.50")]
+    [InlineData("SURVEY", "0.0\" N\";0.0\" S\";0", -12.25, "12.3 S")]
+    [InlineData("INVOICE LIST", "$#,##0.00 ;($#,##0.00);", 0, "")]
+    [InlineData("Format Scaling", "#,##0,", 1234567, "1,235")]
+    [InlineData("Colour Formats", "[blue]#,##0;[red]-#,##0", -1234.5, "-1,235")]
+    public void UserFormats_DecompileAndFormat(string sample, string text, double value, string expected)
+    {
+        var format = Assert.Single(TestData.Load(sample).NumberFormats, f => f.ToText() == text);
+        Assert.Equal(expected, format.Format(value));
+    }
+
+    [Fact]
+    public void TextSection_FormatsText()
+    {
+        // Excel 1.5's General;@ shows text through @, and 0;-0;0;"t" replaces it with t (spec §7).
+        Assert.Equal("abc", Assert.Single(TestData.Load("Colour Formats").NumberFormats, f => f.ToText() == "General;@").Format("abc"));
+        Assert.Equal("t", Assert.Single(TestData.Load("Format Text Section").NumberFormats).Format("abc"));
+        Assert.Equal("abc", ExcelNumberFormat.BuiltIn[2].Format("abc"));
+    }
+
+    [Theory]
+    [MemberData(nameof(TestData.AllSheets), MemberType = typeof(TestData))]
+    public void EveryCell_FormatsWithItsDocumentsFormat(string sample)
+    {
+        var document = ExcelDocument.Read(File.ReadAllBytes(TestData.SampleFile(sample)));
+        foreach (var (_, _, cell) in document.Cells.NonEmptyCells)
+        {
+            Assert.NotNull(ExcelValueFormatter.FormatCell(cell, document));
+        }
+
+        Assert.All(document.NumberFormats, f => Assert.False(string.IsNullOrEmpty(f.ToText())));
+    }
+}

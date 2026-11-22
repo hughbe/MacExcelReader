@@ -399,7 +399,7 @@ sealed class CheckCommand : Command<CheckSettings>
         int compared = 0;
         foreach (var (r, c, cell) in ours.Cells.NonEmptyCells)
         {
-            if (cell.Formula is not { } formula || (formula.IsArrayFormula && !formula.IsSharedAnchor) || excel.Cells.TryGet(r, c)?.Formula is not { } theirs)
+            if (cell.Formula is not { } formula || (formula.IsArrayFormula && !formula.IsSharedAnchor) || excel.Cells.Find(r, c)?.Formula is not { } theirs)
             {
                 continue;
             }
@@ -574,7 +574,7 @@ sealed class CheckCommand : Command<CheckSettings>
                 }
 
                 // A series with an empty reference gets a few bytes left over from memory as one (spec §16.9).
-                if (!all && key is "firstReference" or "secondReference" && oa[key]?.GetValue<string>() is "")
+                if (!all && key is "categoriesReference" or "valuesReference" && oa[key]?.GetValue<string>() is "")
                 {
                     continue;
                 }

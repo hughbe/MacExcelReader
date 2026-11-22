@@ -143,7 +143,7 @@ public class ReadBenchmarks
     public int ReadLargeCountCells() => ExcelDocument.Read(_large).Cells.CountNonEmpty();
 
     [Benchmark]
-    public object? ReadLargeSingleCell() => ExcelDocument.Read(_large).Cells.TryGet(1500, 10)?.Value;
+    public object? ReadLargeSingleCell() => ExcelDocument.Read(_large).Cells.Find(1500, 10)?.Value;
 
     [Benchmark]
     public byte[] RoundTripLarge() => ExcelDocument.Read(_large).ToArray();

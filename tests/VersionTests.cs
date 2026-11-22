@@ -161,7 +161,7 @@ public class VersionTests
         var chart = ChartDocument.Read(Sample(name));
         Assert.Equal(charts, chart.Charts.Count);
         Assert.Equal(series, chart.Series.Count);
-        Assert.All(chart.Series, s => Assert.Equal(s.PointCount, s.SecondValues.Count));
+        Assert.All(chart.Series, s => Assert.Equal(s.PointCount, s.Values.Count));
     }
 
     [Fact]

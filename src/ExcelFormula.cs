@@ -256,7 +256,7 @@ public sealed class ExcelFormula
         {
             // Another cell holds the shared record.
             if (document is not null && SharedAnchor is { } anchor
-                && document.Cells.TryGet(anchor.Row, anchor.Column)?.Formula is { IsSharedAnchor: true } shared)
+                && document.Cells.Find(anchor.Row, anchor.Column)?.Formula is { IsSharedAnchor: true } shared)
             {
                 return shared.SharedText(document);
             }
