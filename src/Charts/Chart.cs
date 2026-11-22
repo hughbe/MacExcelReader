@@ -205,6 +205,9 @@ public sealed class Chart
     /// <summary>Gets or sets whether series are stacked.</summary>
     public bool IsStacked { get => GetBit(0, 13); set => SetBit(0, 13, value); }
 
+    /// <summary>Gets or sets whether the chart has a legend (header word 0, bit 15; set by LEGEND and Chart > Add Legend).</summary>
+    public bool HasLegend { get => GetBit(0, 15); set => SetBit(0, 15, value); }
+
     /// <summary>Gets or sets whether a stacked chart is drawn as 100%.</summary>
     public bool IsPercent { get => GetBit(0, 14); set => SetBit(0, 14, value); }
 

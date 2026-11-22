@@ -65,6 +65,9 @@ public class WorkspaceTests
         Assert.Equal(3, block[454 + 3] & 0x0F);
         Assert.Equal([666, 1058], workspace.PreferredChartOffsets);
         Assert.Equal([ChartType.Scatter, ChartType.Pie], workspace.PreferredChartTypes);
+
+        // Set Preferred Format copies the charts and titles but not the series, so the series lists are empty.
+        Assert.All(new[] { 658, 660, 662, 664 }, offset => Assert.Equal(0, (block[offset] << 8) | block[offset + 1]));
     }
 
     [Fact]

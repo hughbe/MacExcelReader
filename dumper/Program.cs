@@ -632,7 +632,7 @@ sealed class ChartCommand : Command<FileSettings>
             table.AddRow("Options", $"stacked {Program.YesNo(chart.IsStacked)}, 100% {Program.YesNo(chart.IsPercent)}, vary by category {Program.YesNo(chart.VaryByCategory)}");
             table.AddRow("Overlap / cluster spacing", $"{chart.Overlap}% / {chart.ClusterSpacing}%");
             table.AddRow("First pie slice angle", $"{chart.FirstSliceAngle}°");
-            table.AddRow("Legend", chart.LegendPosition.ToString());
+            table.AddRow("Legend", chart.HasLegend ? chart.LegendPosition.ToString() : $"none (position {chart.LegendPosition} if added)");
             table.AddRow("Category axis", Axis(chart.CategoryAxis));
             table.AddRow("Value axis", Axis(chart.ValueAxis));
             table.AddRow("Value scale", Scale(chart.ValueScale));

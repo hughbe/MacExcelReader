@@ -1467,6 +1467,7 @@ Header word 0:
 
 | Bits | Meaning |
 |-----:|---------|
+| 15 | The chart has a legend. LEGEND and Chart > Add Legend set it (`30.1b` in 1.00; `Legend` sample), and only then does a click find the legend (`36.02`). |
 | 14 | 100% |
 | 13 | Stacked |
 | 12 | Bars (horizontal) rather than columns |
@@ -1931,15 +1932,9 @@ recalculate the sheet when it opens it (§6; five 1.00 samples and seven 1.5 sam
 
 None of these affects reading the samples or writing valid files.
 
-**Worksheets and macro sheets**
-
 * Most of the 88 extra window-state bytes of version 18 (§13), and what else in a number format makes Excel
   1.5 save version 18 (§2.1).
 * What Excel 1.04 changed besides adding CHANGE.LINK; no 1.04 code or sample is available (§2.1).
-
-**Workspace files** (Appendix B)
-
-* The words at offsets 538–546 and 658–662 of a chart's data block (Appendix B).
 
 ---
 
@@ -2273,7 +2268,7 @@ calculation settings. It holds no cell data. Written by `64.00` and read by `64.
 | 20 bytes | Calculation settings, laid out as offsets 0x000–0x013 of the sheet state block (§6): maximum iterations, calculation mode, precision, reference style, unused word, maximum change (double), iteration. In 1.00 they are global, not per document. |
 | word | 1 if a window was **zoomed** to fill the screen (the FULL command or the zoom box; global `g0c5a`), else 0. Open zooms the front window again (`17.0c`). The rectangles below are always the windows' normal size: Excel un-zooms a window before recording it. |
 | … | The document windows, front to back, each as below, then a `0x00` byte |
-| word | `n`, then `n` bytes: the **preferred chart format** (Chart > Set Preferred Format, applied by Gallery > Preferred). Set Preferred Format keeps the active chart's data block (`5a.13` in 1.00), and this is that block as it is (below). `n` = 0 when none has been set (1,640 bytes for `CLOCK.CH`'s format). |
+| word | `n`, then `n` bytes: the **preferred chart format** (Chart > Set Preferred Format, applied by Gallery > Preferred). Set Preferred Format copies the active chart's formatting into a data block of its own (below; `5a.13` in 1.00). `n` = 0 when none has been set (1,640 bytes for `CLOCK.CH`'s format). |
 | byte | 0 |
 | 3 words | **Printer Setup** (dialog 288, PRINTER.SETUP): printer type, baud rate and port (values below). The sample's `0, 5, 0` is a Macintosh printer; `PRINTER.SETUP(2,2,3)` gives `1, 2, 1`. |
 | byte | 0 |
@@ -2282,21 +2277,62 @@ calculation settings. It holds no cell data. Written by `64.00` and read by `64.
 code makes its data segment (`pushG g23cc | setDS`) and addresses by fixed offsets; the document points at it
 from offset 202. Excel 1.00 makes the block 1,078 bytes long for a new chart (`0f.00`), sets up its fixed
 fields (`0f.02`) and allocates the chart structures, point formats and strings in it as it needs them
-(`30.11`), so it grows. Set Preferred Format keeps the block and gives the chart a fresh one. Its first word
-is its own length, as for every block on Excel's heap, which the memory manager (`0a.03`) moves like any
-other; the pointers inside are offsets in the block, so they stay valid when it moves.
+(`30.11`), so it grows. Set Preferred Format makes a new block and copies the chart structures and titles of
+the active chart into it, but not its series (`5a.14`); that block is the preferred format, and the chart
+keeps its own. The block's first word is its own length, as for every block on Excel's heap, which the memory
+manager (`0a.03`) moves like any other; the pointers inside are offsets in the block, so they stay valid when
+it moves.
 
 | Offset | Meaning |
 |-------:|---------|
 | 0 | Word: the block's length |
+| 320 | A point-format record (§16.8) that the chart code fills for one series at a time (`3c.02`, `35.17`) |
 | 334 | Chart title: a text object in its 60-byte in-memory form (§16.7), kind 1 (`0f.02`) |
 | 394 | Category-axis title, kind 2 |
 | 454 | Value-axis title, kind 3 |
-| 538 | Word, set to −1 when the block is made **(unknown)** |
-| 540, 542, 546 | Words, set to 0 when the block is made **(unknown)** |
+| 514 | Three QuickDraw rectangles, 8 bytes each: the chart area, plot area and legend as last drawn. A click is tested against them for selection kinds 0–2 (`36.03`). |
+| 538 | Word: the **selection**, the kind of chart object selected (below); −1 when nothing is (`0f.02`, `36.06`) |
+| 540 | Word: which object of that kind (below) |
+| 542 | Word: a second index for some kinds (below) |
+| 544 | Byte: the number of selection handles drawn round the selection (`36.17`) |
+| 545 | Byte: the style of those handles, from a table indexed by the selection kind |
+| 546 | Word: the offset of the structure of the chart the selection belongs to, main or overlay |
+| 548 | 8 bytes: a rectangle the handle code works with (`36.17`) **(inferred)** |
+| 556 | 4 bytes for each handle, up to eight: where it is drawn (`36.17`) |
 | 652 | Two words: the offsets of the main chart's structure and the overlay's (0 when there is none). Save writes them last first, which is why a file has the overlay first (§16.1; `5d.00`). |
 | 656 | Word: the number of charts |
-| 658, 662 | Words worked out from the chart's series when it is made (`34.00`) **(unknown)** |
+| 658 | Word: the offset of the first series in the first series list (§16.9), made from the worksheet selection when the chart is made (`34.00`, `0f.02`); the series link through their offset 12 |
+| 660 | Word: the same for the second series list |
+| 662 | Word: the number of series in the first list |
+| 664 | Word: the number in the second; Save adds the two for the series count (`5d.00`). Words 658–664 are 0 in a preferred format, which has no series. |
+
+Selection kinds, with what Format > Patterns shows for each (`59.00` in 1.00). The kinds come from the click
+code (`36.02`, `36.04`, `36.05`, `31.0a`) and the code that draws each chart type, which tests the click as it
+draws (`39`, `53`–`56`, `3a`):
+
+| Value | Selected | Words 540 and 542 | Patterns dialog |
+|---:|---|---|---|
+| −1 | Nothing | | |
+| 0 | Chart area (Chart > Select Chart) | | Area |
+| 1 | Plot area (Chart > Select Plot Area) **(inferred, from the order of the rectangles at 514)** | | Area |
+| 2 | Legend | | Area |
+| 3 | Value axis | | Axis |
+| 4 | Category axis | | Axis |
+| 5 | Chart title | | Area |
+| 6 | Category-axis title | | Area |
+| 7 | Value-axis title | | Area |
+| 8 | Free text | Its index in the text list | Area |
+| 9 | Data label | Series and point (§16.7, mem 4 and 5) | Area |
+| 10 | Arrow | Its index in the text list | Arrow |
+| 11 | Gridlines | Which axis's, major or minor (`3a.08`, `3a.0f`) | Line |
+| 12 | A data series, or a pie slice | Series and point | Line and marker (line and scatter charts) or area |
+| 13 | Drop lines | | Line |
+| 14 | Hi-lo lines | | Line |
+| 15 | A data point, in a line or scatter chart with one series (`53.03`) | Series and point | Marker |
+
+Offsets 514–587 are run-time state, worked out as the chart is drawn and clicked. A preferred format holds
+whatever its block had there, left over from memory: in `Resume Excel 2` offsets 514–545 hold four doubles
+(−40, 40, 10, 10) rather than rectangles and a selection.
 
 Each chart structure is the 392-byte form of the chart record (§16.5, the table's "mem" column). In `Resume
 Excel 2` the table at 652 holds 666 and 1058, the main (scatter) and overlay (pie) charts of `CLOCK.CH`, and

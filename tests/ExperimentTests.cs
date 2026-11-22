@@ -176,6 +176,17 @@ public class ExperimentTests
         Assert.Equal((byte4 << 8) | byte5, chart.Excel15CategoryCount);
     }
 
+    [Theory]
+    [InlineData("Legend", true)]
+    [InlineData("Library Column", false)]
+    public void ChartHeader_Bit15IsTheLegend(string sample, bool hasLegend)
+    {
+        // Chart > Add Legend in Excel 1.00 on a library column chart, then File > Save (spec §16.5).
+        var chart = ChartDocument.Load(SamplePath(sample)).MainChart;
+        Assert.Equal(hasLegend, chart.HasLegend);
+        Assert.Equal(LegendPosition.Bottom, chart.LegendPosition);
+    }
+
     [Fact]
     public void PieExplodedAll_DefaultSeriesFormatHoldsTheExplosion()
     {
