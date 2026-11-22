@@ -66,14 +66,17 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     /// <summary>Gets whether the format has a single section: every slot is the same bytes at offset 0.</summary>
     public bool IsSingleSection => Descriptor[^1] != 0;
 
-    /// <summary>Gets whether the format shows a date or time (its positive section has a date or time token).</summary>
+    /// <summary>
+    /// Gets whether the format shows a date: its positive section has a day, month or year token. Hours, minutes,
+    /// seconds and AM/PM do not count, as in Excel's own test (<c>07.18</c> in 1.00; spec §7).
+    /// </summary>
     public bool IsDate
     {
         get
         {
             foreach (var token in Tokenize(GetSection(ExcelNumberFormatSection.Positive)))
             {
-                if (token.Code is (>= 0x0B and <= 0x1A) or 0x1F or 0x20 or 0x21)
+                if (token.Code is (>= 0x0B and <= 0x12) or 0x19 or 0x1A)
                 {
                     return true;
                 }

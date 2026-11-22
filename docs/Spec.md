@@ -545,6 +545,10 @@ gives the rest:
 
 A cell whose formatted text is wider than its column shows as many `#` as fit instead (`19.0e`).
 
+Excel tests whether a format shows a date in two places. `07.18` looks for a day, month or year token (`0B`–`12`,
+`19`, `1A`) in the positive section; times alone do not count. Its caller `34.04` counts the built-in formats
+10–18, the time-only ones included, and any other format `07.18` accepts.
+
 TEXT will not take `General` or a fill (`*-0`). General (`19.0c`) fits the number into the characters the column
 has room for, W, not counting a minus sign:
 

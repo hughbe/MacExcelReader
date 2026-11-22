@@ -244,4 +244,18 @@ public class FormattingTests
         // Excel 1.00's General (19.0c): spec §7.
         Assert.Equal(expected, ExcelValueFormatter.FormatGeneral(value, width));
     }
+
+    [Fact]
+    public void DateFormats_AreDecidedAsExcelDoes()
+    {
+        // 07.18 counts day, month and year tokens only; 34.04 adds the built-in formats 10–18 (spec §7).
+        Assert.True(ExcelNumberFormat.BuiltIn[10].IsDate);    // m/d/yy
+        Assert.False(ExcelNumberFormat.BuiltIn[16].IsDate);   // h:mm
+        Assert.True(ExcelValueFormatter.IsDateFormat(16));
+        Assert.False(ExcelValueFormatter.IsDateFormat(9));
+        var document = TestData.Load("INVOICE TEMPLATE");
+        int dayMonthYear = document.NumberFormats.FindIndex(f => f.ToText() == "dd mmm yy") + ExcelValueFormatter.BuiltInFormatCount;
+        Assert.True(ExcelValueFormatter.IsDateFormat(dayMonthYear, document));
+        Assert.False(ExcelValueFormatter.IsDateFormat(dayMonthYear));
+    }
 }

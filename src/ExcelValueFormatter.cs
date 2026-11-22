@@ -18,9 +18,13 @@ public static class ExcelValueFormatter
         => index >= 0 && index < BuiltInFormatCount ? ExcelNumberFormat.BuiltIn[index].ToText() : null;
 
     /// <summary>
-    /// Gets whether a built-in format displays a date or time.
+    /// Gets whether a format index is a date format the way Excel decides it (<c>34.04</c> in 1.00; spec §7): one of
+    /// the built-in date and time formats 10–18, or a user-defined format of <paramref name="document"/> that shows
+    /// a date (<see cref="ExcelNumberFormat.IsDate"/>).
     /// </summary>
-    public static bool IsDateFormat(int index) => index is >= 0 and < BuiltInFormatCount && ExcelNumberFormat.BuiltIn[index].IsDate;
+    public static bool IsDateFormat(int index, ExcelDocument? document = null)
+        => index is >= 10 and <= 18
+            || (index >= BuiltInFormatCount && document?.GetNumberFormat(index)?.IsDate == true);
 
     /// <summary>
     /// Converts a 1904-system serial number to a date and time.
