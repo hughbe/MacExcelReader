@@ -1,31 +1,59 @@
 # MacExcelReader
 
-MacExcelReader is a fast, allocation-conscious .NET library for reading and writing Microsoft Excel 1.x for Macintosh documents (Excel 1.00 to 1.5): worksheets (Finder type `XLBN`), macro sheets (`XLPG`) and charts (`MCBN`).
+[![NuGet](https://img.shields.io/nuget/v/MacExcelReader.svg)](https://www.nuget.org/packages/MacExcelReader)
+[![CI](https://github.com/hughbe/MacExcelReader/actions/workflows/ci.yml/badge.svg)](https://github.com/hughbe/MacExcelReader/actions/workflows/ci.yml)
 
-The file format was reverse-engineered from the code of Excel 1.00, 1.01, 1.03, 1.04, 1.06 and 1.5 and is documented in [docs/Spec.md](docs/Spec.md). The full API is described in the [usage guide](docs/Usage.md).
+A fast .NET library for reading and writing Microsoft Excel 1.x for Macintosh documents, from Excel 1.00 (1985) to
+Excel 1.5 (1988): worksheets (Finder type `XLBN`), macro sheets (`XLPG`) and charts (`MCBN`).
+
+The file format was reverse-engineered from the code of Excel 1.00, 1.01, 1.03, 1.04, 1.06 and 1.5, and checked
+by running files in the real thing under an emulator. It is documented in full in the
+[format specification](https://github.com/hughbe/MacExcelReader/blob/main/docs/Spec.md).
+
+---
+
+## Install
+
+```sh
+dotnet add package MacExcelReader
+```
+
+The library targets .NET 9 and has no dependencies.
 
 ---
 
 ## Features
 
-- **Exact round-trips.** All 37 sample documents from the Excel 1.00, 1.03 and 1.5 disks, and 80 files Excel itself saved in experiments, read and write back byte for byte, sheets and charts, including Excel 1.5's version-18 files. Fields the library does not model are preserved untouched.
-- **Cells.** Integers, numbers, text and formulas with their current values, plus number formats, alignment, bold and italic, borders, and protection flags.
-- **Formulas, both ways.** Decompile tokens to A1-style text (`=IF(NOT(FORMULA.FIND(B19,1,2,1)),RETURN())`) and compile text back to tokens with `ExcelFormula.Parse`. The parser reproduces Excel's own encoding byte for byte for 1,281 of the samples' 1,282 formulas and all 206 name definitions, for whichever release saved them: token classes, `IF` and `CHOOSE` jumps, the one-argument `SUM` attribute, volatile and memory-function tokens, array formulas and array constants, macro commands, dialog-box forms (`RUN?()`), names, external references and calls to macros on this or another sheet. Every function Excel 1.00–1.5 knows, with each release's argument rules. Allocation-free token walking.
-- **Number formats.** The 19 built-in formats and any user-defined one: decompiled to their text, used to format values as Excel does (dates in the 1904 date system), and compiled from text with `ExcelNumberFormat.Parse` or `ExcelDocument.AddNumberFormat`, byte for byte as Excel 1.00 or 1.5 does.
-- **Everything else in the file.** Calculation settings, column widths, fonts, protection and the password hash, defined names and command-macro shortcuts, external documents, windows and selections, page breaks and Page Setup.
-- **Writing.** Create new worksheets and macro sheets with Excel 1.03's defaults, or edit existing ones; only the cells you touch are re-encoded.
-- **Charts.** Chart type and options, axes and scales, legend, titles, data labels, free text and arrows, point formats (markers, patterns, exploded pie slices, label settings), overlay charts, the layout Excel last drew, and the series data. Numbers use Microsoft's 8-byte decimal format.
-- **Robust.** Malformed input only ever raises `ExcelFormatException`. This is checked by fuzzing the samples with hundreds of thousands of random corruptions.
+- **Exact round-trips.** Every sample, the 37 documents from Microsoft's Excel 1.00, 1.03 and 1.5 disks and 80
+  files Excel saved in experiments, reads and writes back byte for byte: sheets and charts, version-17 and
+  Excel 1.5's version-18 files. Fields the library does not model are kept as they are.
+- **Cells.** Integers, numbers, text and formulas with their current values, number formats, alignment, bold
+  and italic, borders and protection.
+- **Formulas, both ways.** Decompile tokens to A1-style text and compile text back to tokens with
+  `ExcelFormula.Parse`, as each release encodes them: token classes, `IF` and `CHOOSE` jumps, array formulas and
+  constants, macro commands and dialog-box forms (`RUN?()`), names, external references, and every function
+  Excel 1.00–1.5 knows with each release's argument rules. All 1,274 test formulas compile to the bytes Excel
+  1.00, 1.03 or 1.5 gave them when re-entering them, except a whole-sheet range that Excel re-entered from
+  shortened text, and so do all 206 name definitions in Microsoft's samples.
+- **Number formats.** Decompile any format to its text, format values with it as Excel does (dates in the 1904
+  date system, General, `###` in a narrow column), and compile text into a new format with
+  `ExcelDocument.AddNumberFormat`, byte for byte as Excel 1.00 or 1.5 does.
+- **Everything else in the file.** Calculation settings, column widths, fonts, protection and its password
+  hash, defined names and macro shortcuts, external documents, windows and selections (frozen panes and
+  gridline colours in Excel 1.5), page breaks and Page Setup.
+- **Writing.** Create worksheets and macro sheets with Excel's defaults, or edit existing ones; only the cells
+  you change are re-encoded.
+- **Charts.** Type and options, axes and scales, legend, titles, data labels, free text and arrows, point
+  formats, overlay charts and the series data, in Microsoft Chart's 8-byte decimal numbers.
+- **Workspaces.** Read and write "Resume Excel" files: the settings and the windows Excel reopens.
+- **Robust.** Malformed input only ever raises `ExcelFormatException`, checked by fuzzing the samples with
+  hundreds of thousands of random corruptions.
 
 ---
 
 ## Quick start
 
-```sh
-dotnet add reference path/to/MacExcelReader/src/MacExcelReader.csproj
-```
-
-### Read
+### Read a sheet
 
 ```csharp
 using MacExcelReader;
@@ -54,22 +82,23 @@ foreach (var cell in document.Cells.EnumerateNonEmpty())
 }
 ```
 
-### Write
+### Write a sheet
 
 ```csharp
 var sheet = ExcelDocument.CreateWorksheet();
 sheet.Cells["A1"].SetText("Total");
-sheet.Cells["A2"].SetValue(42);
+sheet.Cells["A2"].SetValue(1234.5);
+sheet.Cells["A2"].NumberFormat = sheet.AddNumberFormat("#,##0.00 \"DM\"");
 sheet.Cells["A2"].Bold = true;
 
 var formula = ExcelFormula.Parse("=A2*2");
-formula.SetResult(84);   // the value Excel shows until it recalculates
+formula.SetResult(2469);   // the value Excel shows until it recalculates
 sheet.Cells["A3"].SetFormula(formula);
 
-sheet.Save("Totals");   // set Finder type sheet.FinderType ("XLBN") and creator "XCEL"
+sheet.Save("Totals");   // give the file Finder type sheet.FinderType ("XLBN") and creator "XCEL"
 ```
 
-### Charts
+### Read a chart
 
 ```csharp
 using MacExcelReader.Charts;
@@ -81,6 +110,19 @@ foreach (var series in chart.Series)
     Console.WriteLine($"{series.Name}: {string.Join(", ", series.Values)}");
 }
 ```
+
+The [usage guide](https://github.com/hughbe/MacExcelReader/blob/main/docs/Usage.md) covers the whole API.
+
+---
+
+## Documentation
+
+| Document | What it covers |
+|----------|----------------|
+| [Usage guide](https://github.com/hughbe/MacExcelReader/blob/main/docs/Usage.md) | The library's API, with examples |
+| [Format specification](https://github.com/hughbe/MacExcelReader/blob/main/docs/Spec.md) | The file format, byte by byte, with the code of each Excel release it comes from |
+| [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) | The harness that runs files in Excel under Mini vMac, and every experiment's results |
+| [Excel bugs and quirks](https://github.com/hughbe/MacExcelReader/blob/main/docs/ExcelBugs.md) | Excel's own bugs and oddities found along the way |
 
 ---
 
@@ -131,7 +173,7 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `cell <file> <address>` | Everything about one cell: value, date, formats, flags, formula, result, raw bytes and a token-by-token breakdown |
 | `parse <formula> [-f file] [--name] [--array] [--excel 1.5]` | Compile formula text and show the tokens Excel would store |
 | `sheet <list> <output> [--split N] [--excel 1.5]` | Build sheets from a formula list (`tests/Data`), for testing formulas in Excel |
-| `excel-test pack <disk> <files...>` / `excel-test check <disk>` | Test files in a real Excel under an emulator: see [Testing in a real Excel](docs/Testing.md) |
+| `excel-test pack <disk> <files...>` / `excel-test check <disk>` | Test files in a real Excel under an emulator: see [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) |
 | `names <file>` | Defined names, command shortcuts and definitions |
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |
@@ -151,11 +193,24 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
 
 ## Limitations
 
-- New documents carry empty embedded p-code segments. No released Excel reads them: every release writes code signature `0xAB27`, which each treats as its own build, so each uses its own copy of the code (spec §4.1). Only a build with another signature would load them, to read a closed document through a link; copy the segments from an existing document if that matters.
-- The formula parser does not calculate. A new formula's cached value is whatever you set with `SetResult`, and Excel keeps it until something the formula depends on changes. Set `document.State.RecalculationState = ExcelRecalculationState.Needed` to have Excel recalculate the sheet when it opens it.
-- The parser's rules come from Excel's code and tables and reproduce every formula in the samples. Excel itself has re-entered and saved (with the harness's `--recompile`) every formula in `tests/Data/formulas-1.0.txt`, sheet 1 in Excel 1.03 and the rest in Excel 1.00, and every formula in `formulas-1.5.txt` in Excel 1.5, and the library's tokens match. The one exception is a whole-sheet range such as `=A1:IV16384`, which GET.FORMULA gives as whole rows, so Excel's re-entry differs ([Excel bugs and quirks](docs/ExcelBugs.md)). Formulas unlike any of these could still encode differently.
-- `ExcelValueFormatter.FormatCell(cell, document)` and `ExcelNumberFormat.Format` give the text Excel turns a value into, with no column: a fill (`*-`) shows nothing and colours are dropped. `FormatCell(cell, document, column)` shows it as Excel draws it in its column, General fitted and too-wide numbers as `###`, following Excel 1.00's display code, but it counts every character as one digit width where Excel measures pixels, so it is approximate. Excel's TEXT function agrees with the formatter for every format in the samples, and General with Excel's own number-to-text conversion (`docs/Testing.md`), for the values tried. Format text uses the US letters and separators; a translated Excel shows its own (spec §7).
-- Files written by the library have been checked in Excel 1.00, 1.03 and 1.5 under Mini vMac, in the runs listed in [Testing in a real Excel](docs/Testing.md), including charts the library builds from scratch, which Excel 1.00 draws and re-saves with no change to their content.
+- **No calculation.** A new formula's cached value is whatever you set with `SetResult`, and Excel keeps it
+  until something the formula depends on changes. Set
+  `document.State.RecalculationState = ExcelRecalculationState.Needed` to have Excel recalculate the sheet when
+  it opens it.
+- **Formulas from pre-release builds.** Of the 1,282 formulas in Microsoft's samples, 1,243 recompile to the
+  stored bytes. The other 39 were compiled by builds before the releases (the 1.00 disk's macro sheets and two
+  of the 1.5 samples) and encode a few things differently; they still decompile correctly
+  ([spec §2.3 and §15.4](https://github.com/hughbe/MacExcelReader/blob/main/docs/Spec.md)).
+- **Display is text, not pixels.** `ExcelValueFormatter.FormatCell(cell, document)` gives the text Excel turns a
+  value into. `FormatCell(cell, document, column)` follows how Excel draws it in its column, but counts every
+  character as one digit width where Excel measures pixels, so a value at the edge of its column may differ.
+  Colours are not applied, and format text uses the US letters and separators.
+- **Empty embedded code.** New documents carry empty copies of the code segments every Excel document embeds.
+  No released Excel reads them ([spec §4.1](https://github.com/hughbe/MacExcelReader/blob/main/docs/Spec.md)), so this only matters to a build with a
+  different code signature reading the file through a link.
+
+Files the library writes have been opened and re-saved in Excel 1.00, 1.03, 1.04, 1.06 and 1.5 in the
+[experiments](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md), including charts built from scratch.
 
 ---
 
@@ -166,24 +221,17 @@ dotnet build
 dotnet test
 ```
 
-The tests run over the sample documents in `tests/Samples`, grouped by the release that saved them: `Excel 1.00` (the 1.00 data disk, whose Expenses, REPLACE, COMMANDS and DB.FORM are identical to the 1.03 disk's), `Excel 1.01` (files the French 1.01 saved in experiments), `Excel 1.03` (Worksheet1), `Excel 1.04` and `Excel 1.06` (files those releases saved in experiments) and `Excel 1.5` (the 1.5 sampler, including two charts). Each folder also holds the files that release saved in experiments, named for what they show; `tests/ExperimentTests.cs` checks what each one showed.
+The tests run over the samples in `tests/Samples`, in a folder for each release that saved them, and over the
+formula and number-format lists in `tests/Data`. Files Excel saved in experiments are named for what they show,
+and `tests/ExperimentTests.cs` checks each one.
 
 ### Releasing
 
-CI packs the library on every run (the `package` artifact). To publish a version to NuGet, push a tag:
-
-```sh
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-The Release workflow builds and tests the tagged commit, packs it with the tag as the version (`v1.0.0` gives
-1.0.0) and pushes the package and its symbols to nuget.org with NuGet Trusted Publishing, so no API key is
-stored. It needs a Trusted Publishing policy on nuget.org for this repository and the workflow file
-`release.yml`, and the nuget.org account name in the repository secret `NUGET_USER`.
+Push a version tag, such as `v1.0.0`. The Release workflow builds and tests that commit, packs it with the tag
+as the version and publishes it to nuget.org with NuGet Trusted Publishing.
 
 ---
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT; see [LICENSE](https://github.com/hughbe/MacExcelReader/blob/main/LICENSE).
