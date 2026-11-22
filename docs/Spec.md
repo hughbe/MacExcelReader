@@ -1067,7 +1067,7 @@ The file ends after this section.
 ## 15. Parsed expressions
 
 Reverse-Polish token stream. This is the direct ancestor of the BIFF2 `ptg` encoding: token numbers and
-operand sizes coincide wherever they could be checked.
+operand sizes coincide wherever they could be checked ([Excel 1.x and BIFF2](Biff2.md#6-formulas) compares them).
 
 Tokens `0x01`–`0x1F` are plain bytes. Tokens from `0x20` up carry a **class** in bits 6–5:
 

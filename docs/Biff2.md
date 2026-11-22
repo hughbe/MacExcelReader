@@ -84,8 +84,9 @@ Most of BIFF2's settings records match a field of Excel 1.x's state block (§6),
 | `0x244`, `0x246` standard font and size | FONT (`0x31`) | Excel 1.x has one font for the whole sheet: a Toolbox font number and size. BIFF2 has a font list, with names and heights in twips |
 | `0x24C` row height (cached) | DEFAULTROWHEIGHT (`0x25`) | Excel 1.x derives it from the font; rows cannot have their own height |
 
-Excel 1.x also keeps settings with no BIFF2 record: the recalculation state (`0x018`, which BIFF2 has per formula
-instead), the flag for functions newer than the base set (`0x01C`), and the count of defined names (`0x022`).
+Excel 1.x also keeps settings with no BIFF2 record: the recalculation state (`0x018`; BIFF2 has only a
+per-formula “recalculate always” flag), the flag for functions newer than the base set (`0x01C`), and the count
+of defined names (`0x022`).
 BIFF2's DATEMODE has no counterpart, since Excel 1.x always uses 1904 dates.
 
 ## 4. Cells
@@ -106,7 +107,7 @@ record to find them (OOo §4.7).
 | 2 Number | A double, in section 5 | NUMBER (`0x03`) |
 | 3 Text | A Pascal string, in section 5 | LABEL (`0x04`) |
 | 5, 6 Formula | A formula record, in section 5 | FORMULA (`0x06`), with STRING (`0x07`) for a text result |
-| — | — | BOOLERR (`0x05`): a constant TRUE, FALSE or error. Excel 1.x's type 4 occurs in no sample. |
+| — | — | BOOLERR (`0x05`): a constant TRUE, FALSE or error. How Excel 1.x stores one is not known: its type 4 occurs in no sample. |
 
 **Formula results.** Both formats keep a formula's last value in 8 bytes, and both mark a value that is not a
 number by setting the high-order word of the double to `0xFFFF`, which makes it a NaN. In Excel 1.x that word
@@ -234,7 +235,7 @@ by name (§11). A new Excel 1.x sheet always has five names with empty definitio
 Excel 1.x keeps one table of external documents, each a Pascal string (§8), and a list of the names used from
 each (§10). Token `1A` refers to a document by its 1-based place in the table, and a name token between `1A` and
 `1B` to a name by its place in that document's list. BIFF2 has EXTERNCOUNT, then an EXTERNSHEET record for each
-document, each followed by its EXTERNNAME records (OOo §5.39–§5.41).
+document, each followed by its EXTERNALNAME records (OOo §5.39–§5.41).
 
 Document names differ. Excel 1.x stores the name or Mac path as it is (`::sampler files - current 1/13:Files:DATA`).
 BIFF encodes it with control characters: `01` before an encoded path, `02` for the document itself, and
@@ -246,8 +247,8 @@ also has the one-character name `00` for whichever sheet is active, as in `=!A1`
 **Storage.** BIFF2 keeps each format as its text (`0.00%`) in a FORMAT record, built-in formats included, with
 BUILTINFMTCOUNT saying how many are built in (OOo §5.12, §5.49). Excel 1.x keeps only the user-defined
 formats, each already compiled: section offsets and lengths, and token bodies (§7). It writes the number of
-built-in formats (19) before them and renumbers a file's format indexes on Open if its own count differs, which
-is what BUILTINFMTCOUNT is for.
+built-in formats (19) before them and renumbers a file's format indexes on Open if its own count differs; BIFF2's
+BUILTINFMTCOUNT records the same count.
 
 So a converter compiles and decompiles: `ExcelNumberFormat.ToText` turns an Excel 1.x format into its text, and
 `ExcelNumberFormat.Parse` compiles text the way Excel 1.00 or 1.5 does.
@@ -304,9 +305,10 @@ Only BIFF2 has:
 
 * a font list (FONT, FONT2, FONTCOLOR), shading and row heights;
 * row and column default formats (ROW, COLUMNDEFAULT) and an XF table;
-* cell notes (NOTE);
+* cell notes (NOTE), which Excel 1.x does not have;
 * the 1900 date system (DATEMODE) and a code page (CODEPAGE);
-* file encryption (FILEPASS), and BACKUP, WINDOWPROTECT and the show-zero-values switch;
+* file encryption (FILEPASS): Excel 1.5 refuses such a file (“Can't open password protected sheet”);
+* the show-zero-values switch;
 * charts in the same file format as sheets.
 
 ## 14. Converting Excel 1.x to BIFF2
@@ -318,8 +320,8 @@ A reader of either format that wants to write the other needs, beyond moving fie
 * dates: DATEMODE 1;
 * cells: walk the dense grid, write a record for each cell that is not an unformatted blank, and turn negative
   Excel 1.x integers into NUMBER records;
-* formatting: one FONT for the sheet's font and its bold and italic variants, and an XF for each combination
-  used;
+* formatting: four FONT records, the sheet's font plain, bold, italic and bold italic, which is exactly what
+  the 2-bit font index holds, and an XF for each combination used;
 * number formats: decompile each user format to text and write all the built-in ones first;
 * formulas: copy the token array, put each name's and external document's index into its token, move array
   elements and memory areas to the end, renumber functions 56 and up, and rewrite Excel 1.5's `39` and `3A`
