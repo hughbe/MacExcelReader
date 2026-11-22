@@ -152,6 +152,18 @@ public class ReadBenchmarks
     public byte[] RoundTripExpenses() => ExcelDocument.Read(_expenses).ToArray();
 
     [Benchmark]
+    public int FormatDbFormCells()
+    {
+        int length = 0;
+        foreach (var (_, _, cell) in _dbFormDocument.Cells.NonEmptyCells)
+        {
+            length += ExcelValueFormatter.FormatCell(cell, _dbFormDocument).Length;
+        }
+
+        return length;
+    }
+
+    [Benchmark]
     public int DecompileDbFormFormulas()
     {
         var document = ExcelDocument.Read(_dbForm);
