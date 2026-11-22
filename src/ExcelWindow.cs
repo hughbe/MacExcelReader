@@ -22,7 +22,7 @@ public sealed class ExcelWindow
 
     /// <summary>
     /// The size of the window state block in version-18 files (Excel 1.5): the 41 bytes, then 88 more bytes
-    /// of the window record (spec §12).
+    /// of the window record (spec §13).
     /// </summary>
     public const int Version18StateSize = 129;
 
@@ -102,6 +102,57 @@ public sealed class ExcelWindow
         set => BinaryPrimitives.WriteUInt16BigEndian(State.AsSpan(39), value);
     }
 
+    /// <summary>Gets whether the state block is the 129-byte one of a version-18 file (Excel 1.5).</summary>
+    public bool HasVersion18State => State.Length == Version18StateSize;
+
+    /// <summary>
+    /// Gets or sets whether the panes are frozen (Excel 1.5, version-18 state offset 121; spec §13). Always false
+    /// for a 41-byte state.
+    /// </summary>
+    public bool PanesFrozen
+    {
+        get => HasVersion18State && State[121] != 0;
+        set => Version18State()[121] = (byte)(value ? 1 : 0);
+    }
+
+    /// <summary>
+    /// Gets or sets the first row below the split where Excel 1.5 froze the panes (version-18 state offset 123;
+    /// spec §13), or null for a 41-byte state. Left over from memory until the window's panes are first frozen.
+    /// </summary>
+    public ushort? FrozenRow
+    {
+        get => HasVersion18State ? BinaryPrimitives.ReadUInt16BigEndian(State.AsSpan(123)) : null;
+        set => BinaryPrimitives.WriteUInt16BigEndian(Version18State().AsSpan(123), value ?? 0);
+    }
+
+    /// <summary>
+    /// Gets or sets the first column right of the split where Excel 1.5 froze the panes (version-18 state offset
+    /// 125; spec §13), or null for a 41-byte state. Left over from memory until the window's panes are first frozen.
+    /// </summary>
+    public ushort? FrozenColumn
+    {
+        get => HasVersion18State ? BinaryPrimitives.ReadUInt16BigEndian(State.AsSpan(125)) : null;
+        set => BinaryPrimitives.WriteUInt16BigEndian(Version18State().AsSpan(125), value ?? 0);
+    }
+
+    /// <summary>
+    /// Gets or sets the gridline and heading colour (Excel 1.5, version-18 state offsets 127 and 128; spec §13), or
+    /// null for automatic. A 41-byte state is always automatic.
+    /// </summary>
+    public ExcelColor? GridlineColor
+    {
+        get => HasVersion18State && State[127] == 0 ? (ExcelColor)State[128] : null;
+        set
+        {
+            var state = Version18State();
+            state[127] = (byte)(value is null ? 1 : 0);
+            state[128] = (byte)(value ?? 0);
+        }
+    }
+
+    private byte[] Version18State()
+        => HasVersion18State ? State : throw new InvalidOperationException("Only a version-18 window state holds this setting.");
+
     /// <summary>
     /// Creates the window Excel 1.03 saves for a new sheet, with A1 selected.
     /// </summary>
@@ -154,4 +205,32 @@ public sealed class ExcelWindow
             writer.WriteByte(range.LastColumn);
         }
     }
+}
+
+/// <summary>The eight colours of Excel 1.5, in the order of <c>STR#</c> 263 (spec §7, §13).</summary>
+public enum ExcelColor
+{
+    /// <summary>Black.</summary>
+    Black = 0,
+
+    /// <summary>White.</summary>
+    White = 1,
+
+    /// <summary>Red.</summary>
+    Red = 2,
+
+    /// <summary>Green.</summary>
+    Green = 3,
+
+    /// <summary>Blue.</summary>
+    Blue = 4,
+
+    /// <summary>Yellow.</summary>
+    Yellow = 5,
+
+    /// <summary>Magenta.</summary>
+    Magenta = 6,
+
+    /// <summary>Cyan.</summary>
+    Cyan = 7,
 }

@@ -574,6 +574,12 @@ sealed class DumpCommand : Command<FileSettings>
                 new ExcelCellAddress(s.FirstRow, s.FirstColumn) + (s.FirstRow == s.LastRow && s.FirstColumn == s.LastColumn ? string.Empty : ":" + new ExcelCellAddress(s.LastRow, s.LastColumn)))));
             table.AddRow("Display", $"formulas {Program.YesNo(window.DisplayFormulas)}, gridlines {Program.YesNo(window.DisplayGridlines)}, headings {Program.YesNo(window.DisplayHeadings)}");
             table.AddRow("Splits", $"horizontal {window.HorizontalSplit}, vertical {window.VerticalSplit}");
+            if (window.HasVersion18State)
+            {
+                table.AddRow("Frozen panes", window.PanesFrozen ? $"yes, at {new ExcelCellAddress(window.FrozenRow!.Value, window.FrozenColumn!.Value)}" : "no");
+                table.AddRow("Gridline colour", window.GridlineColor?.ToString().ToLowerInvariant() ?? "automatic");
+            }
+
             table.AddRow("State bytes", Program.Hex(window.State));
             AnsiConsole.Write(table);
         }

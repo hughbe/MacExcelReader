@@ -180,6 +180,7 @@ Things to know:
 | Nov 2026 | 1.04 | CHANGE.LINK and a three-argument OPEN with `--excel 1.04 --recompile`, and a sheet with no new functions whose count was set to 209 | Import word 0x740A; function count from the formulas (209, 208); same tokens as the library (spec §2.1, §2.3, §5) |
 | Nov 2026 | 1.06 | The same two sheets as the 1.04 run | Same tokens, import word 0x740A and function counts as 1.04 (spec §2.1, §2.3) |
 | Nov 2026 | 1.5 | Library line charts with 102 and 103 points, opened and saved | Chart version 1 for more than 102 categories (spec §16.2) |
+| Nov 2026 | 1.5 | `SIMUL EQUATIONS` opened and saved by hand; FORMAT.NUMBER with a text section, a trailing comma and two plain sections | The released 1.5 saves `SIMUL EQUATIONS` as version 17; text sections and trailing-comma scaling make version 18 (spec §2.1, §7) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

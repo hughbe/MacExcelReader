@@ -402,10 +402,63 @@ public class ExperimentTests
     [InlineData("Colour Formats")]
     [InlineData("Gridline Colour")]
     [InlineData("Frozen Panes")]
+    [InlineData("Format Text Section")]
+    [InlineData("Format Scaling")]
     public void Excel15Features_SaveAsVersion18(string name)
     {
-        // Excel 1.5 saves version 18 for colour or @ number formats, gridline colours and frozen panes (spec §2.1).
+        // Excel 1.5 saves version 18 for colour or @ number formats, a text section, trailing-comma scaling,
+        // gridline colours and frozen panes (spec §2.1).
         Assert.Equal(ExcelDocument.Excel15FormatVersion, Load(name).Version);
+    }
+
+    [Theory]
+    [InlineData("Format Two Sections")]
+    [InlineData("SIMUL EQUATIONS Saved")]
+    public void Excel15_SavesVersion17WhenNothingNeedsIt(string name)
+    {
+        // FORMAT.NUMBER("0.0;-0.0"), and Microsoft's version-18 SIMUL EQUATIONS opened and saved in the released
+        // Excel 1.5: neither has anything only Excel 1.5 reads, so both save as version 17 (spec §2.1).
+        var document = Load(name);
+        Assert.Equal(17, document.Version);
+        Assert.Equal(ExcelWindow.StateSize, document.Windows[0].State.Length);
+    }
+
+    [Fact]
+    public void Excel15_TextSectionFollowsTheOtherThree()
+    {
+        // FORMAT.NUMBER("0;-0;0;""t"""): the fourth section is the quoted string, 09 01 "t" (spec §7).
+        var format = Assert.Single(Load("Format Text Section").NumberFormats);
+        Assert.Equal(0x14, format.Descriptor[3]);
+        Assert.Equal(3, format.Descriptor[7]);
+        Assert.Equal([0x09, 0x01, (byte)'t'], format.Body[0x14..]);
+    }
+
+    [Fact]
+    public void Excel15_TrailingCommaScalesByAThousand()
+    {
+        // FORMAT.NUMBER("#,##0,"): the header's third byte is c = b - 3 for the one trailing comma (spec §7).
+        var format = Assert.Single(Load("Format Scaling").NumberFormats);
+        Assert.Equal([0x03, 0x04, 0x00, 0xFD], format.Body[..4]);
+    }
+
+    [Fact]
+    public void Excel15_FrozenPanesStoreTheSplitCell()
+    {
+        // SPLIT(1,2) then FREEZE.PANES(TRUE): frozen, with the split at row 2 and column 1, counting from 0 (spec §13).
+        var window = Load("Frozen Panes").Windows[0];
+        Assert.True(window.PanesFrozen);
+        Assert.Equal((ushort)2, window.FrozenRow);
+        Assert.Equal((ushort)1, window.FrozenColumn);
+        Assert.Null(window.GridlineColor);
+    }
+
+    [Fact]
+    public void Excel15_GridlineColour()
+    {
+        // DISPLAY(FALSE,TRUE,TRUE,TRUE,3): red (spec §13).
+        var window = Load("Gridline Colour").Windows[0];
+        Assert.Equal(ExcelColor.Red, window.GridlineColor);
+        Assert.False(window.PanesFrozen);
     }
 
     [Fact]

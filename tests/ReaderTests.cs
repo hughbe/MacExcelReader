@@ -306,4 +306,16 @@ public class ReaderTests
         var document = ExcelDocument.Read(File.ReadAllBytes(SampleFile(sample)));
         Assert.All(document.ExternalDocuments, external => Assert.All(external.Reserved, b => Assert.Equal(0, b)));
     }
+
+    [Theory]
+    [MemberData(nameof(Sheets))]
+    public void Version18Windows_HaveNoPendingRedraws(string sample)
+    {
+        // State offsets 41–120 are Excel 1.5's marks for rows waiting to be redrawn, cleared once they are (spec §13).
+        var document = ExcelDocument.Read(File.ReadAllBytes(SampleFile(sample)));
+        foreach (var window in document.Windows.Where(w => w.HasVersion18State))
+        {
+            Assert.All(window.State[41..121], b => Assert.Equal(0, b));
+        }
+    }
 }

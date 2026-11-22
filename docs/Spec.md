@@ -18,7 +18,7 @@ charts. It was reverse-engineered from the applications' code and checked agains
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 55 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 59 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
@@ -136,17 +136,28 @@ from memory (above), except in the cell table, where the writer replaces them wi
 | 1.03 | 17 | 0–207 | Writes a zero-length name for an external entry that refers to the document itself (§8), and makes its in-memory external entries 16 bytes (§8). Function table and tokens identical to 1.01's. |
 | 1.04 | 17 | 0–208 | Adds CHANGE.LINK (208, a command with up to two text arguments, carried out by `44.00` in 1.04) and a third argument to OPEN, matching the Read Only box its Open dialog gains (Appendix A). Its Save writes the function count as one more than the highest function number a formula uses (§5): 209 for a sheet calling CHANGE.LINK, and 208 for one that calls nothing newer even when the file it opened said 209 (`Changes 1.04`, `No New Functions 1.04` samples). It keeps a document's file reference between saves and flushes the volume after saving (`44.0c`, `44.0d` in 1.04), which does not change the bytes written. Embedded code identical to 1.03's apart from the import word (§2.3). Compiler and tokens identical to 1.03's. |
 | 1.06 (December 1987) | 17 | 0–208 | Writes the same files as 1.04, with byte-identical embedded code, so its files cannot be told from 1.04's (§2.3); compiler, function table and tokens unchanged (`Changes 1.06` and `No New Functions 1.06` samples). Its other changes are inside the application: a `SIZE` resource for MultiFinder, one routine (`01.1a` in 1.06) for all its checks for pending events, and no longer reserving master pointers around Open (1.04's `15.2b`, `15.2c`). |
-| 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of eleven more functions (Appendix A; OPEN's had changed in 1.04) and the token class of function calls inside IF and CHOOSE (§15.4). Marks charts with more than 102 categories as chart version 1, which earlier releases refuse (§16.2). Adds frozen panes and gridline colours to windows (§13) and text sections, `@` and colours to number formats (§7). |
+| 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of eleven more functions (Appendix A; OPEN's had changed in 1.04) and the token class of function calls inside IF and CHOOSE (§15.4). Marks charts with more than 102 categories as chart version 1, which earlier releases refuse (§16.2). Adds frozen panes and gridline colours to windows (§13) and text sections, scaling by trailing commas, `@` and colours to number formats (§7). |
 
 The format version is header word 2 (§4). Excel 1.00's Open accepts only version 17 (`46.06`), and so do
 1.01's (`46.07`), 1.03's, 1.04's and 1.06's (`44.0e` in 1.04 and 1.06). Excel 1.5 writes 17 unless the
 document needs something only it can read, then 18 and the warning "This file will only be readable by Excel
-1.5 or greater" (`47.0d`). Its Save switches to 18 when a window has frozen panes or a gridline and heading
-colour other than automatic (state bytes 121 and 127, §13), or when the number-format check (`47.10` in 1.5)
-flags a format. That check decompiles each format and watches a flag the format decompiler sets (`0d.19`,
-`0d.1a`); a format using `@` or a colour sets it (§7). `SIMUL EQUATIONS`, the one version-18 file among
-Microsoft's samples, has neither window setting and no `@` or colour, so the check flags something else as
-well **(unknown)**.
+1.5 or greater" (`47.0d`). Save starts at 17 and switches to 18 when one of the document's windows has frozen
+panes or a gridline and heading colour other than automatic (state bytes 121 and 127, §13), or when the
+number-format check (`47.10` in 1.5) flags a user-defined format. The check turns each format back into text
+(`0d.19`, with `0d.1a` for each section), and the decompiler raises a flag when the format has any of:
+
+| Feature | Example | Where the flag is set |
+|---------|---------|-----------------------|
+| A text section that is not General and is not the positive section's bytes | `0;-0;0;"t"` | `0d.19` |
+| A trailing thousands separator, which scales the number by 1000 (number header `c` below `b`, §7) | `#,##0,` | `0d.1a`, token `03` |
+| `@` (token `23`) | `@` | `0d.1a` |
+| A colour (token `24`) | `[RED]0.00` | `0d.1a` |
+
+A format using only what earlier releases read saves as 17 (`Format Two Sections`). `SIMUL EQUATIONS`, the one
+version-18 file among Microsoft's samples, has none of these: the released 1.5 opens it and saves it as version
+17 without the warning (`SIMUL EQUATIONS Saved`). Its embedded code is the released build's (§2.3), so it was
+saved by a build with the same segment 1 but a different version rule, or in a state its file does not keep
+**(inferred)**.
 
 A version-17 document can also need a later release without changing its version, because it uses a function
 the reader lacks. The function count at the start of the data area (§5) records that, and Excel 1.5 warns
@@ -425,8 +436,9 @@ one for positive numbers, in that order; version-18 files add a fourth, for text
 
 Sections can share bytes: `$#,##0 ;($#,##0)` (built-in 5) has offsets `0C 00 00` and lengths `0E 0C 0C`, so
 zero and positive both use the 12 bytes at offset 0 and negative the 14 at offset 12. A section of length 0
-displays nothing (`INVOICE LIST`: `$#,##0.00 ;($#,##0.00);` hides zeros). The text section of every version-18
-sample is just `01` (General). Excel 1.5 writes the 3-slot form to version-17 files (`47.11`).
+displays nothing (`INVOICE LIST`: `$#,##0.00 ;($#,##0.00);` hides zeros). A format given without a text section
+gets `01` (General) there, as in Microsoft's version-18 sample; `0;-0;0;"t"` stores `09 01 74` (`Format Text
+Section`). Excel 1.5 writes the 3-slot form to version-17 files (`47.11`).
 
 Built-in formats are not stored in documents; they live in the application's `FRMT` 256 resource in the same
 descriptor-plus-body form. Total formats are capped at 64. The 19 built-ins, by index, in Excel 1.00. A file
@@ -459,7 +471,7 @@ international character table at run time, so the ones shown are the US defaults
 |------:|----------|---------------|
 | `01` | | `General` |
 | `02` | 1 byte `c` | Literal character `c`. A backslash is written before it unless it is one of the characters that may appear unescaped. |
-| `03` | 3 bytes `a b c` | Starts a number section; produces no text. `a` = number of integer digit positions (drives thousands-separator placement), `b` = decimal places, `(c − b) / 2` = number of percent signs. |
+| `03` | 3 bytes `a b c` | Starts a number section; produces no text. `a` = number of integer digit positions (drives thousands-separator placement), `b` = decimal places, `c` a signed byte: `(c − b) / 2` = number of percent signs. Excel 1.5: when `c` is below `b`, `(b − c) / 3` is the number of trailing thousands separators, each dividing the number by 1000 (`#,##0,` is `03 04 00 FD`, `Format Scaling`). |
 | `1C` | 3 bytes | Same, for a scientific section |
 | `04` | 1 byte `n` | `n` × `#` |
 | `06` | 1 byte `n` | `n` × `0` |
@@ -478,10 +490,16 @@ international character table at run time, so the ones shown are the US defaults
 | `1D`, `1E` | 1 byte | Exponent sign `+` / `-`; the byte is the exponent digit count |
 | `21` | 2 bytes `n1 n2`, `n1` chars, `n2` chars | AM/PM designator, written as the two strings joined by `/` (`AM/PM`, `A/P`) |
 | `22` | | Currency symbol |
-| `23` | | Excel 1.5: `@`, the text placeholder **(inferred: the character comes from a locale table filled in at run time)** |
+| `23` | | Excel 1.5: `@`, the text placeholder. The character is the 28th of the format-character string (below). |
 | `24` | 1 byte `n` | Excel 1.5: a colour, written `[name]` with the name `n` from `STR#` 263 (`black`, `white`, `red`, `green`, `blue`, `yellow`, `magenta`, `cyan`, from 0). For example, `[RED]0.00` holds `24 02`, and `[BLUE]#,##0;[RED]-#,##0` holds `24 04` and `24 02`. |
 
-A format that uses `23` or `24` makes Excel 1.5 save the file as version 18 (§2.1).
+A format that uses `23` or `24`, a text section or trailing-comma scaling makes Excel 1.5 save the file as
+version 18 (§2.1).
+
+Excel 1.5 reads its format characters from `STR` 479, `;#0.%,:/ -+().\*ymdhmsE/"[]@`, at startup (`01.0b`
+loads it, or the identical `STR` 480 when called with 1). It then replaces the decimal point (character 4),
+thousands separator (6), time separator (7) and date separator (8) with those of `INTL` 0. The decompiler takes
+`;` from character 1, the fill `*` from 16, the brackets of a colour from 26 and 27, and `@` from 28.
 
 So `#,##0` is `03 04 00 00 | 07 | 04 03 | 06 01`: header, thousands on, `###`, `0`. Literals and strings sit
 wherever they print: `0.0" S"` is `03 01 01 01 | 06 01 | 05 | 06 01 | 09 02 " S"`, and `### ##0.00` uses `02
@@ -878,18 +896,21 @@ Check against `Worksheet1`: offset 0 is 3 and offset 35 is 4, and its single sel
 Every sample has exactly one window.
 
 **Version 18.** Excel 1.5's window record is longer, and version-18 files save 88 more bytes of it after the
-41, giving a 129-byte state. Three of the new bytes are identified, by state offset (window-record offset −
-183):
+41, giving a 129-byte state. By state offset (window-record offset − 183):
 
 | Offset | Size | New window | Meaning |
 |-------:|-----:|-----------|---------|
+| 41 | 80 bytes | 0 | **Rows waiting to be redrawn**, one byte per row on screen. Excel 1.5 marks a row in every window of the document that shows it (`22.02`, native code); `22.03` redraws the marked rows and clears the marks, and scrolling shifts the bytes with the rows (`18.01`). They are 0 in every sample. |
 | 121 | byte | 0 | **Panes frozen.** FREEZE.PANES toggles it; SPLIT does nothing while it is set (FREEZE.PANES is `0f.3e` and SPLIT `0f.47` in 1.5). |
+| 122 | byte | | Not used: never written, so left over from memory |
+| 123 | word | | **Row of the frozen split**: the first row of the lower panes, counting from 0. FREEZE.PANES stores it (`0f.40`), and while the panes are frozen scrolling stops there (`18.01`). Left over from memory until the window's panes are first frozen. |
+| 125 | word | | **Column of the frozen split**: the first column of the right panes, counting from 0, stored and used the same way |
 | 127 | byte | 1 | **Gridline and heading colour is automatic** (the DISPLAY dialog, `0d.20` in 1.5, shows "automatic" when it is set) |
 | 128 | byte | 0 | Gridline and heading colour, used when offset 127 is 0: 0–7 in the order of `STR#` 263 (§7). DISPLAY's colour argument counts from 1: `DISPLAY(FALSE,TRUE,TRUE,TRUE,3)` saves 2, red. |
 
-The rest are **(unknown)**; they are zero in `SIMUL EQUATIONS`. A window with panes frozen (121) or a colour
-that is not automatic (127 = 0) makes Excel 1.5 save version 18 (§2.1), since a version-17 file cannot hold
-either.
+`SPLIT(1,2)` then `FREEZE.PANES(TRUE)` saves 1, 2 and 1 at offsets 121, 123 and 125 (`Frozen Panes`). A window
+with panes frozen (121) or a colour that is not automatic (127 = 0) makes Excel 1.5 save version 18 (§2.1),
+since a version-17 file cannot hold either.
 
 ---
 
@@ -1980,10 +2001,7 @@ recalculate the sheet when it opens it (§6; five 1.00 samples and seven 1.5 sam
 
 None of these affects reading the samples or writing valid files.
 
-* Most of the 88 extra window-state bytes of version 18 (§13), and what else in a number format makes Excel
-  1.5 save version 18 (§2.1).
-
-* Where Excel 1.5's `@` format character comes from (§7).
+* Which build saved Microsoft's version-18 `SIMUL EQUATIONS`, and why it chose version 18 (§2.1).
 
 ---
 
