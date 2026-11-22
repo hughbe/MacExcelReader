@@ -275,4 +275,47 @@ public class ReaderTests
 
         return -1;
     }
+
+    [Fact]
+    public void Table_ReadsItsInputCells()
+    {
+        // Made by Excel 1.03's TABLE(Y7,X5) on A1:C3: the table's cells are B2:C3.
+        var document = Load("Table");
+        var anchor = document.Cells["B2"].Formula!;
+        Assert.True(anchor.IsTable);
+        Assert.Equal((ExcelCellAddress.Parse("Y7"), ExcelCellAddress.Parse("X5")), anchor.TableInputs);
+        Assert.Equal("{=TABLE($Y$7,$X$5)}", anchor.ToText(document));
+        Assert.Equal("{=TABLE($Y$7,$X$5)}", document.Cells["C3"].Formula!.ToText(document));
+    }
+
+    [Fact]
+    public void ChartSize_IsTheWindowContentInTwips()
+    {
+        var chart = MacExcelReader.Charts.ChartDocument.Load(SamplePath("CLOCK.CH"));
+        Assert.Equal(5580, chart.ChartWidth);   // 279 pixels: the 295-pixel window less 16
+        Assert.Equal(4540, chart.ChartHeight);
+    }
+
+    public static TheoryData<string> Sheets => AllSheets();
+
+    [Theory]
+    [MemberData(nameof(Sheets))]
+    public void ExternalDocuments_HaveZeroInTheirUnusedBytes(string sample)
+    {
+        // Excel 1.00 clears the first six bytes of an external-document entry and never uses them (spec §8).
+        var document = ExcelDocument.Read(File.ReadAllBytes(SampleFile(sample)));
+        Assert.All(document.ExternalDocuments, external => Assert.All(external.Reserved, b => Assert.Equal(0, b)));
+    }
+
+    [Theory]
+    [MemberData(nameof(Sheets))]
+    public void Version18Windows_HaveNoPendingRedraws(string sample)
+    {
+        // State offsets 41–120 are Excel 1.5's marks for rows waiting to be redrawn, cleared once they are (spec §13).
+        var document = ExcelDocument.Read(File.ReadAllBytes(SampleFile(sample)));
+        foreach (var window in document.Windows.Where(w => w.HasVersion18State))
+        {
+            Assert.All(window.State[41..121], b => Assert.Equal(0, b));
+        }
+    }
 }

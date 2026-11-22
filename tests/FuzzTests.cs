@@ -40,7 +40,7 @@ public class FuzzTests
     {
         var chart = ChartDocument.Create(ChartType.ColumnOrBar);
         chart.MainChart.Texts.Add(ChartText.Create(ChartTextKind.ChartTitle, "Title"));
-        chart.Series.Add(ChartSeries.Create([1, 2, 3], "S", "=R1C1:R1C3"));
+        chart.Series.Add(ChartSeries.Create("S", [1, 2, 3], "Data", "R1C1:R1C3"));
         var original = chart.ToArray();
         var random = new Random(1234);
         for (int iteration = 0; iteration < 400; iteration++)
@@ -68,6 +68,23 @@ public class FuzzTests
 
     private static void Exercise(byte[] bytes)
     {
+        // Workspace ("Resume Excel") files start with a zero word.
+        if (bytes.Length > 1 && bytes[0] == 0 && bytes[1] == 0)
+        {
+            try
+            {
+                _ = ExcelWorkspace.Read(bytes).ToArray();
+            }
+            catch (ExcelFormatException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
+            return;
+        }
+
         if (bytes.Length > 0 && bytes[0] == 0x01)
         {
             try

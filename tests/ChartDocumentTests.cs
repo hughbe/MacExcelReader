@@ -1,4 +1,5 @@
 using MacExcelReader.Charts;
+using static MacExcelReader.Tests.TestData;
 
 namespace MacExcelReader.Tests;
 
@@ -63,21 +64,21 @@ public class ChartDocumentTests
         chart.CategoriesBetweenTickLabels = 3;
         var axis = chart.CategoryAxis;
         axis.MinorTickMarks = TickMarkType.Cross;
-        axis.MajorGridlinePattern = 4;
-        axis.MinorGridlinePattern = 2;
+        axis.MajorGridlines.Pattern = ChartPattern.LightGray;
+        axis.MinorGridlines.Pattern = ChartPattern.DarkGray;
         var scale = chart.ValueScale;
         scale.Minimum = -10;
         scale.Maximum = 20;
         scale.MajorUnit = 5;
         scale.MinorUnit = 1;
         scale.CrossesAt = 2;
-        scale.AutoMinimum = false;
-        scale.AutoMaximum = false;
-        scale.AutoMajorUnit = false;
-        scale.AutoMinorUnit = false;
-        scale.AutoCrossesAt = false;
-        scale.Logarithmic = true;
-        scale.ReverseOrder = true;
+        scale.AutomaticMinimum = false;
+        scale.AutomaticMaximum = false;
+        scale.AutomaticMajorUnit = false;
+        scale.AutomaticMinorUnit = false;
+        scale.AutomaticCrossesAt = false;
+        scale.IsLogarithmic = true;
+        scale.ValuesInReverseOrder = true;
 
         var reread = ChartDocument.Read(document.ToArray()).MainChart;
         Assert.True(reread.IsBar && reread.IsStacked && reread.IsPercent);
@@ -92,14 +93,14 @@ public class ChartDocumentTests
         Assert.True(reread.CategoriesInReverseOrder);
         Assert.Equal(3, reread.CategoriesBetweenTickLabels);
         Assert.Equal(TickMarkType.Cross, reread.CategoryAxis.MinorTickMarks);
-        Assert.Equal(4, reread.CategoryAxis.MajorGridlinePattern);
-        Assert.Equal(2, reread.CategoryAxis.MinorGridlinePattern);
+        Assert.Equal(ChartPattern.LightGray, reread.CategoryAxis.MajorGridlines.Pattern);
+        Assert.Equal(ChartPattern.DarkGray, reread.CategoryAxis.MinorGridlines.Pattern);
         Assert.Equal(-10, reread.ValueScale.Minimum);
         Assert.Equal(20, reread.ValueScale.Maximum);
         Assert.Equal(5, reread.ValueScale.MajorUnit);
         Assert.Equal(1, reread.ValueScale.MinorUnit);
         Assert.Equal(2, reread.ValueScale.CrossesAt);
-        Assert.True(reread.ValueScale.Logarithmic && reread.ValueScale.ReverseOrder);
+        Assert.True(reread.ValueScale.IsLogarithmic && reread.ValueScale.ValuesInReverseOrder);
         Assert.Equal(4, reread.CategoryAxis.Font.Length);
     }
 
@@ -111,8 +112,8 @@ public class ChartDocumentTests
         text.SeriesNumber = 2;
         text.PointNumber = 255;
         text.IsVertical = true;
-        text.HorizontalAlignment = 2;
-        text.VerticalAlignment = 1;
+        text.HorizontalAlignment = ChartHorizontalAlignment.Right;
+        text.VerticalAlignment = ChartVerticalAlignment.Center;
         text.ShowKey = true;
         text.ShowValue = true;
         document.MainChart.Texts.Add(text);
@@ -122,8 +123,8 @@ public class ChartDocumentTests
         Assert.Equal(2, reread.SeriesNumber);
         Assert.Equal(255, reread.PointNumber);
         Assert.True(reread.IsVertical);
-        Assert.Equal(2, reread.HorizontalAlignment);
-        Assert.Equal(1, reread.VerticalAlignment);
+        Assert.Equal(ChartHorizontalAlignment.Right, reread.HorizontalAlignment);
+        Assert.Equal(ChartVerticalAlignment.Center, reread.VerticalAlignment);
         Assert.True(reread.ShowKey && reread.ShowValue);
         Assert.Equal("DataLabel: Sales", reread.ToString());
         Assert.Throws<ArgumentException>(() => new ChartText(new byte[45]));
@@ -139,7 +140,7 @@ public class ChartDocumentTests
         document.MainChart.SeriesWords.AddRange([10, 20]);
         document.MainChart.PointFormats.Add(new byte[12]);
 
-        var textSeries = ChartSeries.Create([], "Categories", "=R1C1:R1C2");
+        var textSeries = ChartSeries.Create("Categories", [], "Data", "R2C1:R2C2", "R1C1:R1C2");
         textSeries.SeriesType = 3;
         textSeries.FirstTexts.AddRange(["One", "Two"]);
         textSeries.SecondValues.AddRange([MicrosoftDecimal.FromDouble(3), MicrosoftDecimal.FromDouble(4)]);
@@ -165,11 +166,12 @@ public class ChartDocumentTests
     }
 
     [Fact]
-    public void ChartDocument_RejectsUnsupportedVersionsAndChartCounts()
+    public void ChartDocument_ReadsVersion1AndRejectsBadChartCounts()
     {
+        // Version 1 is Excel 1.5's mark for a chart with more than 102 categories, laid out as version 12.
         var versionOne = ChartDocument.Create(ChartType.Line).ToArray();
         versionOne[3] = 1;
-        Assert.Throws<ExcelFormatException>(() => ChartDocument.Read(versionOne));
+        Assert.Equal(1, ChartDocument.Read(versionOne).Version);
 
         var noCharts = ChartDocument.Create(ChartType.Line);
         noCharts.Charts.Clear();
@@ -227,7 +229,7 @@ public class ChartDocumentTests
         var chart = document.MainChart;
         chart.IsStacked = true;
         chart.LegendPosition = LegendPosition.Vertical;
-        chart.ValueScale.AutoMaximum = false;
+        chart.ValueScale.AutomaticMaximum = false;
         chart.ValueScale.Maximum = 250;
         chart.Texts.Add(ChartText.Create(ChartTextKind.ChartTitle, "Sales"));
         var label = ChartText.Create(ChartTextKind.DataLabel, string.Empty);
@@ -235,10 +237,10 @@ public class ChartDocumentTests
         label.Text = null;
         chart.Texts.Add(label);
 
-        var first = ChartSeries.Create([1, 2.5, 4], "Q1", "=R1C1:R1C3");
+        var first = ChartSeries.Create("Q1", [1, 2.5, 4], "Data", "R1C1:R1C3");
         first.InFirstList = true;
         document.Series.Add(first);
-        document.Series.Add(ChartSeries.Create([10, 20], "Q2", "=R2C1:R2C2"));
+        document.Series.Add(ChartSeries.Create("Q2", [10, 20], "Data", "R2C1:R2C2"));
 
         var bytes = document.ToArray();
         var reread = ChartDocument.Read(bytes);
@@ -252,7 +254,8 @@ public class ChartDocumentTests
         Assert.Equal(2, reread.Series.Count);
         Assert.Equal([1, 2.5, 4], reread.Series[0].SecondValues.Select(v => v.ToDouble()));
         Assert.Equal("Q2", reread.Series[1].Name);
-        Assert.Equal("=R2C1:R2C2", reread.Series[1].FirstReference);
+        Assert.Equal("R2C1:R2C2", reread.Series[1].SecondReference);
+        Assert.Equal("Data", reread.Series[1].SourceDocument);
         Assert.Equal(bytes, reread.ToArray());
     }
 
@@ -262,12 +265,34 @@ public class ChartDocumentTests
         var bytes = ChartDocument.Create(ChartType.Scatter).ToArray();
         var reread = ChartDocument.Read(bytes);
         Assert.NotNull(reread.MainChart.XScale);
-        Assert.True(reread.MainChart.XScale!.AutoMinimum);
+        Assert.True(reread.MainChart.XScale!.AutomaticMinimum);
     }
 
     [Fact]
     public void Read_WorksheetBytes_Throws()
     {
         Assert.Throws<ExcelFormatException>(() => ChartDocument.Read(new byte[200]));
+    }
+
+    public static TheoryData<string> Charts => AllCharts();
+
+    [Theory]
+    [MemberData(nameof(Charts))]
+    public void PointFormats_LeaveTheUnusedBytesAtZero(string sample)
+    {
+        // Excel 1.00 clears a point format when it makes one and never touches bytes 0 and 5 or bits 14 and 8-0 of
+        // word 8 (spec §16.8).
+        var document = ChartDocument.Read(File.ReadAllBytes(SampleFile(sample)));
+        foreach (var chart in document.Charts)
+        {
+            var formats = chart.PointFormats.Append(chart.Record[366..378]);
+            Assert.All(formats, format =>
+            {
+                Assert.Equal(0, format[0]);
+                Assert.Equal(0, format[5]);
+                Assert.Equal(0, format[8] & 0x41);
+                Assert.Equal(0, format[9]);
+            });
+        }
     }
 }

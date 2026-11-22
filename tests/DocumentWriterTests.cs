@@ -89,7 +89,7 @@ public class DocumentWriterTests
     public void Names_CommandMacrosAndDefinitionsRoundTrip()
     {
         var document = ExcelDocument.CreateMacroSheet();
-        document.Names.Add(new ExcelDefinedName("Go", [0x2C, 0x00, 0x04, 0x01], ExcelDefinedName.CommandFlag | ExcelDefinedName.ReferenceFlag)
+        document.Names.Add(new ExcelDefinedName("Go", [0x2C, 0x00, 0x04, 0x01], ExcelDefinedName.MacroFlag | ExcelDefinedName.ReferenceFlag)
         {
             ShortcutKey = (byte)'g',
         });
@@ -187,7 +187,7 @@ public class DocumentWriterTests
         var document = ExcelDocument.CreateWorksheet();
         var state = document.State;
         state.MaxIterations = 7;
-        state.CalculationMode = -1;
+        state.CalculationMode = ExcelCalculationMode.AutomaticExceptTables;
         state.FullPrecision = false;
         state.Iteration = true;
         state.MaxChange = 0.5;
@@ -198,7 +198,7 @@ public class DocumentWriterTests
 
         var reread = RoundTrip(document).State;
         Assert.Equal(7, reread.MaxIterations);
-        Assert.Equal(-1, reread.CalculationMode);
+        Assert.Equal(ExcelCalculationMode.AutomaticExceptTables, reread.CalculationMode);
         Assert.False(reread.FullPrecision);
         Assert.True(reread.Iteration);
         Assert.Equal(0.5, reread.MaxChange);
@@ -358,6 +358,48 @@ public class DocumentWriterTests
                 Assert.Equal(cell.TextValue, other.TextValue);
             }
         }
+    }
+
+    [Fact]
+    public void Excel100FunctionNames_AreReadFromSection7AndWrittenBack()
+    {
+        // A file without an extra header names its functions numbered 208 and up at the start of section 7 (spec §14).
+        var document = ExcelDocument.CreateWorksheet();
+        document.ExtraHeader = [];
+        document.FunctionCount = 210;
+        document.ExtraFunctionNames.AddRange(["FIRST.EXTRA", "SECOND.EXTRA"]);
+        document.RowPageBreaks.Add(5);
+        document.Cells[0, 0].SetText("x");
+
+        var bytes = document.ToArray();
+        var reread = ExcelDocument.Read(bytes);
+        Assert.Equal(["FIRST.EXTRA", "SECOND.EXTRA"], reread.ExtraFunctionNames);
+        Assert.Equal([(ushort)5], reread.RowPageBreaks);
+        Assert.Equal(bytes, reread.ToArray());
+
+        // With an extra header (Excel 1.03 and later) a larger function count carries no names.
+        var later = ExcelDocument.CreateWorksheet();
+        later.FunctionCount = 239;
+        later.RowPageBreaks.Add(5);
+        var rereadLater = ExcelDocument.Read(later.ToArray());
+        Assert.Empty(rereadLater.ExtraFunctionNames);
+        Assert.Equal([(ushort)5], rereadLater.RowPageBreaks);
+    }
+
+    [Fact]
+    public void ExtraFunctionNames_MustMatchTheCountAndHeader()
+    {
+        // Open reads one name per function past 208 only when there is no extra header (spec §14), so any other
+        // combination would be misread.
+        var missing = ExcelDocument.CreateWorksheet();
+        missing.ExtraHeader = [];
+        missing.FunctionCount = 209;
+        Assert.Throws<InvalidOperationException>(() => missing.ToArray());
+
+        var withHeader = ExcelDocument.CreateWorksheet();
+        withHeader.FunctionCount = 209;
+        withHeader.ExtraFunctionNames.Add("EXTRA");
+        Assert.Throws<InvalidOperationException>(() => withHeader.ToArray());
     }
 
     [Fact]

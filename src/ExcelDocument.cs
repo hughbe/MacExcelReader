@@ -56,6 +56,15 @@ public sealed class ExcelDocument
     /// <summary>Gets or sets the function count of the writing build (208 for Excel 1.x).</summary>
     public ushort FunctionCount { get; set; } = (ushort)ExcelFunctions.Count;
 
+    /// <summary>
+    /// Gets the names of the functions numbered from 208 up to <see cref="FunctionCount"/>, which a file without an
+    /// extra header carries at the start of section 7 when its count is above 208 (spec §14), so that Open can
+    /// check they mean the same functions. Excel 1.00's code supports the list for a build whose function table
+    /// is longer than its start-up count, but released 1.00 has 208 of each: it never writes a name and refuses
+    /// any file whose count is above 208. Excel 1.01 and later dropped the list, so no known file has one.
+    /// </summary>
+    public List<string> ExtraFunctionNames { get; } = [];
+
     /// <summary>Gets the sheet state block.</summary>
     public ExcelSheetState State { get; }
 
@@ -272,7 +281,16 @@ public sealed class ExcelDocument
 
         document.ReadNames(new BigEndianReader(data, sections[4]));
         document.ReadWindows(new BigEndianReader(data, sections[6]));
-        document.ReadPrintSettings(new BigEndianReader(data, sections[7]));
+        var printSettings = new BigEndianReader(data, sections[7]);
+        if (document.ExtraHeader.Length == 0)
+        {
+            for (int i = ExcelFunctions.Count; i < document.FunctionCount; i++)
+            {
+                document.ExtraFunctionNames.Add(printSettings.ReadPascalString());
+            }
+        }
+
+        document.ReadPrintSettings(printSettings);
         return document;
     }
 
@@ -477,6 +495,9 @@ public sealed class ExcelDocument
         }
 
         State.SetExtent(rows, columns);
+        State.SetNameCounts(
+            Names.Count(n => n.Definition.Length > 0 && (n.Flags & ExcelDefinedName.ReferenceFlag) != 0),
+            ExternalDocuments.FindIndex(d => d.Name == "\0") + 1);
         while (RowIndex.Count < rows)
         {
             RowIndex.Add(0);
@@ -508,6 +529,7 @@ public sealed class ExcelDocument
             writer.WriteBytes(segment);
         }
 
+        ValidateExtraFunctionNames();
         writer.WriteUInt16(FunctionCount);
         writer.WriteBytes(State.RawData);
         writer.WriteByte((byte)Kind);
@@ -621,8 +643,13 @@ public sealed class ExcelDocument
 
         writer.WriteByte(0);
 
-        // Section 7: page breaks and print setup.
+        // Section 7: Excel 1.00's list of extra function names, then page breaks and print setup.
         sections[7] = writer.Position;
+        foreach (string name in ExtraFunctionNames)
+        {
+            writer.WritePascalString(name);
+        }
+
         WriteChunks(writer, ColumnPageBreaks, (w, b) => w.WriteByte(b));
         WriteChunks(writer, RowPageBreaks, (w, v) => w.WriteUInt16(v));
         if (PrintSetup is null)
@@ -640,7 +667,16 @@ public sealed class ExcelDocument
 
         for (int i = 0; i < sections.Length; i++)
         {
-            writer.PatchUInt32(sectionTable + 4 * i, (uint)(((sections[i] / 512) << 16) | (sections[i] % 512)));
+            // Excel's 512-byte buffer is written out only when the next byte arrives, so a position on a block
+            // boundary is the end of the full block before it: (block - 1, 512) (spec §1.2).
+            int block = sections[i] / 512, offset = sections[i] % 512;
+            if (offset == 0 && block > 0)
+            {
+                block--;
+                offset = 512;
+            }
+
+            writer.PatchUInt32(sectionTable + 4 * i, (uint)((block << 16) | offset));
         }
 
         return writer.ToArray();
@@ -740,5 +776,17 @@ public sealed class ExcelDocument
         }
 
         writer.WriteByte(0);
+    }
+
+    private void ValidateExtraFunctionNames()
+    {
+        // Open reads one name per function from 208 up to the count, but only when there is no extra header (spec §14).
+        int expected = ExtraHeader.Length == 0 ? Math.Max(0, FunctionCount - ExcelFunctions.Count) : 0;
+        if (ExtraFunctionNames.Count != expected)
+        {
+            throw new InvalidOperationException(ExtraHeader.Length == 0
+                ? $"A file without an extra header needs one extra function name per function from {ExcelFunctions.Count} up to the function count ({expected}), not {ExtraFunctionNames.Count}. To save a document using later functions in the form Excel 1.01 and later read, set ExtraHeader to [0]."
+                : "Only a file without an extra header can hold extra function names.");
+        }
     }
 }

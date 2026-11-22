@@ -32,6 +32,9 @@ public sealed class Program
             config.AddCommand<SheetCommand>("sheet")
                 .WithDescription("Build sheets from a formula list, for testing formulas in Excel.")
                 .WithExample("sheet", "tests/Data/formulas-1.0.txt", "Formulas", "--split", "100");
+            config.AddCommand<NewChartCommand>("newchart")
+                .WithDescription("Build a chart file with the library, for testing charts in Excel")
+                .WithExample("newchart", "Line", "out/Chart", "--series", "1,2,3", "--series", "3,1,2", "--title", "Sales");
             config.AddBranch("excel-test", branch =>
             {
                 branch.SetDescription("Test files in a real Excel under an emulator (see docs/Testing.md).");
@@ -51,6 +54,9 @@ public sealed class Program
                 .WithDescription("Dump the whole file: header, settings, names, windows, print setup and cells.");
             config.AddCommand<ChartCommand>("chart")
                 .WithDescription("Dump a chart (MCBN) file.");
+            config.AddCommand<WorkspaceCommand>("workspace")
+                .WithDescription("Show a workspace (\"Resume Excel\", type XLIN) file: settings and the windows it reopens.")
+                .WithExample("workspace", "Resume Excel");
             config.AddCommand<LayoutCommand>("layout")
                 .WithDescription("Show where each part of the file lies: header, code segments and sections.")
                 .WithExample("layout", "Expenses");
@@ -70,6 +76,14 @@ public sealed class Program
     }
 
     internal static string Escape(string? text) => Markup.Escape(text ?? string.Empty);
+
+    internal static string CalculationModeText(ExcelCalculationMode mode) => mode switch
+    {
+        ExcelCalculationMode.Automatic => "automatic",
+        ExcelCalculationMode.AutomaticExceptTables => "automatic except tables",
+        ExcelCalculationMode.Manual => "manual",
+        _ => ((short)mode).ToString(CultureInfo.InvariantCulture),
+    };
 
     internal static string Hex(ReadOnlySpan<byte> bytes) => bytes.IsEmpty ? "(none)" : Convert.ToHexString(bytes);
 
@@ -505,17 +519,27 @@ sealed class DumpCommand : Command<FileSettings>
         header.AddRow("Code segments", string.Join(", ", document.CodeSegments.Select(s => $"{s.Length} bytes")));
         header.AddRow("Function count", document.FunctionCount.ToString(CultureInfo.InvariantCulture));
         header.AddRow("Extra header", Program.Hex(document.ExtraHeader));
+        if (document.ExtraFunctionNames.Count > 0)
+        {
+            header.AddRow("Extra function names", Program.Escape(string.Join(", ", document.ExtraFunctionNames.Select((n, i) => $"{ExcelFunctions.Count + i} {n}"))));
+        }
+
         header.AddRow("Built-in formats", document.BuiltInFormatCount.ToString(CultureInfo.InvariantCulture));
         header.AddRow("User formats", document.NumberFormats.Count == 0 ? "(none)"
             : string.Join("; ", document.NumberFormats.Select(f => Program.Hex(f.Descriptor) + " " + Program.Hex(f.Body))));
         AnsiConsole.Write(header);
 
         var settingsTable = new Table().Title("[bold]Sheet settings[/]").AddColumn("Setting").AddColumn("Value");
-        settingsTable.AddRow("Calculation mode", state.CalculationMode switch { 1 => "automatic", 0 => "automatic except tables", -1 => "manual", var m => m.ToString(CultureInfo.InvariantCulture) });
+        settingsTable.AddRow("Calculation mode", Program.CalculationModeText(state.CalculationMode));
         settingsTable.AddRow("Precision", state.FullPrecision ? "full" : "as displayed");
         settingsTable.AddRow("Iteration", $"{Program.YesNo(state.Iteration)}, max {state.MaxIterations}, max change {state.MaxChange.ToString(CultureInfo.InvariantCulture)}");
-        settingsTable.AddRow("Reference style word", state.ReferenceStyle.ToString(CultureInfo.InvariantCulture));
-        settingsTable.AddRow("Recalculation state", state.RecalculationState.ToString(CultureInfo.InvariantCulture));
+        settingsTable.AddRow("Reference style", state.ReferenceStyle.ToString());
+        settingsTable.AddRow("Recalculation state", state.RecalculationState switch
+        {
+            0 => "0 (clean)",
+            1 => "1 (needs recalculation)",
+            var other => $"{other} (pending)",
+        });
         settingsTable.AddRow("Protected", $"{Program.YesNo(state.IsProtected)}, password hash 0x{state.PasswordHash:X4}");
         settingsTable.AddRow("Standard font", $"font {state.StandardFont}, {state.StandardFontSize} pt");
         settingsTable.AddRow("Last non-hidden column", state.LastVisibleColumn.ToString(CultureInfo.InvariantCulture));
@@ -525,7 +549,11 @@ sealed class DumpCommand : Command<FileSettings>
         settingsTable.AddRow("Column widths", "75 except " + (string.Join(", ", widths) is { Length: > 0 } w ? w : "(none)"));
         AnsiConsole.Write(settingsTable);
 
-        if (document.HasExternalDocumentTable)
+        if (document.HasExternalDocumentTable && document.ExternalDocuments.Count == 0)
+        {
+            AnsiConsole.WriteLine("External documents: an empty table");
+        }
+        else if (document.HasExternalDocumentTable)
         {
             var external = new Table().Title("[bold]External documents[/]").AddColumn("#").AddColumn("Name").AddColumn("Names used");
             for (int i = 0; i < document.ExternalDocuments.Count; i++)
@@ -551,6 +579,12 @@ sealed class DumpCommand : Command<FileSettings>
                 new ExcelCellAddress(s.FirstRow, s.FirstColumn) + (s.FirstRow == s.LastRow && s.FirstColumn == s.LastColumn ? string.Empty : ":" + new ExcelCellAddress(s.LastRow, s.LastColumn)))));
             table.AddRow("Display", $"formulas {Program.YesNo(window.DisplayFormulas)}, gridlines {Program.YesNo(window.DisplayGridlines)}, headings {Program.YesNo(window.DisplayHeadings)}");
             table.AddRow("Splits", $"horizontal {window.HorizontalSplit}, vertical {window.VerticalSplit}");
+            if (window.HasVersion18State)
+            {
+                table.AddRow("Frozen panes", window.PanesFrozen ? $"yes, at {new ExcelCellAddress(window.FrozenRow!.Value, window.FrozenColumn!.Value)}" : "no");
+                table.AddRow("Gridline colour", window.GridlineColor?.ToString().ToLowerInvariant() ?? "automatic");
+            }
+
             table.AddRow("State bytes", Program.Hex(window.State));
             AnsiConsole.Write(table);
         }
@@ -590,7 +624,8 @@ sealed class DumpCommand : Command<FileSettings>
         for (int i = 0; i < document.Names.Count; i++)
         {
             var name = document.Names[i];
-            string kind = name.IsCommand ? $"command (Option-⌘-{(char)name.ShortcutKey})"
+            string kind = name.IsCommand ? (name.ShortcutKey == 0 ? "command" : $"command (Option-⌘-{(char)name.ShortcutKey})")
+                : name.IsFunctionMacro ? "function macro"
                 : name.Definition.Length == 0 ? "undefined"
                 : (name.Flags & ExcelDefinedName.ReferenceFlag) != 0 ? "reference" : "formula";
             names.AddRow((i + 1).ToString(CultureInfo.InvariantCulture), Program.Escape(name.Name), Program.Escape(kind),
@@ -616,7 +651,7 @@ sealed class ChartCommand : Command<FileSettings>
             table.AddRow("Options", $"stacked {Program.YesNo(chart.IsStacked)}, 100% {Program.YesNo(chart.IsPercent)}, vary by category {Program.YesNo(chart.VaryByCategory)}");
             table.AddRow("Overlap / cluster spacing", $"{chart.Overlap}% / {chart.ClusterSpacing}%");
             table.AddRow("First pie slice angle", $"{chart.FirstSliceAngle}°");
-            table.AddRow("Legend", chart.LegendPosition.ToString());
+            table.AddRow("Legend", chart.HasLegend ? chart.LegendPosition.ToString() : $"none (position {chart.LegendPosition} if added)");
             table.AddRow("Category axis", Axis(chart.CategoryAxis));
             table.AddRow("Value axis", Axis(chart.ValueAxis));
             table.AddRow("Value scale", Scale(chart.ValueScale));
@@ -626,7 +661,21 @@ sealed class ChartCommand : Command<FileSettings>
             }
 
             table.AddRow("Category crossing", $"at category {chart.ValueAxisCrossesAtCategory}, between categories {Program.YesNo(chart.ValueAxisCrossesBetweenCategories)}, at maximum {Program.YesNo(chart.ValueAxisCrossesAtMaximumCategory)}, reverse {Program.YesNo(chart.CategoriesInReverseOrder)}, labels every {chart.CategoriesBetweenTickLabels}");
-            table.AddRow("Point formats", chart.PointFormats.Count.ToString(CultureInfo.InvariantCulture));
+            table.AddRow("Categories", chart.CategoryCount == 0 && chart.Excel15CategoryCount != 0
+                ? $"{chart.Excel15CategoryCount} (Excel 1.5's word)"
+                : chart.CategoryCount.ToString(CultureInfo.InvariantCulture));
+            if (chart != document.MainChart)
+            {
+                table.AddRow("Shares main chart's scale", $"value axis {Program.YesNo(chart.SharesValueAxisScale)}, X axis {Program.YesNo(chart.SharesXAxisScale)}");
+            }
+
+            var (top, left) = chart.DrawingMargins;
+            table.AddRow("Layout (twips)", $"margins top {top}, left {left}; chart area {Box(chart.ChartArea.Box)}; plot area {Box(chart.PlotArea.Box)}; tick length {chart.ValueAxis.TickLength}");
+            table.AddRow("Default series format", PointFormat(chart.DefaultSeriesFormat));
+            for (int i = 0; i < chart.PointFormats.Count; i++)
+            {
+                table.AddRow($"Point format {i + 1}", PointFormat(chart.GetPointFormat(i)));
+            }
             AnsiConsole.Write(table);
 
             if (chart.Texts.Count > 0)
@@ -634,9 +683,21 @@ sealed class ChartCommand : Command<FileSettings>
                 var texts = new Table().Title("[bold]Text objects[/]").AddColumn("Kind").AddColumn("Text").AddColumn("Attached to").AddColumn("Options");
                 foreach (var text in chart.Texts)
                 {
-                    texts.AddRow(text.Kind.ToString(), Program.Escape(text.Text ?? "(automatic)"),
+                    string kind = text.IsArrow ? "Arrow" : text.Kind switch
+                    {
+                        ChartTextKind.ChartTitle => "Chart title",
+                        ChartTextKind.CategoryAxisTitle => "Category-axis title",
+                        ChartTextKind.ValueAxisTitle => "Value-axis title",
+                        ChartTextKind.DataLabel => "Data label",
+                        ChartTextKind.FreeText => "Free text",
+                        _ => text.Kind.ToString(),
+                    };
+                    texts.AddRow(kind, Program.Escape(text.IsArrow ? string.Empty : text.Text ?? "(automatic)"),
                         text.Kind == ChartTextKind.DataLabel ? $"series {text.SeriesNumber}, point {(text.PointNumber == 255 ? "all" : text.PointNumber)}" : string.Empty,
-                        $"{(text.IsVertical ? "vertical" : "horizontal")}, show key {Program.YesNo(text.ShowKey)}, show value {Program.YesNo(text.ShowValue)}");
+                        text.IsArrow
+                            ? $"pattern {text.ArrowLine.Pattern}, shaft {text.ArrowLine.Weight}, "
+                              + (text.HeadStyle == ArrowHeadStyle.None ? "no head" : $"{text.HeadStyle.ToString().ToLowerInvariant()} head, {text.HeadWidth.ToString().ToLowerInvariant()} width, {text.HeadLength.ToString().ToLowerInvariant()} length")
+                            : $"{(text.IsVertical ? "vertical" : "horizontal")}, aligned {text.HorizontalAlignment.ToString().ToLowerInvariant()} {text.VerticalAlignment.ToString().ToLowerInvariant()}, show key {Program.YesNo(text.ShowKey)}, show value {Program.YesNo(text.ShowValue)}");
                 }
 
                 AnsiConsole.Write(texts);
@@ -655,18 +716,25 @@ sealed class ChartCommand : Command<FileSettings>
                     i < series.SecondValues.Count ? series.SecondValues[i].ToString() : string.Empty);
             }
 
-            table.Caption($"type {series.SeriesType}, references {Program.Escape(series.FirstReference)} / {Program.Escape(series.SecondReference)}{(series.SourceDocument.Length > 0 ? ", from " + Program.Escape(series.SourceDocument) : string.Empty)}");
+            table.Caption($"{series.SeriesType switch { 0 => "dates", 3 => "text categories", _ => "numbers" }}, references {Program.Escape(series.FirstReference)} / {Program.Escape(series.SecondReference)}{(series.SourceDocument.Length > 0 ? ", from " + Program.Escape(series.SourceDocument) : string.Empty)}");
             AnsiConsole.Write(table);
         }
 
         return 0;
     }
 
+    private static string Box(ChartBox box) => $"top {box.Top}, left {box.Left}, {box.Height} × {box.Width}";
+
+    private static string PointFormat(ChartPointFormat format)
+        => $"series or point {format.SeriesOrPoint}; line {format.Line.Pattern}{(format.AutomaticLine ? " (auto)" : string.Empty)} {format.Line.Weight}; area pattern {format.AreaPattern}{(format.AutomaticArea ? " (auto)" : string.Empty)}; marker {format.Marker}{(format.AutomaticMarker ? " (auto)" : string.Empty)}"
+            + (format.SeriesLabel ? "; series label" : string.Empty) + (format.PointLabels ? "; point labels" : string.Empty) + (format.PercentLabels ? " (percentages)" : string.Empty)
+            + (format.Explosion != 0 ? $"; pulled out {format.Explosion}%" : string.Empty);
+
     private static string Axis(ChartAxis axis)
-        => $"ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition}; line {(axis.AxisLinePattern == 0 ? "hidden" : "shown")}; gridlines major {(axis.MajorGridlinePattern == 0 ? "off" : "on")}, minor {(axis.MinorGridlinePattern == 0 ? "off" : "on")}";
+        => $"ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition} (drawn at {axis.TickLabelsAt}); line {(axis.Line.Pattern == ChartPattern.None ? "hidden" : $"{axis.Line.Pattern} {axis.Line.Weight} at {axis.LineAt}")}; gridlines major {axis.MajorGridlines.Pattern}, minor {axis.MinorGridlines.Pattern}";
 
     private static string Scale(ChartScale scale)
-        => $"min {(scale.AutoMinimum ? "auto" : scale.Minimum)}, max {(scale.AutoMaximum ? "auto" : scale.Maximum)}, major {(scale.AutoMajorUnit ? "auto" : scale.MajorUnit)}, minor {(scale.AutoMinorUnit ? "auto" : scale.MinorUnit)}, crosses {(scale.AutoCrossesAt ? "auto" : scale.CrossesAt)}{(scale.Logarithmic ? ", log" : string.Empty)}{(scale.ReverseOrder ? ", reversed" : string.Empty)}";
+        => $"min {(scale.AutomaticMinimum ? "auto" : scale.Minimum)}, max {(scale.AutomaticMaximum ? "auto" : scale.Maximum)}, major {(scale.AutomaticMajorUnit ? "auto" : scale.MajorUnit)}, minor {(scale.AutomaticMinorUnit ? "auto" : scale.MinorUnit)}, crosses {(scale.AutomaticCrossesAt ? "auto" : scale.CrossesAt)}{(scale.IsLogarithmic ? ", log" : string.Empty)}{(scale.ValuesInReverseOrder ? ", reversed" : string.Empty)}";
 }
 
 static class RangeParser
@@ -791,12 +859,13 @@ sealed class JsonCommand : Command<JsonSettings>
         return new
         {
             kind = document.Kind.ToString(),
+            version = document.Version,
             signature = $"0x{document.Signature:X4}",
             rows = document.Cells.RowCount,
             columns = document.Cells.ColumnCount,
             settings = new
             {
-                calculationMode = state.CalculationMode,
+                calculationMode = state.CalculationMode.ToString(),
                 fullPrecision = state.FullPrecision,
                 iteration = state.Iteration,
                 maxIterations = state.MaxIterations,
@@ -808,6 +877,7 @@ sealed class JsonCommand : Command<JsonSettings>
                 columnWidths = Enumerable.Range(0, ExcelSheetState.ColumnCount).Where(i => state.GetColumnWidth(i) != 75)
                     .ToDictionary(i => FormulaDecompiler.ColumnName(i), i => (int)state.GetColumnWidth(i)),
             },
+            numberFormats = document.NumberFormats.Select(f => Convert.ToHexString(f.Descriptor) + " " + Convert.ToHexString(f.Body)),
             externalDocuments = document.ExternalDocuments.Select(d => new { name = d.Name, names = d.Names }),
             names = document.Names.Select(n => new
             {
@@ -843,7 +913,7 @@ sealed class JsonCommand : Command<JsonSettings>
             stacked = c.IsStacked,
             percent = c.IsPercent,
             legend = c.LegendPosition.ToString(),
-            valueScale = new { c.ValueScale.AutoMinimum, c.ValueScale.Minimum, c.ValueScale.AutoMaximum, c.ValueScale.Maximum, c.ValueScale.Logarithmic },
+            valueScale = new { c.ValueScale.AutomaticMinimum, c.ValueScale.Minimum, c.ValueScale.AutomaticMaximum, c.ValueScale.Maximum, c.ValueScale.IsLogarithmic },
             texts = c.Texts.Select(t => new { kind = t.Kind.ToString(), text = t.Text, automatic = t.IsAutomaticText }),
         }),
         series = document.Series.Select(s => new
@@ -856,4 +926,96 @@ sealed class JsonCommand : Command<JsonSettings>
             values = s.SecondValues.Select(v => v.ToDouble()),
         }),
     };
+}
+
+sealed class WorkspaceCommand : Command<FileSettings>
+{
+    public override int Execute(CommandContext context, FileSettings settings, CancellationToken cancellationToken)
+    {
+        var workspace = ExcelWorkspace.Load(settings.Input);
+        var summary = new Table().Title("[bold]Workspace[/]").AddColumn("Field").AddColumn("Value");
+        summary.AddRow("Calculation mode", Program.CalculationModeText(workspace.CalculationMode));
+        summary.AddRow("Precision", workspace.FullPrecision ? "full" : "as displayed");
+        summary.AddRow("Iteration", $"{Program.YesNo(workspace.Iteration)}, max {workspace.MaxIterations}, max change {workspace.MaxChange.ToString(CultureInfo.InvariantCulture)}");
+        summary.AddRow("A window zoomed", Program.YesNo(workspace.Zoomed));
+        summary.AddRow("Preferred chart format", workspace.PreferredChartFormat.Length == 0
+            ? "(none)"
+            : $"{workspace.PreferredChartFormat.Length:N0} bytes; "
+              + string.Join(", ", workspace.PreferredChartOffsets.Zip(workspace.PreferredChartTypes, (o, t) => (o, t))
+                  .Select((c, i) => $"{(i == 0 ? "main" : "overlay")} {c.t} chart at offset {c.o}")));
+        string[] bauds = ["300", "600", "1200", "2400", "4800", "9600"];
+        summary.AddRow("Printer setup", workspace.PrinterType == 0 ? "Macintosh"
+            : $"TTY, {(workspace.PrinterPort == 0 ? "printer" : "modem")} port, {(workspace.PrinterBaud < bauds.Length ? bauds[workspace.PrinterBaud] : workspace.PrinterBaud.ToString(CultureInfo.InvariantCulture))} baud");
+        AnsiConsole.Write(summary);
+
+        var windows = new Table().Title("[bold]Windows, front to back[/]").AddColumn("Kind").AddColumn("Document").AddColumn("Folder").AddColumn("Directory").AddColumn("Rectangle").AddColumn("Active cell");
+        foreach (var entry in workspace.Windows)
+        {
+            string kind = entry.Kind switch
+            {
+                ExcelWorkspaceWindow.WorksheetKind => "worksheet",
+                ExcelWorkspaceWindow.MacroSheetKind => "macro sheet",
+                ExcelWorkspaceWindow.ChartKind => "chart",
+                _ => $"0x{entry.Kind:X2}",
+            };
+            var w = entry.Window;
+            windows.AddRow(kind, Program.Escape(entry.DocumentName), Program.Escape(entry.Folder), entry.Directory.ToString(CultureInfo.InvariantCulture),
+                $"{w.Top}, {w.Left}, {w.Bottom}, {w.Right}",
+                entry.Kind == ExcelWorkspaceWindow.ChartKind ? "" : new ExcelCellAddress(w.ActiveRow, w.ActiveColumn).ToString());
+        }
+
+        AnsiConsole.Write(windows);
+        return 0;
+    }
+}
+
+
+sealed class NewChartSettings : CommandSettings
+{
+    [CommandArgument(0, "<type>")]
+    [Description("ColumnOrBar, Line, Pie, Area or Scatter.")]
+    public required ChartType Type { get; init; }
+
+    [CommandArgument(1, "<output>")]
+    [Description("The chart file to write.")]
+    public required string Output { get; init; }
+
+    [CommandOption("--series <VALUES>")]
+    [Description("A series as comma-separated numbers; repeat for more series. Default: one series 1,3,2.")]
+    public string[] Series { get; init; } = [];
+
+    [CommandOption("--title <TEXT>")]
+    [Description("A chart title.")]
+    public string? Title { get; init; }
+
+    [CommandOption("--bar")]
+    [Description("Horizontal bars (with ColumnOrBar).")]
+    public bool Bar { get; init; }
+}
+
+/// <summary>
+/// Builds a chart file with <see cref="ChartDocument.Create"/>, so the harness can check what Excel makes of it.
+/// </summary>
+sealed class NewChartCommand : Command<NewChartSettings>
+{
+    public override int Execute(CommandContext context, NewChartSettings settings, CancellationToken cancellationToken)
+    {
+        var document = ChartDocument.Create(settings.Type);
+        document.MainChart.IsBar = settings.Bar;
+        if (settings.Title is { } title)
+        {
+            document.MainChart.Texts.Add(ChartText.Create(ChartTextKind.ChartTitle, title));
+        }
+
+        var series = settings.Series.Length == 0 ? ["1,3,2"] : settings.Series;
+        for (int i = 0; i < series.Length; i++)
+        {
+            var values = series[i].Split(',').Select(v => double.Parse(v, CultureInfo.InvariantCulture)).ToList();
+            document.Series.Add(ChartSeries.Create($"Series {i + 1}", values, "Data", $"R{i + 1}C1:R{i + 1}C{values.Count}"));
+        }
+
+        File.WriteAllBytes(settings.Output, document.ToArray());
+        AnsiConsole.MarkupLine($"Wrote [bold]{Markup.Escape(settings.Output)}[/]: {settings.Type}, {series.Length} series.");
+        return 0;
+    }
 }

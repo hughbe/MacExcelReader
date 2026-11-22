@@ -449,7 +449,13 @@ public static class ExcelFunctions
             return null;
         }
 
-        return version >= ExcelVersion.Excel150 && s_excel15Rules.TryGetValue(number, out var changed) ? changed : function;
+        if (version >= ExcelVersion.Excel150 && s_excel15Rules.TryGetValue(number, out var changed))
+        {
+            return changed;
+        }
+
+        // Excel 1.04 already gave OPEN its third argument (its function table, spec §2.1).
+        return version >= ExcelVersion.Excel104 && number == 106 ? s_excel15Rules[106] : function;
     }
 
     /// <summary>

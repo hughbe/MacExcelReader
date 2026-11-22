@@ -168,12 +168,12 @@ public class FormattingTests
 
         var state = new ExcelSheetState(new byte[ExcelSheetState.Size])
         {
-            ReferenceStyle = 1,
+            ReferenceStyle = ExcelReferenceStyle.A1,
             LastVisibleColumn = 255,
             RecalculationState = 2,
             StandardFont = 3,
         };
-        Assert.Equal(1, state.ReferenceStyle);
+        Assert.Equal(ExcelReferenceStyle.A1, state.ReferenceStyle);
         Assert.Equal(255, state.LastVisibleColumn);
         Assert.Equal(2, state.RecalculationState);
         Assert.Equal(3, state.StandardFont);

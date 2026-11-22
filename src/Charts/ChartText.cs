@@ -21,6 +21,9 @@ public enum ChartTextKind
 
     /// <summary>A data label attached to a series or point.</summary>
     DataLabel = 4,
+
+    /// <summary>Free text placed anywhere on the chart, or an arrow (see <see cref="ChartText.IsArrow"/>).</summary>
+    FreeText = 6,
 }
 
 /// <summary>
@@ -83,24 +86,73 @@ public sealed class ChartText
     /// <summary>Gets or sets the point number of a data label (255 = the whole series).</summary>
     public byte PointNumber { get => Record[5]; set => Record[5] = value; }
 
+    /// <summary>
+    /// Gets or sets whether the object is an arrow rather than text (memory offset 17). An arrow is a free object
+    /// with automatic text and no string; its two points are the arrow's ends (spec §16.7).
+    /// </summary>
+    public bool IsArrow { get => ArrowLine.Pattern != ChartPattern.None; set => ArrowLine.Pattern = value ? ChartPattern.Solid : ChartPattern.None; }
+
+    /// <summary>
+    /// Gets an arrow's line: its pattern (memory offset 17), which is <see cref="ChartPattern.None"/> for text, and
+    /// its shaft weight.
+    /// </summary>
+    public ChartLineFormat ArrowLine => new(Record, 14);
+
+    /// <summary>Gets the text box's area format: border, background and the box Excel last drew it in.</summary>
+    public ChartAreaFormat Area => new(Record, 20);
+
+    /// <summary>Gets or sets an arrow's head width.</summary>
+    public ArrowHeadWidth HeadWidth { get => (ArrowHeadWidth)((Word(18) >> 12) & 3); set => SetWord(18, (ushort)((Word(18) & ~0x3000) | (((int)value & 3) << 12))); }
+
+    /// <summary>Gets or sets an arrow's head length; <see cref="ArrowHeadLength.None"/> means no head.</summary>
+    public ArrowHeadLength HeadLength { get => (ArrowHeadLength)((Word(18) >> 8) & 3); set => SetWord(18, (ushort)((Word(18) & ~0x0300) | (((int)value & 3) << 8))); }
+
+    /// <summary>
+    /// Gets or sets an arrow's head style. Setting <see cref="ArrowHeadStyle.None"/> sets the length to
+    /// <see cref="ArrowHeadLength.None"/>; setting a head on an arrow without one gives it a medium length.
+    /// </summary>
+    public ArrowHeadStyle HeadStyle
+    {
+        get => HeadLength == ArrowHeadLength.None ? ArrowHeadStyle.None : (Word(18) & 0x0080) != 0 ? ArrowHeadStyle.Open : ArrowHeadStyle.Filled;
+        set
+        {
+            if (value == ArrowHeadStyle.None)
+            {
+                HeadLength = ArrowHeadLength.None;
+                return;
+            }
+
+            if (HeadLength == ArrowHeadLength.None)
+            {
+                HeadLength = ArrowHeadLength.Medium;
+            }
+
+            SetWord(18, (ushort)(value == ArrowHeadStyle.Open ? Word(18) | 0x0080 : Word(18) & ~0x0080));
+        }
+    }
+
+    private ushort Word(int offset) => System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(Record.AsSpan(offset));
+
+    private void SetWord(int offset, ushort value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(Record.AsSpan(offset), value);
+
     /// <summary>Gets or sets whether the text is generated automatically (no string is stored).</summary>
     public bool IsAutomaticText { get => (Flags & 0x2000) != 0; set => SetFlag(13, value); }
 
     /// <summary>Gets or sets vertical orientation.</summary>
     public bool IsVertical { get => (Flags & 0x1000) != 0; set => SetFlag(12, value); }
 
-    /// <summary>Gets or sets the horizontal alignment: 0 centre, 1 left, 2 right.</summary>
-    public int HorizontalAlignment
+    /// <summary>Gets or sets the horizontal alignment (text options bits 11–9).</summary>
+    public ChartHorizontalAlignment HorizontalAlignment
     {
-        get => (Flags >> 9) & 7;
-        set => Flags = (ushort)((Flags & ~0x0E00) | ((value & 7) << 9));
+        get => (ChartHorizontalAlignment)((Flags >> 9) & 7);
+        set => Flags = (ushort)((Flags & ~0x0E00) | (((int)value & 7) << 9));
     }
 
-    /// <summary>Gets or sets the vertical alignment: 0 bottom, 1 centre, 2 top.</summary>
-    public int VerticalAlignment
+    /// <summary>Gets or sets the vertical alignment (text options bits 8–6).</summary>
+    public ChartVerticalAlignment VerticalAlignment
     {
-        get => (Flags >> 6) & 7;
-        set => Flags = (ushort)((Flags & ~0x01C0) | ((value & 7) << 6));
+        get => (ChartVerticalAlignment)((Flags >> 6) & 7);
+        set => Flags = (ushort)((Flags & ~0x01C0) | (((int)value & 7) << 6));
     }
 
     /// <summary>Gets or sets "show key".</summary>

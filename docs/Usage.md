@@ -147,7 +147,11 @@ gives a particular release's rules, and `ExcelFunctions.FindNumber("SUM")` goes 
 var formula = ExcelFormula.Parse("=IF(A1>0,SUM($A$1:$A$5)*2,-1)");
 formula.SetResult(0);            // the value Excel shows until it recalculates
 document.Cells["B1"].SetFormula(formula);
+document.State.RecalculationState = 1;   // have Excel recalculate the sheet when it opens it
 ```
+
+Excel does not recalculate the formulas it loads until something they depend on changes, so set the
+recalculation state when you cannot work out the results yourself.
 
 The leading `=` is optional. It supports:
 
@@ -248,7 +252,7 @@ records.
 
 ```csharp
 var state = document.State;
-state.CalculationMode;    // 1 automatic, -1 manual
+state.CalculationMode;    // ExcelCalculationMode.Automatic, AutomaticExceptTables or Manual
 state.FullPrecision;      // false = precision as displayed
 state.Iteration; state.MaxIterations; state.MaxChange;
 state.GetColumnWidth(0); state.SetColumnWidth(0, 100);   // 0 hides a column
@@ -277,7 +281,7 @@ sheet.Save("Totals");
 New documents use the defaults Excel 1.03 writes for an empty sheet. The grid grows as you assign cells.
 
 Editing a file you read is safe: only the cells you touch are re-encoded, and everything the library does not
-model (unidentified fields, stale pointers, embedded code) is written back exactly as it was read. A
+model (unidentified fields, bytes left over from memory, embedded code) is written back exactly as it was read. A
 document read and saved without changes is byte-for-byte identical to the original.
 
 ## Charts
@@ -289,18 +293,39 @@ var chart = ChartDocument.Load("Chart1");
 var main = chart.MainChart;
 Console.WriteLine($"{main.Type}, stacked: {main.IsStacked}, legend: {main.LegendPosition}");
 var scale = main.ValueScale;
-Console.WriteLine(scale.AutoMaximum ? "auto" : scale.Maximum.ToString());
+Console.WriteLine(scale.AutomaticMaximum ? "auto" : scale.Maximum.ToString());
 
 foreach (var series in chart.Series)
 {
     Console.WriteLine($"{series.Name} ({series.FirstReference}): {string.Join(", ", series.SecondValues)}");
 }
+
+var format = main.DefaultSeriesFormat;      // and main.GetPointFormat(i) for per-series or per-point overrides
+Console.WriteLine($"marker {format.Marker}, pie slices pulled out {format.Explosion}%, point labels {format.PointLabels}");
+if (chart.OverlayChart is { } overlay)
+{
+    Console.WriteLine($"overlay {overlay.Type}, shares the main value axis: {overlay.SharesValueAxisScale}");
+}
 ```
 
+To build a chart, give each series its source document and references, as Excel 1.x always has them:
+
+```csharp
+var newChart = ChartDocument.Create(ChartType.ColumnOrBar);
+newChart.Series.Add(ChartSeries.Create("Sales", [1, 3, 2], "Data", "R2C1:R2C3", categoriesReference: "R1C1:R1C3"));
+newChart.Save("Sales Chart");
+```
+
+Patterns, markers, line weights and arrowheads are enums (`ChartPattern`, `ChartMarker`, `ChartLineWeight`,
+`ArrowHeadWidth`, `ArrowHeadLength`, `ArrowHeadStyle`) named after Excel 1.00's Patterns dialogs.
+
 A chart file stores a copy of the plotted data, so the values are available without the worksheet. Numbers
-in chart files use Microsoft's 8-byte decimal format; `MicrosoftDecimal` converts them. Chart support was
-derived from Excel's code and is confirmed by three real charts from Excel 1.00 and 1.5, which read and write
-back byte for byte.
+in chart files use Microsoft's 8-byte decimal format; `MicrosoftDecimal` converts them. `CategoryCount`,
+`DrawingMargins`, the area formats' `Box` and the axes' `TickLength`, `TickLabelsAt` and `LineAt` are the layout Excel worked out the
+last time it drew the chart; Excel recomputes them, so a writer can leave them as they are. A chart Excel 1.5 saved last
+holds the category count as a word instead, which `Excel15CategoryCount` reads. Chart support was
+derived from Excel's code and is checked against Microsoft's three sample charts and the charts Excel saved in
+experiments, which all read and write back byte for byte.
 
 ## Performance
 

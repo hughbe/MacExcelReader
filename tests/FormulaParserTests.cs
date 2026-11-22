@@ -13,40 +13,47 @@ public class FormulaParserTests
     /// three pointer bytes of an array constant, a deleted reference's operands, and the data byte of the
     /// volatile and SUM attributes.
     /// </summary>
-    private static byte[] Normalize(ReadOnlySpan<byte> expression, bool definition)
-    {
-        var copy = expression.ToArray();
-        foreach (var token in FormulaTokens.Enumerate(expression))
-        {
-            var operands = copy.AsSpan(token.Offset + 1, token.Length - 1);
-            switch (token.Code)
-            {
-                case 0x23:
-                    operands[(definition ? 2 : 0)..].Clear();
-                    break;
-                case 0x1A:
-                    operands[..(definition ? 6 : 7)].Clear();
-                    break;
-                case 0x20:
-                    operands[3..].Clear();
-                    break;
-                case 0x1B:
-                case 0x2A:
-                    operands.Clear();
-                    break;
-                case 0x19 when operands[0] is 0x01 or 0x10:
-                    operands[1] = 0;
-                    break;
-            }
-        }
-
-        return copy;
-    }
+    private static byte[] Normalize(ReadOnlySpan<byte> expression, bool definition) => FormulaTokens.ClearStaleBytes(expression, definition);
 
     // The pre-release Excel 1.5 build wrote FORMULA with one argument in the variable-count form, where the
     // released 1.5 keeps the fixed-count form (spec §2.3, §15.4).
     private static bool IsKnownException(byte[] file, ExcelFormula formula)
     {
+        // A range of two areas (25 25 11), which Excel 1.03 compiled from GET.FORMULA's whole-row text
+        // R[-20]:R[16363] in the "Recompiled" sample. A1 text has no way to write it that reads back the same.
+        var codes = new List<byte>();
+        foreach (var token in FormulaTokens.Enumerate(formula.Expression))
+        {
+            codes.Add(token.Code);
+        }
+
+        for (int i = 2; i < codes.Count; i++)
+        {
+            if (codes[i] == 0x11 && codes[i - 1] == 0x25 && codes[i - 2] == 0x25)
+            {
+                return true;
+            }
+        }
+
+        // A memory area (26) with no cached areas: an earlier version of this library compiled an intersection of
+        // cells that do not overlap that way, and Excel kept the tokens ("Memory Error", "Recalculated"). Excel
+        // itself compiles it to a memory error (27).
+        foreach (var token in FormulaTokens.Enumerate(formula.Expression))
+        {
+            if (token.Code == FormulaTokens.MemoryArea && formula.Fixups.Length >= 2 && formula.Fixups[0] == 0 && formula.Fixups[1] == 0)
+            {
+                return true;
+            }
+        }
+
+        // A name on another document that looks like a cell reference: Excel 1.03 read Other!A1 in R1C1 mode as the
+        // name A1 ("Links"). A1 text has no way to write it that reads back as a name.
+        if (codes.Contains(0x23) && codes.Contains(0x1A) && ExcelDocument.Read(file).ExternalDocuments
+                .Any(d => d.Names.Any(n => n.Length >= 2 && char.IsAsciiLetter(n[0]) && char.IsAsciiDigit(n[^1]) && n.All(char.IsAsciiLetterOrDigit))))
+        {
+            return true;
+        }
+
         if (!IsPreRelease15(file))
         {
             return false;
@@ -89,7 +96,8 @@ public class FormulaParserTests
         foreach (var (row, column, cell) in document.Cells.NonEmptyCells)
         {
             var address = new ExcelCellAddress(row, column);
-            if (cell.Formula is not { } formula || IsKnownException(bytes, formula) || (formula.IsArrayFormula && !formula.IsSharedAnchor))
+            // Tables are made by the TABLE command; their text cannot be compiled.
+            if (cell.Formula is not { } formula || formula.IsTable || IsKnownException(bytes, formula) || (formula.IsArrayFormula && !formula.IsSharedAnchor))
             {
                 continue;
             }
