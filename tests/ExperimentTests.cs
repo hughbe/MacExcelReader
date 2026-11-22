@@ -274,6 +274,30 @@ public class ExperimentTests
         Assert.Equal(208, ExcelDocument.Read(bytes).FunctionCount);
     }
 
+    [Theory]
+    [InlineData("Changes 1.06", 209)]
+    [InlineData("No New Functions 1.06", 208)]
+    public void Excel106_SavesAs104Does(string sample, int functionCount)
+    {
+        // The same sheets as the 1.04 experiment, run in Excel 1.06: the same tokens, embedded code (import word
+        // 0x740A, so a 1.06 file looks like a 1.04 one) and function-count rule (spec §2.1, §2.3, §5).
+        var bytes = Sample(sample);
+        var document = ExcelDocument.Read(bytes);
+        Assert.Equal(ExcelVersion.Excel104, SavedBy(bytes));
+        Assert.Equal(functionCount, document.FunctionCount);
+        Assert.Equal([0], document.ExtraHeader);
+        var original = Load(sample.Replace("1.06", "1.04"));
+        foreach (var (row, column, cell) in original.Cells.NonEmptyCells)
+        {
+            if (cell.Formula is { } formula)
+            {
+                Assert.Equal(
+                    FormulaTokens.ClearStaleBytes(formula.Expression),
+                    FormulaTokens.ClearStaleBytes(document.Cells[row, column].Formula!.Expression));
+            }
+        }
+    }
+
     [Fact]
     public void PieExplodedAll_DefaultSeriesFormatHoldsTheExplosion()
     {

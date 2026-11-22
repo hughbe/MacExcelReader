@@ -2,7 +2,7 @@
 
 MacExcelReader is a fast, allocation-conscious .NET library for reading and writing Microsoft Excel 1.x for Macintosh documents (Excel 1.00 to 1.5): worksheets (Finder type `XLBN`), macro sheets (`XLPG`) and charts (`MCBN`).
 
-The file format was reverse-engineered from the code of Excel 1.00, 1.01, 1.03, 1.04 and 1.5 and is documented in [docs/Spec.md](docs/Spec.md). The full API is described in the [usage guide](docs/Usage.md).
+The file format was reverse-engineered from the code of Excel 1.00, 1.01, 1.03, 1.04, 1.06 and 1.5 and is documented in [docs/Spec.md](docs/Spec.md). The full API is described in the [usage guide](docs/Usage.md).
 
 ---
 
@@ -165,7 +165,7 @@ dotnet build
 dotnet test
 ```
 
-The tests run over the sample documents in `tests/Samples`, grouped by the release that saved them: `Excel 1.00` (the 1.00 data disk, whose Expenses, REPLACE, COMMANDS and DB.FORM are identical to the 1.03 disk's), `Excel 1.01` (files the French 1.01 saved in experiments), `Excel 1.03` (Worksheet1), `Excel 1.04` (files Excel 1.04 saved in experiments) and `Excel 1.5` (the 1.5 sampler, including two charts). Each folder also holds the files that release saved in experiments, named for what they show; `tests/ExperimentTests.cs` checks what each one showed.
+The tests run over the sample documents in `tests/Samples`, grouped by the release that saved them: `Excel 1.00` (the 1.00 data disk, whose Expenses, REPLACE, COMMANDS and DB.FORM are identical to the 1.03 disk's), `Excel 1.01` (files the French 1.01 saved in experiments), `Excel 1.03` (Worksheet1), `Excel 1.04` and `Excel 1.06` (files those releases saved in experiments) and `Excel 1.5` (the 1.5 sampler, including two charts). Each folder also holds the files that release saved in experiments, named for what they show; `tests/ExperimentTests.cs` checks what each one showed.
 
 ---
 

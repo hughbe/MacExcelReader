@@ -26,7 +26,7 @@ Finally Driver saves itself, so its cells keep Excel's answers.
 
 | Excel | Running Driver |
 |---|---|
-| 1.00, 1.01, 1.03, 1.04 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R; Macro > Exécuter in the French 1.01). `check` cannot turn the French 1.01's GET.FORMULA text into A1, so read it from Driver. |
+| 1.00, 1.01, 1.03, 1.04, 1.06 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R; Macro > Exécuter in the French 1.01). `check` cannot turn the French 1.01's GET.FORMULA text into A1, so read it from Driver. |
 | 1.5 | Open Driver. It runs by itself (Auto_Open). Pack with `--excel 1.5`. |
 
 Start Excel from its own disk, not by opening a document from the Finder, which may pick a newer Excel. To
@@ -116,7 +116,7 @@ dotnet run --project dumper -- sheet tests/Data/formulas-1.5.txt out/G --split 1
 ```
 
 `--excel 1.04` compiles for Excel 1.04, which adds CHANGE.LINK and a third argument to OPEN; pack with the same
-option. Excel 1.04 asks for a registration name the first time it starts.
+option. Excel 1.04 and 1.06 ask for a registration name the first time they start. The 1.06 disk has no System Folder: boot from another system disk and start Excel from the 1.06 disk.
 
 A list is one formula per line, with `## Heading` lines and these setup lines:
 
@@ -178,6 +178,7 @@ Things to know:
 | Nov 2026 | 1.00 | DCOUNT with field 1, 0, empty and 2, re-entered with `--recompile` | An empty argument whose type has bit 0x80 is "not given" (spec §15.3) |
 | Nov 2026 | 1.01 (French) | A formula sheet probed with GET.FORMULA, then NEW(1) and SAVE.AS | One-byte extra header; French built-in names, function names and R1C1 letters; same tokens (spec §2.1, §11, §15.4) |
 | Nov 2026 | 1.04 | CHANGE.LINK and a three-argument OPEN with `--excel 1.04 --recompile`, and a sheet with no new functions whose count was set to 209 | Import word 0x740A; function count from the formulas (209, 208); same tokens as the library (spec §2.1, §2.3, §5) |
+| Nov 2026 | 1.06 | The same two sheets as the 1.04 run | Same tokens, import word 0x740A and function counts as 1.04 (spec §2.1, §2.3) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

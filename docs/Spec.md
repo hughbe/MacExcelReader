@@ -13,11 +13,12 @@ charts. It was reverse-engineered from the applications' code and checked agains
 | Excel 1.01 (French) | `Microsoft Excel 1.01 [French].dsk` (800K HFS), the only 1.01 available | Every procedure, matched to its 1.00 counterpart. 1.01 keeps 1.00's segment and procedure numbers apart from a few procedures it inserts; where a number differs the spec gives both (`46.06` in 1.00, `46.07` in 1.01). |
 | Excel 1.03 | `Microsoft Excel 1.03.dsk` (800K HFS) | Save (`45.0c`), Open (`44.08`), the external-link reader (`72.01`), the formula compiler (`0f.00`), chart reader and writer (`5d`, `5c`), the counterparts of 1.00's `47.0b`, `46.06`, `73.01`, `11.00`, `5e` and `5d`. The spec cites 1.00's numbers first. |
 | Excel 1.04 | `Microsoft Excel 1.04.dsk` (800K HFS, from WinWorld) | Every procedure, matched to its 1.03 counterpart. 1.04 inserts two segments (`0x47`, `0x48`), so 1.03's `0x47`–`0x73` are `0x49`–`0x75` in 1.04 and lower numbers are unchanged apart from a few inserted procedures; the spec gives 1.04's numbers where it describes a 1.04 change. |
+| Excel 1.06 | `Microsoft Excel 1.06.dsk` (800K HFS) | Every procedure, matched to its 1.04 counterpart. 1.06 keeps 1.04's segment and procedure numbers apart from a few procedures it inserts or drops. |
 | Excel 1.5 (May 1988) | Excel 1.5 folder | Save (`47.0d`), format and token translation (`47.18`), function table and file-number table, version-18 rules |
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 51 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 53 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
@@ -26,8 +27,9 @@ experiments. A reader built from this spec reads all of them, and a writer rebui
 | Excel 1.00 program disk | `Resume Excel`, a workspace file (Appendix B) |
 | Excel 1.03 disk | `Worksheet1` (empty worksheet). The disk's other samples are byte-identical to the 1.00 disk's. |
 | Excel 1.04 disk | `Expenses`, `COMMANDS`, `DB.FORM` and `REPLACE`, byte-identical to the 1.00 disk's, and a `Resume Excel` with no windows. |
+| Excel 1.06 disk | `COMMANDS`, `DB.FORM` and `REPLACE`, byte-identical to the 1.00 disk's. |
 | Excel 1.5 sampler | 26 worksheets and macro sheets, including one version-18 file (`SIMUL EQUATIONS`), and 2 charts (`BREAK CHART`, `PROFIT CHART`) |
-| Experiments | Files Excel 1.00, 1.01, 1.03, 1.04 and 1.5 saved in the test harness (docs/Testing.md), each named for what it shows, such as `Literals`, `Errors`, `Column Widths`, `Table Deleted Input`, `Arrow Heads` and `Legend`. They are in `tests/Samples`, next to the release that saved them. |
+| Experiments | Files Excel 1.00, 1.01, 1.03, 1.04, 1.06 and 1.5 saved in the test harness (docs/Testing.md), each named for what it shows, such as `Literals`, `Errors`, `Column Widths`, `Table Deleted Input`, `Arrow Heads` and `Legend`. They are in `tests/Samples`, next to the release that saved them. |
 
 Microsoft's samples hold 1,282 formulas and 206 name definitions. §2.3 explains how to tell which build saved
 each file.
@@ -133,6 +135,7 @@ from memory (above), except in the cell table, where the writer replaces them wi
 | 1.01 | 17 | 0–207 | Adds a one-byte extra header (§5) and drops the extra function names (§14), keeping the function-count flag in state word `0x01C` instead (§5, §6). Takes the argument separator and other characters from the system's international settings (§15.4), and moves its words into resources so that it can be translated: function names (§15.3), the built-in names of a new sheet (§11), built-in number formats and format letters (§7), and the workspace file's name (Appendix B). Its code asks for a string by number (`0d.0d` in 1.01): below `0x2000` the `STR` resource with that ID, from `0x2000` up item number − `0x2000`, counting from 0, of `STR#` 256. Function table and tokens identical to 1.00's. |
 | 1.03 | 17 | 0–207 | Writes a zero-length name for an external entry that refers to the document itself (§8), and makes its in-memory external entries 16 bytes (§8). Function table and tokens identical to 1.01's. |
 | 1.04 | 17 | 0–208 | Adds CHANGE.LINK (208, a command with up to two text arguments, carried out by `44.00` in 1.04) and a third argument to OPEN, matching the Read Only box its Open dialog gains (Appendix A). Its Save writes the function count as one more than the highest function number a formula uses (§5): 209 for a sheet calling CHANGE.LINK, and 208 for one that calls nothing newer even when the file it opened said 209 (`Changes 1.04`, `No New Functions 1.04` samples). It keeps a document's file reference between saves and flushes the volume after saving (`44.0c`, `44.0d` in 1.04), which does not change the bytes written. Embedded code identical to 1.03's apart from the import word (§2.3). Compiler and tokens identical to 1.03's. |
+| 1.06 (December 1987) | 17 | 0–208 | Writes the same files as 1.04, with byte-identical embedded code, so its files cannot be told from 1.04's (§2.3); compiler, function table and tokens unchanged (`Changes 1.06` and `No New Functions 1.06` samples). Its other changes are inside the application: a `SIZE` resource for MultiFinder, one routine (`01.1a` in 1.06) for all its checks for pending events, and no longer reserving master pointers around Open (1.04's `15.2b`, `15.2c`). |
 | 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of twelve functions (Appendix A) and the token class of function calls inside IF and CHOOSE (§15.4). Adds frozen panes and gridline colours to windows (§13) and text sections, `@` and colours to number formats (§7). |
 
 The format version is header word 2 (§4). Excel 1.00's Open accepts only version 17 (`46.06`), and so do
@@ -166,7 +169,7 @@ builds apart even where the lengths agree:
 | `0x038A` | `0x720A` | A build earlier than 1.00, without the p-code compiler's shared-sequence optimisation | `Expenses` |
 | `0x0326` | `0x730A` | Excel 1.00 or 1.01: byte-identical to segment `0x70` of both. A 1.01 file has the one-byte extra header (§5), a 1.00 file none. | the other six sheets of the 1.00 disk |
 | `0x0326` | `0x720A` | Excel 1.03: byte-identical to its segment `0x6F` | `Worksheet1` |
-| `0x0326` | `0x740A` | Excel 1.04: its segment `0x71`, which differs from 1.03's only in the import word and one byte near the end | `Changes 1.04`, `No New Functions 1.04` |
+| `0x0326` | `0x740A` | Excel 1.04 or 1.06: segment `0x71` of both, byte-identical, which differs from 1.03's only in the import word and one byte near the end | `Changes 1.04`, `No New Functions 1.04`, `Changes 1.06`, `No New Functions 1.06` |
 | `0x032A` | `0x7A0A` | Excel 1.5: byte-identical to the 1.5 application's code | ten of the 1.5 samples |
 | `0x03FC` | `0x7C0A` | Another Excel 1.5 build, encoding formulas exactly as the 1.5 application's code does | `ACCOUNTS MACROS`, `COMMISSION MACROS` |
 | `0x032A` | `0x7C0A` | A pre-release Excel 1.5 build (different bytes) | the other 14 of the 1.5 samples |
@@ -294,9 +297,9 @@ function table if a global flag is set, and otherwise a base count fixed at star
 compiler sets the flag when a formula uses a number at or above the base count. When the count is above 208,
 1.00 also writes the names of the extra functions at the start of section 7, so that Open can check them
 (§14). Excel 1.01 keeps the flag per document, in state word `0x01C` (§6), and drops the names; 1.03 does the
-same. Excel 1.04's Save (`45.0d` in 1.04) and 1.5's write 208, or one more than the highest function number
-any formula uses if that is higher. Every sample has 208 except `INVOICE MACROS`, which uses GET.DOCUMENT
-(238) and has 239.
+same. Excel 1.04's Save (`45.0d` in 1.04 and 1.06) and 1.5's write 208, or one more than the highest function
+number any formula uses if that is higher. Every sample has 208 except `INVOICE MACROS`, which uses
+GET.DOCUMENT (238) and has 239.
 
 ---
 
