@@ -24,6 +24,11 @@
     <Copyright>Hugh Bellamy 2026</Copyright>
   </PropertyGroup>
 
+  <!-- Deterministic paths in builds on CI, so the package's symbols point at the repository. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
   <ItemGroup>
     <None Include="../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
