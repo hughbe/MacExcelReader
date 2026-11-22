@@ -164,6 +164,12 @@ from memory (above), except in the cell table, where the writer replaces them wi
 
 ## 2. Versions
 
+Six releases of Excel 1.x are covered, from 1.00 in 1985 to 1.5 in 1988. All of them read and write
+essentially the same format. Two numbers in a file tell them apart: the **format version** (header word 2),
+which changes only when old releases could not read a file, and the code embedded in each document, which
+identifies the exact build that saved it (§2.3). Between them the releases mostly added functions, which a
+file records with the function count (§5).
+
 ### 2.1 Releases
 
 | Release | Format versions it writes | Functions | What changed |
@@ -234,6 +240,12 @@ one argument in the variable-count form (`42 01 39`), where the released 1.5 kee
 
 ## 3. Overall layout
 
+A document file has three parts. A short header says where the data starts. Two segments of Excel's own code
+follow it, which a reader can skip (§4.1). The data area comes last: a fixed preamble with the sheet's settings
+(§5, §6), then eight **sections**. Each section is one of Excel's in-memory structures, written out in turn by
+Save: number formats, external documents, the cell table, external names, defined names, cell data, windows,
+and page breaks with print settings. A chart is written in a different format (§16).
+
 ```
 +0x00  File header                     24 bytes
 +0x18  Embedded p-code segment 1       header.len1 bytes
@@ -259,6 +271,8 @@ Sections are contiguous and in this order; the section table gives the start of 
 ---
 
 ## 4. File header (24 bytes)
+
+The header identifies the file as an Excel 1.x document and gives where the data area starts.
 
 | Offset | Size | Value in samples | Meaning |
 |-------:|-----:|------------------|---------|
@@ -319,7 +333,9 @@ same code signature `0xAB27`. Chart files carry signature `0x13E8` (§16.2).
 
 ## 5. Data area preamble
 
-At `header.dataOffset`:
+The data area opens with the fields Open needs before it can read the sections: the function count, which says
+whether this Excel knows every function the formulas use; the sheet's settings (§6); whether the document is a
+worksheet or a macro sheet; and where each section starts. At `header.dataOffset`:
 
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
@@ -357,7 +373,10 @@ than the highest function number any formula uses if that is higher. Every sampl
 
 ## 6. Sheet state block (630 bytes)
 
-A raw dump of a contiguous run of application globals. Offsets are relative to the start of the block.
+The document's settings: calculation options, the grid size, column widths, the protection password, the
+standard font and print titles, together with values Excel works out from them. In memory these are a run of
+consecutive global variables for the active document, and Save writes the whole run as it is, so some fields
+are only pointers left over from memory. Offsets are relative to the start of the block.
 
 | Offset | Size | Samples | Meaning |
 |-------:|-----:|---------|---------|
@@ -420,6 +439,9 @@ The cached font values at 0x248–0x254 are recomputed from the font number and 
 
 ### 6.1 Grid dimensions
 
+The cell table (§9) is a full rectangle of entries, so its size has to be known before it can be read. It is
+not stored directly; it comes from three state words:
+
 ```
 nRows = word[0x014] + word[0x020]
 nCols = word[0x274] + word[0x020]
@@ -437,7 +459,8 @@ column index from then on. Most samples are in the second form; `CLOCK.WS`, `CLO
 
 ### 6.2 Password hash
 
-From the password dialog's handler (`24.01` in 1.00, `22.01` in 1.03). For a password of `n` characters
+A protected document stores a 16-bit hash of its password, not the password, in state word `0x242`. The
+algorithm is from the password dialog's handler (`24.01` in 1.00, `22.01` in 1.03). For a password of `n` characters
 `c[1…n]`:
 
 ```
@@ -454,6 +477,10 @@ An empty password gives 0. This is the same hash later Excel versions use for sh
 ---
 
 ## 7. Section 0 — number formats
+
+A number format, such as `#,##0.00` or `d-mmm-yy`, controls how a cell's value is shown. Excel has 19 built in,
+and a document stores any others its cells use, compiled from the text the user typed into a list of tokens.
+A cell refers to its format by number (§9). The section starts:
 
 | Size | Meaning |
 |-----:|---------|
@@ -653,6 +680,10 @@ and with an exponent outside that (`1E+20`, `1.2345678901234E+20`).
 
 ## 8. Section 1 — external documents and row index
 
+This section holds two unrelated things. The external-document table lists the other documents this sheet's
+formulas refer to (links such as `=Budget!A1`). The row index is a size hint for Excel's recalculation
+structures.
+
 **External document table**
 
 | Size | Meaning |
@@ -849,6 +880,10 @@ memory), and its block, `01 00 06` followed by six elements, follows the names.
 
 ## 12. Section 5 — cell data
 
+The cell table (§9) holds integers, TRUE, FALSE and errors itself. Every other value lives here: numbers,
+text and formulas, one record per cell, in the order of the cell table. A cell's entry gives the offset of
+its record (§9). Records carry no type of their own; the cell type says how to read each one.
+
 ### 12.1 Number (type 2)
 
 8 bytes, IEEE double.
@@ -858,6 +893,9 @@ memory), and its block, `01 00 06` followed by six elements, follows the names.
 Pascal string (up to 255 characters).
 
 ### 12.3 Formula record (types 5 and 6)
+
+A formula is stored compiled, as the tokens of §15, with the value it last calculated so that Excel can show
+the sheet without recalculating it. Formula text is not stored; Excel decompiles the tokens to show it.
 
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
@@ -880,6 +918,9 @@ Row word (offset 12):
 | 13–0 | Row |
 
 ### 12.4 Current value
+
+The first 8 bytes of a formula record hold its last result: a number, or a marker followed by text, a logical
+value or an error.
 
 * If bytes 0–1 are **not** `FF FF`: an IEEE double (cell type 5).
 * If bytes 0–1 are `FF FF` (cell type 6), byte 2 selects:
@@ -995,7 +1036,9 @@ expression follows the array-formula class rules of §15.4.
 
 ## 13. Section 6 — windows
 
-One record per open window on the document, front to back, terminated by a `0x00` byte.
+Excel saves the windows that were open on a document, so that opening it brings them back with the same
+position, scrolling, selection and display options. A document can have several windows. One record per
+open window on the document, front to back, terminated by a `0x00` byte.
 
 | Size | Meaning |
 |-----:|---------|
@@ -1129,8 +1172,13 @@ The file ends after this section.
 
 ## 15. Parsed expressions
 
-Reverse-Polish token stream. This is the direct ancestor of the BIFF2 `ptg` encoding: token numbers and
-operand sizes coincide wherever they could be checked ([Excel 1.x and BIFF2](Biff2.md#6-formulas) compares them).
+Excel compiles every formula, and every name's definition, into a sequence of tokens it can evaluate directly,
+and stores only that (§11, §12.3). The tokens are in reverse Polish order, operands before their operator:
+`=A1+2` is a reference to A1, the number 2, then the addition token. Recalculation runs the tokens on a
+stack. To show a formula, Excel turns the tokens back into text, so a reader that wants the text must do the
+same. §15.4 covers the other direction, compiling text as Excel does.
+
+The token stream is the direct ancestor of the BIFF2 `ptg` encoding: token numbers and operand sizes coincide wherever they could be checked ([Excel 1.x and BIFF2](Biff2.md#6-formulas) compares them).
 
 Tokens `0x01`–`0x1F` are plain bytes. Tokens from `0x20` up carry a **class** in bits 6–5:
 
@@ -1425,8 +1473,9 @@ index         jump       table      choice 1   skip       choice 2   skip       
 **Numbers.** Whole numbers 0–65535 are `1E` words; other numbers are `1F` doubles (`=65535` is `1E FF FF`,
 `=65536` a double, `Literals`). A minus sign directly on a number constant is folded into it: `-1` is `1F BF
 F0 00 00 00 00 00 00`, not `1E 00 01 13`. A minus sign on anything else is `13`. Excel 1.00 shows a number
-constant as the General format does (§7), with at most 14 significant digits, in the formula bar and in SYLK
-alike. Text with more digits therefore comes back shorter, and entering the shorter text again can give a
+constant as the General format does (§7): at most 14 significant digits, rounded, with a tie at the 14th digit
+rounding down. GET.FORMULA gives `=0.12345678901235` for `=0.12345678901234567`, `=99999999999999` for
+`=99999999999999.5` and `=1.2345678901235E-20` for `=1.2345678901234567E-20`, and SYLK writes the same text. Text with more digits therefore comes back shorter, and entering the shorter text again can give a
 slightly different double: `CORRECT MACROS` defines `Tb` as a time that shows as `0.71097222222222`, whose
 double differs from the stored one in the last bit.
 
@@ -1530,6 +1579,9 @@ and Format > Patterns, and charts the library built and Excel 1.00 re-saved (`Li
 
 ### 16.2 Header (128 bytes)
 
+The header gives the chart format's version, the code signature, and where the data and the series lists
+start.
+
 | Offset | Size | Value | Meaning |
 |-------:|-----:|-------|---------|
 | 0 | word | `0x018C` | Magic. Open rejects anything else. |
@@ -1566,6 +1618,8 @@ Zero is eight zero bytes. A value whose exponent exceeds 63 is written as expone
 below −63 as exponent −63 with digits `10 00 …`. So 1.0 is `41 10 00 00 00 00 00 00`.
 
 ### 16.4 Common sub-records
+
+Fonts, line formats and area formats appear in several chart records in the same forms, described once here.
 
 **Font descriptor** (4 bytes):
 
