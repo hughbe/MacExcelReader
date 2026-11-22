@@ -278,6 +278,8 @@ sheet.Cells["A1"].SetText("Total");
 sheet.Cells["A2"].SetValue(42);                   // stored as Integer
 sheet.Cells["A3"].SetValue(3.25);                 // stored as Number
 sheet.Cells["A3"].NumberFormat = 2;               // 0.00
+sheet.Cells["A4"].SetValue(1234.5);
+sheet.Cells["A4"].NumberFormat = sheet.AddNumberFormat("#,##0.00 \"DM\"");   // a user format: index 19
 sheet.Cells["A3"].Bold = true;
 sheet.Save("Totals");
 ```

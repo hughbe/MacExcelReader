@@ -74,6 +74,30 @@ public sealed class ExcelDocument
     public List<ExcelNumberFormat> NumberFormats { get; } = [];
 
     /// <summary>
+    /// Compiles format text with the given release's rules (see <see cref="ExcelNumberFormat.Parse(string, ExcelVersion)"/>),
+    /// adds it to <see cref="NumberFormats"/> in the form this document's <see cref="Version"/> stores, and returns the
+    /// index cells use for it. A format only Excel 1.5 can read needs <see cref="Version"/> 18.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The format needs version 18 and the document is version 17, or the
+    /// document already has the most formats Excel allows.</exception>
+    public int AddNumberFormat(string text, ExcelVersion version = ExcelVersion.Excel100)
+    {
+        var format = ExcelNumberFormat.Parse(text, version, Version >= Version18);
+        if (Version < Version18 && ExcelNumberFormat.Parse(text, version).RequiresVersion18)
+        {
+            throw new InvalidOperationException($"\"{text}\" can only be read by Excel 1.5: set Version to {Version18} first.");
+        }
+
+        if (ExcelNumberFormat.BuiltIn.Count + NumberFormats.Count >= 64)
+        {
+            throw new InvalidOperationException("A document has at most 64 number formats, built-in ones included.");
+        }
+
+        NumberFormats.Add(format);
+        return ExcelNumberFormat.BuiltIn.Count + NumberFormats.Count - 1;
+    }
+
+    /// <summary>
     /// Gets the number format a cell's format index refers to: one of the built-in formats, or one of
     /// <see cref="NumberFormats"/> from 19 on. Returns null for an index past the last format.
     /// </summary>
@@ -639,15 +663,9 @@ public sealed class ExcelDocument
 
         // Section 6: windows.
         sections[6] = writer.Position;
-        int windowState = Version >= Version18 ? ExcelWindow.Version18StateSize : ExcelWindow.StateSize;
         foreach (var window in Windows)
         {
-            if (window.State.Length != windowState)
-            {
-                throw new InvalidOperationException($"Window state blocks must be {windowState} bytes in a version-{Version} file.");
-            }
-
-            window.Write(writer);
+            window.Write(writer, Version >= Version18);
         }
 
         writer.WriteByte(0);

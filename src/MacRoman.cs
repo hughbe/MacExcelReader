@@ -62,21 +62,13 @@ public static class MacRoman
         var result = new byte[value.Length];
         for (int i = 0; i < value.Length; i++)
         {
-            char c = value[i];
-            if (c < 0x80)
-            {
-                result[i] = (byte)c;
-            }
-            else if (s_reverse.TryGetValue(c, out var b))
-            {
-                result[i] = b;
-            }
-            else
-            {
-                result[i] = (byte)'?';
-            }
+            result[i] = GetByte(value[i]);
         }
 
         return result;
     }
+
+    /// <summary>Encodes one character as Mac OS Roman, or '?' when it has no equivalent.</summary>
+    internal static byte GetByte(char c)
+        => c < 0x80 ? (byte)c : s_reverse.TryGetValue(c, out byte b) ? b : (byte)'?';
 }

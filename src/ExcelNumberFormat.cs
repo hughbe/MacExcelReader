@@ -60,6 +60,52 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     /// </summary>
     public static IReadOnlyList<ExcelNumberFormat> BuiltIn => s_builtIn;
 
+    /// <summary>
+    /// Compiles format text, such as <c>#,##0.00;(#,##0.00)</c>, as the given release's Format Number command does
+    /// (spec §7). Releases before 1.5 follow Excel 1.00's compiler and give the three-section form of a version-17
+    /// file; <see cref="ExcelVersion.Excel150"/> follows Excel 1.5's, which adds text sections, <c>@</c>, colours
+    /// and scaling commas, and gives the four-section form of a version-18 file. Letters, quotes and separators are
+    /// the US ones.
+    /// </summary>
+    /// <exception cref="FormatException">The text is not a format the release accepts.</exception>
+    public static ExcelNumberFormat Parse(string text, ExcelVersion version = ExcelVersion.Excel100)
+        => NumberFormatCompiler.Compile(text, version, textSection: version >= ExcelVersion.Excel150);
+
+    /// <summary>
+    /// Compiles format text for a document of the given format version: as <see cref="Parse(string, ExcelVersion)"/>, but in a version-17
+    /// file Excel 1.5's formats keep only their first three sections, as its Save does (spec §7).
+    /// </summary>
+    internal static ExcelNumberFormat Parse(string text, ExcelVersion version, bool textSection)
+        => NumberFormatCompiler.Compile(text, version, textSection && version >= ExcelVersion.Excel150);
+
+    /// <summary>
+    /// Gets whether only Excel 1.5 can read the format, so a document holding it must be saved as version 18 (spec
+    /// §2.1): it uses <c>@</c> or a colour, scales by trailing commas, or has a text section of its own.
+    /// </summary>
+    public bool RequiresVersion18
+    {
+        get
+        {
+            if (SectionCount == 4 && HasOwnTextSection())
+            {
+                return true;
+            }
+
+            for (int s = 0; s < SectionCount; s++)
+            {
+                foreach (var token in Tokenize(GetSection((ExcelNumberFormatSection)s)))
+                {
+                    if (token.Code is 0x23 or 0x24 || (token.Code is 0x03 or 0x1C && token.Operands.Length == 3 && (sbyte)token.Operands[2] < token.Operands[1]))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+    }
+
     /// <summary>Gets the number of sections: 3, or 4 with Excel 1.5's text section.</summary>
     public int SectionCount => Descriptor.Length == 9 ? 4 : 3;
 
