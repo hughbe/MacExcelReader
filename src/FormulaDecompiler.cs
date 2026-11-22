@@ -130,7 +130,9 @@ internal static class FormulaDecompiler
                         break;
                     case 0x1F:
                         Push(ref text, starts, ref count);
-                        text.AppendFormatted(BinaryPrimitives.ReadDoubleBigEndian(expression.Slice(p)), "R");
+                        // Excel 1.00 writes a number constant as General shows it, with at most 14 significant digits (spec
+                        // §15.4), so text with more digits comes back shorter.
+                        text.Append(ExcelValueFormatter.FormatGeneral(BinaryPrimitives.ReadDoubleBigEndian(expression.Slice(p))));
                         break;
                     case 0x20:
                         Push(ref text, starts, ref count);
@@ -198,9 +200,8 @@ internal static class FormulaDecompiler
                         // A definition's area (0x2D) holds offsets for its relative parts (spec §11).
                         var origin = token.Code == 0x2D ? relativeTo : default;
                         PushOperand(ref text, starts, ref count, document, ref pendingExternal);
-                        AppendCell(ref text, BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p)), expression[p + 4], origin);
-                        text.Append(':');
-                        AppendCell(ref text, BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p + 2)), expression[p + 5], origin);
+                        AppendArea(ref text, BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p)), BinaryPrimitives.ReadUInt16BigEndian(expression.Slice(p + 2)),
+                            expression[p + 4], expression[p + 5], origin);
                         break;
                     }
 
@@ -499,6 +500,53 @@ internal static class FormulaDecompiler
         }
 
         text.AppendFormatted(RowWord.Row(rowWord) + 1, default);
+    }
+
+    // An area. One that spans every column is written as rows, 1:3 or $18:$19, and one that spans every row as columns,
+    // A:B; Excel 1.00 shows =A1:IV1 as =1:1 and =$A$1:$IV$16384 as =$1:$16384. A row or column is absolute when its
+    // own flag says so.
+    private static void AppendArea(ref TextBuffer text, ushort firstRowWord, ushort lastRowWord, byte firstColumn, byte lastColumn, ExcelCellAddress relativeTo)
+    {
+        (firstRowWord, firstColumn) = RowWord.Move(firstRowWord, firstColumn, relativeTo.Row, relativeTo.Column);
+        (lastRowWord, lastColumn) = RowWord.Move(lastRowWord, lastColumn, relativeTo.Row, relativeTo.Column);
+        if (firstColumn == 0 && lastColumn == ExcelCellGrid.MaxColumns - 1)
+        {
+            AppendRow(ref text, firstRowWord);
+            text.Append(':');
+            AppendRow(ref text, lastRowWord);
+        }
+        else if (RowWord.Row(firstRowWord) == 0 && RowWord.Row(lastRowWord) == ExcelCellGrid.MaxRows - 1)
+        {
+            AppendColumn(ref text, firstRowWord, firstColumn);
+            text.Append(':');
+            AppendColumn(ref text, lastRowWord, lastColumn);
+        }
+        else
+        {
+            AppendCell(ref text, firstRowWord, firstColumn, default);
+            text.Append(':');
+            AppendCell(ref text, lastRowWord, lastColumn, default);
+        }
+
+        static void AppendRow(ref TextBuffer text, ushort rowWord)
+        {
+            if (!RowWord.IsRowRelative(rowWord))
+            {
+                text.Append('$');
+            }
+
+            text.AppendFormatted(RowWord.Row(rowWord) + 1, default);
+        }
+
+        static void AppendColumn(ref TextBuffer text, ushort rowWord, byte column)
+        {
+            if (!RowWord.IsColumnRelative(rowWord))
+            {
+                text.Append('$');
+            }
+
+            AppendColumnName(ref text, column);
+        }
     }
 
     /// <summary>

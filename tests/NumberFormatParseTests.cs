@@ -99,6 +99,21 @@ public class NumberFormatParseTests
         Assert.Equal(0x01, ExcelNumberFormat.Parse("0.00", ExcelVersion.Excel150).GetSection(ExcelNumberFormatSection.Text)[0]);
     }
 
+    // Excel 1.00 writes the negative section of any format with more than one, and leaves out a zero section
+    // with the positive section's bytes, even an empty one; Excel 1.5 leaves out only sections that repeat a
+    // non-empty positive one. Both show what Excel 1.00 exported to SYLK for `Format Compiler`.
+    [Theory]
+    [InlineData(";;", ";", ";;")]
+    [InlineData("0.0;;", "0.0;;", "0.0;;")]
+    [InlineData("0;(0)", "0;(0)", "0;(0)")]
+    [InlineData("0.00", "0.00", "0.00")]
+    public void ToText_FollowsEachReleasesSectionRule(string format, string excel100, string excel150)
+    {
+        var compiled = ExcelNumberFormat.Parse(format);
+        Assert.Equal(excel100, compiled.ToText(ExcelVersion.Excel100));
+        Assert.Equal(excel150, compiled.ToText(ExcelVersion.Excel150));
+    }
+
     [Fact]
     public void AddNumberFormat_NeedsVersion18ForExcel15Formats()
     {

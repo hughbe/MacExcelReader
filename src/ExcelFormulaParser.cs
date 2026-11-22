@@ -153,6 +153,9 @@ internal static class ExcelFormulaParser
         /// <summary>Gets the token as written, for error messages.</summary>
         public string Display => Kind == TokenKind.Number ? Number.ToString("R", CultureInfo.InvariantCulture) : Text;
 
+        /// <summary>Gets whether a number token was written as plain digits, as a row number is.</summary>
+        public bool IsDigits { get; init; }
+
         /// <summary>Gets the error of an error token.</summary>
         public ExcelError Error { get; init; }
 
@@ -188,7 +191,8 @@ internal static class ExcelFormulaParser
         {
             int before = _position;
             SkipSpace();
-            return NextToken() with { SpaceBefore = _position > before };
+            bool spaceBefore = _position > before;
+            return NextToken() with { SpaceBefore = spaceBefore };
         }
 
         private Token NextToken()
@@ -326,7 +330,7 @@ internal static class ExcelFormulaParser
             }
 
             // The parser uses the value; the text is only for error messages, and would cost a string.
-            return new Token(TokenKind.Number, string.Empty, start, value);
+            return new Token(TokenKind.Number, string.Empty, start, value) { IsDigits = !span.ContainsAnyExcept("0123456789") };
         }
 
         private Token ReadString(int start)
@@ -405,6 +409,7 @@ internal static class ExcelFormulaParser
         private readonly ExcelVersion _version;
         private Token _current;
         private Token _next;
+        private Token _third;
 
         public Parser(Lexer lexer, ExcelDocument? document, ExcelVersion version)
         {
@@ -413,12 +418,14 @@ internal static class ExcelFormulaParser
             _version = version;
             _current = lexer.Next();
             _next = lexer.Next();
+            _third = lexer.Next();
         }
 
         private void Advance()
         {
             _current = _next;
-            _next = _lexer.Next();
+            _next = _third;
+            _third = _lexer.Next();
         }
 
         /// <summary>Gets the highest function number the formula uses, or -1.</summary>
@@ -582,18 +589,101 @@ internal static class ExcelFormulaParser
 
         private Node ParseRange()
         {
-            var left = ParsePrimary();
+            var left = TryParseWholeRowsOrColumns(external: null) ?? ParsePrimary();
             while (IsOperator(":"))
             {
                 int position = _current.Position;
                 Advance();
-                var right = ParsePrimary();
+                var right = TryParseWholeRowsOrColumns(external: null) ?? ParsePrimary();
                 left = left is RefNode a && right is RefNode b && a.External == b.External
                     ? new AreaNode(a.Position, a.RowWord, b.RowWord, a.Column, b.Column, a.External)
                     : new BinaryNode(position, FormulaTokens.BinaryOperatorCode(":"), left, right);
             }
 
             return left;
+        }
+
+        // Whole rows, 1:3 or $18:$19, and whole columns, A:B or $A:$C, as Excel 1.00 reads them. Whole rows take every
+        // column, A to IV, as absolute columns, and whole columns every row as absolute rows.
+        private AreaNode? TryParseWholeRowsOrColumns(int? external)
+        {
+            if (!(_next.Kind == TokenKind.Operator && _next.Text == ":" && !_next.SpaceBefore && !_third.SpaceBefore))
+            {
+                return null;
+            }
+
+            if (TryRow(_current, out int firstRow, out bool firstRelative) && TryRow(_third, out int lastRow, out bool lastRelative))
+            {
+                int position = _current.Position;
+                Advance();
+                Advance();
+                Advance();
+                return new AreaNode(position, RowWord.Create(firstRow, firstRelative, false), RowWord.Create(lastRow, lastRelative, false),
+                    0, ExcelCellGrid.MaxColumns - 1, external);
+            }
+
+            if (TryColumn(_current, out int firstColumn, out firstRelative) && TryColumn(_third, out int lastColumn, out lastRelative))
+            {
+                int position = _current.Position;
+                Advance();
+                Advance();
+                Advance();
+                return new AreaNode(position, RowWord.Create(0, false, firstRelative), RowWord.Create(ExcelCellGrid.MaxRows - 1, false, lastRelative),
+                    (byte)firstColumn, (byte)lastColumn, external);
+            }
+
+            return null;
+
+            static bool TryRow(Token token, out int row, out bool relative)
+            {
+                row = 0;
+                relative = token.Kind == TokenKind.Number;
+                if (token.Kind == TokenKind.Number && token.IsDigits && token.Number is >= 1 and <= ExcelCellGrid.MaxRows)
+                {
+                    row = (int)token.Number - 1;
+                    return true;
+                }
+
+                if (token.Kind == TokenKind.Identifier && token.Text.Length > 1 && token.Text[0] == '$'
+                    && int.TryParse(token.Text.AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out int number)
+                    && number is >= 1 and <= ExcelCellGrid.MaxRows)
+                {
+                    row = number - 1;
+                    return true;
+                }
+
+                return false;
+            }
+
+            static bool TryColumn(Token token, out int column, out bool relative)
+            {
+                column = 0;
+                relative = true;
+                if (token.Kind != TokenKind.Identifier)
+                {
+                    return false;
+                }
+
+                var letters = token.Text.AsSpan();
+                if (letters.Length > 0 && letters[0] == '$')
+                {
+                    relative = false;
+                    letters = letters[1..];
+                }
+
+                if (letters.Length is < 1 or > 2 || letters.ContainsAnyExcept("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
+                {
+                    return false;
+                }
+
+                foreach (char c in letters)
+                {
+                    column = column * 26 + (char.ToUpperInvariant(c) - 'A' + 1);
+                }
+
+                column--;
+                return column < ExcelCellGrid.MaxColumns;
+            }
         }
 
         private Node ParsePrimary()
@@ -773,6 +863,11 @@ internal static class ExcelFormulaParser
 
         private Node ParsePrimaryReference(int external)
         {
+            if (TryParseWholeRowsOrColumns(external) is { } whole)
+            {
+                return whole;
+            }
+
             if (_current.Kind != TokenKind.Identifier)
             {
                 throw new ExcelFormulaSyntaxException("Expected a reference or name after '!'", _current.Position);
@@ -1254,7 +1349,7 @@ internal static class ExcelFormulaParser
                     // the class of a reference in their place, as Excel 1.03's own compilation shows.
                     int start = -1;
                     if (reference && !_insideMemoryFunction
-                        && (binary.Operator != 0x11 || !(IsPlainReference(binary.Left) && IsPlainReference(binary.Right))))
+                        && (binary.Operator != 0x11 || !(binary.Left is RefNode && binary.Right is RefNode)))
                     {
                         var areas = _definition ? null : Areas(binary);
                         int memoryClass = OperandClass(context);

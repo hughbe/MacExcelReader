@@ -69,6 +69,7 @@ misbehaves, for example with a file that breaks a rule given here.
 18. [Open questions](#18-open-questions)
 * [Appendix A. Functions](#appendix-a-functions)
 * [Appendix B. Workspace files](#appendix-b-workspace-files)
+* [Appendix C. SYLK export](#appendix-c-sylk-export)
 
 ---
 
@@ -443,6 +444,17 @@ displays nothing (`INVOICE LIST`: `$#,##0.00 ;($#,##0.00);` hides zeros). A form
 gets `01` (General) there, as in Microsoft's version-18 sample; `0;-0;0;"t"` stores `09 01 74` (`Format Text
 Section`). Excel 1.5 writes the 3-slot form to version-17 files (`47.11`).
 
+**Format text.** The Format Number dialog, SYLK export and the version check turn a format back into text: the
+positive section first, then the others after `;`. Which sections are written differs by release:
+
+* Excel 1.00–1.06 (`07.16` in 1.00) write the negative section unless the single-section byte is 1, and the
+  zero section unless its offset and length equal the positive section's, even when both are empty. So `;;`,
+  whose three sections are empty at offset 0, comes back as `;`, while `0.0;;` keeps both separators.
+* Excel 1.5 (`0d.19`) leaves out a negative or zero section only when it repeats a non-empty positive section
+  (a zero section is written only after a negative one), and writes the text section unless it is the General that the compiler appended. `;;` comes back as `;;`.
+
+Excel 1.00's SYLK export of `Format Compiler` gives every format in it this way.
+
 Built-in formats are not stored in documents; they live in the application's `FRMT` 256 resource in the same
 descriptor-plus-body form. Total formats are capped at 64. The 19 built-ins, by index, in Excel 1.00. A file
 stores only the index, so a translated Excel shows its own built-ins: the French 1.01's 10 and 18 put the day
@@ -686,6 +698,7 @@ Cell types:
 | 4 | TRUE, FALSE or an error | word 0: high byte 0 for TRUE or FALSE, 1 for an error; low byte the value (1 TRUE, 0 FALSE) or the error code (§12.4). No cell data; bits 15–12 of word 1 are not meaningful. |
 | 5 | Formula, numeric result | Formula record in cell data (§12) |
 | 6 | Formula, non-numeric result | Formula record in cell data (§12) |
+| 7 | Not used | No Excel 1.00 code writes it. All 14 switches on the cell type handle 0–6 only; Open (`46.06`) reads cell data for types 2–6 and Save (`47.0b`) treats 0, 1 and 4 as having none. A reader can reject it. |
 
 Excel picks the type when a constant is typed or entered with FORMULA (Excel 1.00 and 1.5 alike, `Constant
 Cells` and `Constant Cells 1.5` samples). A whole number from 0 to 65535 is an integer: 40000 is `9C 40`, and
@@ -1375,7 +1388,17 @@ index         jump       table      choice 1   skip       choice 2   skip       
 
 **Numbers.** Whole numbers 0–65535 are `1E` words; other numbers are `1F` doubles (`=65535` is `1E FF FF`,
 `=65536` a double, `Literals`). A minus sign directly on a number constant is folded into it: `-1` is `1F BF
-F0 00 00 00 00 00 00`, not `1E 00 01 13`. A minus sign on anything else is `13`.
+F0 00 00 00 00 00 00`, not `1E 00 01 13`. A minus sign on anything else is `13`. Excel 1.00 shows a number
+constant as the General format does (§7), with at most 14 significant digits, in the formula bar and in SYLK
+alike. Text with more digits therefore comes back shorter, and entering the shorter text again can give a
+slightly different double: `CORRECT MACROS` defines `Tb` as a time that shows as `0.71097222222222`, whose
+double differs from the stored one in the last bit.
+
+**Whole rows and columns.** Excel 1.00 shows an area that spans every column (A to IV) as rows, `=$1:$16384` or
+`=1:2`, and one that spans every row (1 to 16384) as columns, `=A:B`, and accepts both forms when typed. A row
+area keeps its columns absolute and a column area its rows. Each operand of a range is shown this way on its
+own, so `=1:1:16384:16384` is a range of two whole-row areas, `46 … 0F 25… 25… 11`, wrapped in a memory area
+like any range whose operands are not both single cells.
 
 **TRUE and FALSE** without parentheses are `1D` constants.
 
@@ -2568,3 +2591,38 @@ Each chart structure is the 392-byte form of the chart record (§16.5, the table
 Excel 2` the table at 652 holds 666 and 1058, the main (scatter) and overlay (pie) charts of `CLOCK.CH`, and
 the count is 2. The rest of the block is a heap: Excel allocates the chart structures, point formats, series
 and strings in it as it needs them (`30.11`), so their places vary.
+
+---
+
+## Appendix C. SYLK export
+
+Save As and `SAVE.AS(name, type)` take type 1 Normal, 2 SYLK, 3 Text (tab-delimited) and 4 WKS (Lotus 1-2-3).
+Excel 1.00 numbers them 0–3 internally and dispatches in `47.05`: Normal goes to the document writer (`47.0b`),
+the others through `72.01` to the SYLK writer (`69.00`), the text writer (`6e.00`) and the WKS writer
+(`74.00`).
+
+SYLK is a text form of the same model, so it shows how Excel 1.00 reads each field. Exporting 84 samples and
+comparing them with the library's reading (7,936 cells, 2,853 formulas) agreed on every constant, number
+format, alignment, style, border, protection flag and name, apart from the format-text and whole-row rules now
+in §7 and §15.4. The records Excel 1.00 writes, in order:
+
+| Record | Meaning |
+|--------|---------|
+| `ID;PXL;N;E` | Header |
+| `P;P<format>` | One per number format, built-in and user, as format text (§7) |
+| `F;P<n>;F<type><digits><align>;S<styles>;W<from> <to> <width>;C<col>` or `R<row>` | Formats. `S` takes the letters D, I, L, R, T, B (§9). A whole-column or whole-row format is written when every cell of the grid in that column or row has the same format. `F;P0;DG0G10;N3 10` gives the defaults. |
+| `B;Y<rows>;X<columns>` | Grid size |
+| `O;L;E;P` | Options |
+| `NN;N<name>;E<expression>;G<key>;F` | A defined name, its macro key and kind |
+| `NE;F<document>;S<reference>;E<reference>` | An external link |
+| `C;Y<row>;X<column>;K<value>;E<formula>;N` | A cell: value, R1C1 formula, `N` when unlocked |
+| `E` | End |
+
+Details a reader of Excel 1.00's SYLK needs:
+
+* Relative references carry an explicit sign: `R[+2]C`.
+* Text values are written in quotes without doubling the quotes inside them.
+* A character above 127 is written as ESC, then its high nibble plus `0x20`, then its low nibble plus `0x30`.
+* `Y` and `X` are left out when they repeat the writer's current row and column. A name record moves the current
+  column, so the first cell after the names can lack an `X` it needs (see Excel bugs).
+* Cell type 7 (§9) has no case in the writer, as in every other cell switch.

@@ -58,6 +58,13 @@ Seen in Excel 1.03. With a large macro sheet open (a 345-row Driver after recomp
 command OPEN returned `#VALUE!` for a small file, and opening it by hand reported "Out of memory". A macro
 that does not check OPEN's result carries on with the wrong window active.
 
+## SYLK export can drop a cell's column (Excel 1.00)
+
+Excel 1.00's SYLK writer (`69.00`) leaves out a cell record's `X` when it equals the column it last wrote, but
+writing a name's definition moves that column too. So the first cell after the `NN` records may have no `X`
+although it is not in the column a reader would assume. A reader that starts the column at 1 and also follows
+the name records gets the cells Excel meant.
+
 ## ACTIVATE needs the window title (Excel 1.00)
 
 Excel 1.00 titles a window with its volume when the document is not on the startup disk (`Ws:F 01 saved`), so

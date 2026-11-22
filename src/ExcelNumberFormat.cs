@@ -165,19 +165,43 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     }
 
     /// <summary>
-    /// Gets the format as text, the way Excel 1.5's Format Number dialog shows it (spec §7): the positive section,
-    /// then the negative, zero and text sections where they differ from it, separated by <c>;</c>.
+    /// Gets the format as text, the way Excel's Format Number dialog shows it (spec §7): the positive section, then
+    /// the negative, zero and text sections, separated by <c>;</c>, leaving out those that repeat the positive one.
     /// </summary>
-    public string ToText()
+    /// <param name="version">
+    /// The release whose rule to follow. Excel 1.00 to 1.06 (<c>07.16</c> in 1.00) write the negative section unless
+    /// the format is single-section, and leave out a zero section with the positive section's offset and length,
+    /// even an empty one: <c>;;</c> comes back as <c>;</c>. Excel 1.5 (<c>0d.19</c>) leaves out a negative or zero
+    /// section that repeats a non-empty positive one, and writes <c>;;</c> back as it is. A format with Excel 1.5's
+    /// text section always follows 1.5.
+    /// </param>
+    public string ToText(ExcelVersion version = ExcelVersion.Excel100)
     {
         var text = new StringBuilder();
         int count = SectionCount;
         int Offset(ExcelNumberFormatSection s) => Descriptor[(int)s];
         int Length(ExcelNumberFormatSection s) => Descriptor[count + (int)s];
-        bool SameAsPositive(ExcelNumberFormatSection s)
-            => Offset(s) == Offset(ExcelNumberFormatSection.Positive) && Length(s) == Length(ExcelNumberFormatSection.Positive) && Length(s) != 0;
+        bool SameBytes(ExcelNumberFormatSection s)
+            => Offset(s) == Offset(ExcelNumberFormatSection.Positive) && Length(s) == Length(ExcelNumberFormatSection.Positive);
 
         AppendSectionText(text, GetSection(ExcelNumberFormatSection.Positive));
+        if (version < ExcelVersion.Excel150 && count == 3)
+        {
+            if (!IsSingleSection)
+            {
+                text.Append(';');
+                AppendSectionText(text, GetSection(ExcelNumberFormatSection.Negative));
+                if (!SameBytes(ExcelNumberFormatSection.Zero))
+                {
+                    text.Append(';');
+                    AppendSectionText(text, GetSection(ExcelNumberFormatSection.Zero));
+                }
+            }
+
+            return text.ToString();
+        }
+
+        bool SameAsPositive(ExcelNumberFormatSection s) => SameBytes(s) && Length(s) != 0;
         if (!SameAsPositive(ExcelNumberFormatSection.Negative))
         {
             text.Append(';');
