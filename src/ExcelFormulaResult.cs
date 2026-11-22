@@ -73,32 +73,17 @@ public readonly struct ExcelFormulaResult
     public ExcelError Error { get; }
 
     /// <summary>
-    /// Gets the value as an object: a double, string, bool, or the error text such as "#VALUE!".
+    /// Gets the value as an object: a double, string, bool, or an <see cref="ExcelError"/>.
     /// </summary>
     public object? Value => Kind switch
     {
         ExcelFormulaResultKind.Number => Number,
         ExcelFormulaResultKind.Text => Text,
         ExcelFormulaResultKind.Boolean => Boolean,
-        ExcelFormulaResultKind.Error => ErrorText(Error),
+        ExcelFormulaResultKind.Error => Error,
         _ => null,
     };
 
-    /// <summary>
-    /// Gets the text Excel shows for an error, such as <c>#N/A</c>; <c>#ERR</c> and the code for a code Excel does
-    /// not have.
-    /// </summary>
-    public static string ErrorText(ExcelError error) => error switch
-    {
-        ExcelError.Null => "#NULL!",
-        ExcelError.DivideByZero => "#DIV/0!",
-        ExcelError.Value => "#VALUE!",
-        ExcelError.Reference => "#REF!",
-        ExcelError.Name => "#NAME?",
-        ExcelError.Number => "#NUM!",
-        ExcelError.NotAvailable => "#N/A",
-        _ => $"#ERR{(byte)error}",
-    };
 
     /// <summary>
     /// Encodes a result as the 8 value bytes of a formula record.

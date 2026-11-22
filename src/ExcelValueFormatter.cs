@@ -281,12 +281,12 @@ public static class ExcelValueFormatter
         // TRUE, FALSE and errors show as they are, whatever the cell's format.
         if (cell.Type == ExcelCellType.BooleanOrError)
         {
-            return cell.IsError ? ExcelFormulaResult.ErrorText(cell.Error) : cell.BooleanValue ? "TRUE" : "FALSE";
+            return cell.IsError ? cell.Error.ToText() : cell.BooleanValue ? "TRUE" : "FALSE";
         }
 
         if (cell.Formula?.Result is { Kind: ExcelFormulaResultKind.Error } result)
         {
-            return ExcelFormulaResult.ErrorText(result.Error);
+            return result.Error.ToText();
         }
 
         return cell.Value switch

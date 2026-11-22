@@ -109,7 +109,7 @@ public class CellTests
         Assert.Equal(false, formula.Result.Value);
 
         formula.SetErrorResult(ExcelError.Value);
-        Assert.Equal("#VALUE!", formula.Result.Value);
+        Assert.Equal(ExcelError.Value, formula.Result.Value);
 
         formula.SetResult(2.5);
         Assert.Equal(2.5, formula.Result.Value);
@@ -126,7 +126,7 @@ public class CellTests
     [InlineData((ExcelError)99, "#ERR99")]
     public void ErrorText(ExcelError error, string expected)
     {
-        Assert.Equal(expected, ExcelFormulaResult.ErrorText(error));
+        Assert.Equal(expected, error.ToText());
     }
 
     [Fact]

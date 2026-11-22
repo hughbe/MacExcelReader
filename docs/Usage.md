@@ -72,7 +72,7 @@ switch (cell.Type)
     case ExcelCellType.Formula: var f = cell.Formula!; break;
 }
 
-object? value = cell.Value;   // ushort, double, string, bool, error text such as "#N/A", or null
+object? value = cell.Value;   // ushort, double, string, bool, ExcelError, or null
 ```
 
 `Integer` cells hold whole numbers from 0 to 65535; Excel stores a typed whole number in that range this way to

@@ -97,7 +97,7 @@ public static class FormulaDecompiler
                     external = 0;
                     break;
                 case 0x1C:
-                    stack.Push(ExcelFormulaResult.ErrorText((ExcelError)expression[p]));
+                    stack.Push(((ExcelError)expression[p]).ToText());
                     break;
                 case 0x1D:
                     stack.Push(expression[p] != 0 ? "TRUE" : "FALSE");
@@ -222,7 +222,7 @@ public static class FormulaDecompiler
                     {
                         1 => BinaryPrimitives.ReadDoubleBigEndian(block.Slice(p)).ToString("R", CultureInfo.InvariantCulture),
                         4 => block[p + 1] != 0 ? "TRUE" : "FALSE",
-                        16 => ExcelFormulaResult.ErrorText((ExcelError)block[p + 1]),
+                        16 => ((ExcelError)block[p + 1]).ToText(),
                         _ => $"?{type}",
                     });
                     p += 8;

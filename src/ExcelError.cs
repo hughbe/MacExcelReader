@@ -26,3 +26,25 @@ public enum ExcelError : byte
     /// <summary><c>#N/A</c>: no value is available.</summary>
     NotAvailable = 0x2A,
 }
+
+/// <summary>
+/// Methods for <see cref="ExcelError"/>.
+/// </summary>
+public static class ExcelErrorExtensions
+{
+    /// <summary>
+    /// Gets the text Excel shows for an error, such as <c>#N/A</c>; <c>#ERR</c> and the code for a code Excel does
+    /// not have.
+    /// </summary>
+    public static string ToText(this ExcelError error) => error switch
+    {
+        ExcelError.Null => "#NULL!",
+        ExcelError.DivideByZero => "#DIV/0!",
+        ExcelError.Value => "#VALUE!",
+        ExcelError.Reference => "#REF!",
+        ExcelError.Name => "#NAME?",
+        ExcelError.Number => "#NUM!",
+        ExcelError.NotAvailable => "#N/A",
+        _ => $"#ERR{(byte)error}",
+    };
+}

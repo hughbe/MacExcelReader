@@ -80,7 +80,7 @@ public class DocumentWriterTests
         Assert.Equal("hi", reread.Cells["A1"].Value);
         Assert.Equal("=\"hi\"", reread.Cells["A1"].Formula!.ToText());
         Assert.Equal(true, reread.Cells["A2"].Value);
-        Assert.Equal("#N/A", reread.Cells["A3"].Value);
+        Assert.Equal(ExcelError.NotAvailable, reread.Cells["A3"].Value);
         Assert.Equal(0, reread.Cells["A3"].Formula!.StoredColumn);
         Assert.Equal(2, reread.Cells["A3"].Formula!.StoredRowWord & 0x3FFF);
     }

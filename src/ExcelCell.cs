@@ -165,13 +165,12 @@ public sealed class ExcelCell
 
     /// <summary>
     /// Gets the cell's value: a <see cref="ushort"/>, <see cref="double"/>, <see cref="string"/>,
-    /// <see cref="bool"/>, an error's text such as <c>#N/A</c>, the formula's current value, or null for an empty
-    /// cell.
+    /// <see cref="bool"/>, an <see cref="ExcelError"/>, the formula's current value, or null for an empty cell.
     /// </summary>
     public object? Value => Type switch
     {
         ExcelCellType.Integer => IntegerValue,
-        ExcelCellType.BooleanOrError => IsError ? ExcelFormulaResult.ErrorText(Error) : BooleanValue,
+        ExcelCellType.BooleanOrError => IsError ? Error : BooleanValue,
         ExcelCellType.Number => ReadNumber(),
         ExcelCellType.Text => DecodeText(),
         ExcelCellType.NumericFormula or ExcelCellType.Formula => DecodeFormula().Result.Value,
@@ -357,6 +356,11 @@ public sealed class ExcelCell
     public override string ToString() => Type switch
     {
         ExcelCellType.Empty => string.Empty,
-        _ => Value?.ToString() ?? string.Empty,
+        _ => Value switch
+        {
+            bool b => b ? "TRUE" : "FALSE",
+            ExcelError e => e.ToText(),
+            var other => other?.ToString() ?? string.Empty,
+        },
     };
 }

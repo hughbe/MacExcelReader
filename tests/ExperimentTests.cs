@@ -24,7 +24,8 @@ public class ExperimentTests
         var result = Load("Errors").Cells[address].Formula!.Result;
         Assert.Equal(ExcelFormulaResultKind.Error, result.Kind);
         Assert.Equal((ExcelError)code, result.Error);
-        Assert.Equal(text, result.Value);
+        Assert.Equal(text, result.Error.ToText());
+        Assert.Equal(result.Error, result.Value);
     }
 
     [Fact]
@@ -62,8 +63,8 @@ public class ExperimentTests
         // The same sheet with 0x018 = 0 kept its zeros even after CALCULATE.NOW (spec §6).
         var document = Load("Recalculated");
         Assert.Equal(ExcelError.DivideByZero, document.Cells["B2"].Formula!.Result.Error);
-        Assert.Equal("#NUM!", document.Cells["B3"].Value);
-        Assert.Equal("#N/A", document.Cells["B4"].Value);
+        Assert.Equal(ExcelError.Number, document.Cells["B3"].Value);
+        Assert.Equal(ExcelError.NotAvailable, document.Cells["B4"].Value);
     }
 
     [Theory]
@@ -195,7 +196,7 @@ public class ExperimentTests
     public void DCountEmptyField_IsNotGiven(string address, string value)
     {
         // Re-entered with FORMULA by the harness in Excel 1.00 and saved (spec §15.3).
-        Assert.Equal(value, Convert.ToString(Load("DCount Empty Field").Cells[address].Value, System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(value, Load("DCount Empty Field").Cells[address].ToString());
     }
 
     [Fact]
@@ -683,7 +684,7 @@ public class ExperimentTests
         var document = Load("Empty Arguments");
         Assert.Equal([0x1E, 0x00, 0x01, 0x16, 0x41, 0x1B], document.Cells["C2"].Formula!.Expression.ToArray());
         Assert.Equal(1, Convert.ToDouble(document.Cells["C2"].Value));          // ROUND(1,) is ROUND(1,0)
-        Assert.Equal("#VALUE!", document.Cells["C3"].Value);                   // MID("abc",,1): start 0
+        Assert.Equal(ExcelError.Value, document.Cells["C3"].Value);            // MID("abc",,1): start 0
         Assert.Equal(ExcelCellType.Empty, document.Cells["C6"].Type);
     }
 
@@ -820,7 +821,8 @@ public class ExperimentTests
         var d2 = document.Cells["D2"];
         Assert.True(d2.IsError);
         Assert.Equal(ExcelError.Reference, d2.Error);
-        Assert.Equal("#REF!", d2.Value);
+        Assert.Equal(ExcelError.Reference, d2.Value);
+        Assert.Equal("#REF!", d2.ToString());
         Assert.Equal("#REF!", ExcelValueFormatter.FormatCell(d2, document));
     }
 

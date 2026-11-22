@@ -314,6 +314,8 @@ sealed class CellCommand : Command<CellSettings>
             null => "(empty)",
             string s => "\"" + s + "\"",
             double d => d.ToString("R", CultureInfo.InvariantCulture),
+            bool b => b ? "TRUE" : "FALSE",
+            ExcelError e => e.ToText(),
             var other => Convert.ToString(other, CultureInfo.InvariantCulture),
         }));
         if (cell.TryGetNumber(out double number) && ExcelValueFormatter.IsDateFormat(cell.NumberFormat, document))
@@ -401,7 +403,7 @@ sealed class CellCommand : Command<CellSettings>
             case 0x1D:
                 return operands[0] != 0 ? "TRUE" : "FALSE";
             case 0x1C:
-                return ExcelFormulaResult.ErrorText((ExcelError)operands[0]);
+                return ((ExcelError)operands[0]).ToText();
             case 0x19:
                 return operands[0] == 0x01 ? "volatile" : (operands[0] & 0x02) != 0 ? "IF jump" : (operands[0] & 0x08) != 0 ? "skip" : (operands[0] & 0x04) != 0 ? "CHOOSE" : $"flags 0x{operands[0]:X2}";
             default:
@@ -468,7 +470,7 @@ sealed class ExportCommand : Command<ExportSettings>
                 var cell = document.Cells.Find(r, c);
                 string text = cell is null ? string.Empty
                     : settings.Formulas && cell.Formula is { } formula ? formula.ToText(document)
-                    : settings.Raw ? Convert.ToString(cell.Value, CultureInfo.InvariantCulture) ?? string.Empty
+                    : settings.Raw ? (cell.Value is ExcelError error ? error.ToText() : Convert.ToString(cell.Value, CultureInfo.InvariantCulture) ?? string.Empty)
                     : ExcelValueFormatter.FormatCell(cell, document);
                 output.Append(Quote(text, separator));
             }
@@ -846,7 +848,7 @@ sealed class JsonCommand : Command<JsonSettings>
                 {
                     address = new ExcelCellAddress(r, c).ToString(),
                     type = cell.Type.ToString(),
-                    value = cell.Value,
+                    value = cell.Value is ExcelError error ? error.ToText() : cell.Value,
                     display = ExcelValueFormatter.FormatCell(cell, document),
                     formula = cell.Formula?.ToText(document),
                     numberFormat = cell.NumberFormat,

@@ -375,7 +375,7 @@ sealed class CheckCommand : Command<CheckSettings>
             string intended = formula.ToText(ours);
             if (result.Formula?.Result is not { } value || value.Kind != ExcelFormulaResultKind.Text)
             {
-                AnsiConsole.MarkupLine($"  [red]{new ExcelCellAddress(r, c)}[/] {Markup.Escape(intended)}: GET.FORMULA gave {Markup.Escape(result.Formula is { } f ? f.Result.Value?.ToString() ?? "nothing" : result.Type.ToString())}");
+                AnsiConsole.MarkupLine($"  [red]{new ExcelCellAddress(r, c)}[/] {Markup.Escape(intended)}: GET.FORMULA gave {Markup.Escape(result.Formula is { } f ? (f.Result.Value is ExcelError e ? e.ToText() : f.Result.Value?.ToString() ?? "nothing") : result.Type.ToString())}");
                 problems++;
                 continue;
             }
