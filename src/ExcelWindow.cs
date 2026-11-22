@@ -182,20 +182,42 @@ public sealed class ExcelWindow
         return window;
     }
 
-    internal void Write(BigEndianWriter writer)
+    internal void Write(BigEndianWriter writer, bool version18 = false)
     {
         writer.WriteByte(0xFF);
-        WriteBody(writer);
+        WriteBody(writer, version18);
     }
 
-    // The rectangle, state and selection: everything after the record's marker byte.
-    internal void WriteBody(BigEndianWriter writer)
+    // The rectangle, state and selection: everything after the record's marker byte. A version-18 file gets the
+    // 129-byte state, a 41-byte one extended as Excel 1.5 sets up a new window (0f.1c: zeros, gridline colour
+    // automatic); a version-17 file gets the first 41 bytes, which cannot hold frozen panes or a gridline colour.
+    internal void WriteBody(BigEndianWriter writer, bool version18 = false)
     {
         writer.WriteInt16(Top);
         writer.WriteInt16(Left);
         writer.WriteInt16(Bottom);
         writer.WriteInt16(Right);
-        writer.WriteBytes(State);
+        if (version18 && !HasVersion18State)
+        {
+            writer.WriteBytes(State);
+            Span<byte> extra = stackalloc byte[Version18StateSize - StateSize];
+            extra.Clear();
+            extra[127 - StateSize] = 1;
+            writer.WriteBytes(extra);
+        }
+        else if (!version18 && HasVersion18State)
+        {
+            if (PanesFrozen || GridlineColor is not null)
+            {
+                throw new InvalidOperationException("Frozen panes and gridline colours need a version-18 file.");
+            }
+
+            writer.WriteBytes(State.AsSpan(0, StateSize));
+        }
+        else
+        {
+            writer.WriteBytes(State);
+        }
         writer.WriteUInt16((ushort)Selection.Count);
         foreach (var range in Selection)
         {

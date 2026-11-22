@@ -1,0 +1,30 @@
+0
+#,0
+0.0;;
+;;
+0;(0)
+dddd, mmmm d, yyyy
+h:mm:ss AM/PM
+h A/P
+mm:ss
+hh "o'clock"
+0.00E-00
+##0.0E+0
+#,##0.00 "DM"
+\x0
+* 0
+0%
+0.0%%
+yy-mm-dd
+d-mmmm
+#,##0,,
+,0
+0.0#
+#.##
+General
+GENERAL
+$0.00;($0.00);"zero"
+0 "a""b"
+mmmmm
+ddddd
+h:m:s

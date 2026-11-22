@@ -508,10 +508,49 @@ So `#,##0` is `03 04 00 00 | 07 | 04 03 | 06 01`: header, thousands on, `###`, `
 wherever they print: `0.0" S"` is `03 01 01 01 | 06 01 | 05 | 06 01 | 09 02 " S"`, and `### ##0.00` uses `02
 20` for the space.
 
-The compiler shows what the header bytes are: it writes the integer-position count, the decimal count, and
-decimals plus twice the number of percent signs. It also shows how the hour tokens are chosen: `h`/`hh`
-compile to `13`/`14`, and are bumped by 12 to `1F`/`20` when an AM/PM designator follows. And it shows that
-`m` is compiled as minutes rather than month when it directly follows an hour token.
+**Compiling format text.** Excel 1.00 compiles a section at a time (`07.09`), up to the next `;`:
+
+| Text | Tokens |
+|------|--------|
+| space `( ) + , - / :` | Literal `02 c` |
+| `\c` | Literal `02 c`, for any character |
+| `"text"` | `09`; an unclosed quote is an error |
+| `#…`, `0…` | A run of the same character is one `04 n` or `06 n`. The first run inserts the header `03 a b c` at the start of the section. A comma inside a run in the integer part turns on thousands: `07` after the header. |
+| `.` | `05`; later runs are decimals |
+| `%` | Literal `02 25`, and two more in the header's `c` |
+| `E+`, `E-` | Turns the header into `1C`, then literal `E`, `1D` or `1E`, and a byte for the exponent's digit count; `E` without a header or a sign is an error |
+| `$` | `22` |
+| `*c` | Fill `0A c`, once per section |
+| `d` to `dddd`, `m` to `mmmm` | `0B`–`0E`, `0F`–`12`; `m` is minutes (`15`, `16`) while an hour is waiting for its minutes |
+| `h`, `hh`, `s`, `ss` | `13`, `14`, `17`, `18` |
+| `yy`, `yyyy` | `19`, `1A`; a lone `y` is an error |
+| `AM/PM`, `A/P` | `21` with the letters as typed; an hour token before it gets 12 added (`1F`, `20`) |
+| `General` | `01`, before any number or date |
+
+Letters are matched in either case. Any other character is an error, and so is mixing digits with dates or
+General. At the end of the section the header gets the integer positions, the decimals, and decimals plus two
+per `%`. A format with thousands and fewer than four integer positions is padded with `#` to four, so `#,0`
+compiles as `#,##0`. A comma after the digits only turns thousands on. The assembler (`07.10`) stores the
+positive section, then the negative, then the zero: with one section the others share its bytes and the
+single-section byte is 1, with two the zero section shares the positive one's, and a fourth section is an
+error. A format compiles to at most 255 bytes.
+
+Excel 1.5's compiler (`0d.0b`, `0d.12`) classifies characters by their place in its format-character string and
+checks the keywords `General`, `AM/PM`, `A/P` and the currency symbol first. It differs from 1.00 in this:
+
+* Any character it does not know is a literal.
+* A comma counts as thousands only when a digit follows it. Commas straight after the digits scale the
+  number, three less in `c` for each, and cannot be combined with `%`.
+* `[colour]` adds `24 n` after the number header (or first), once per section; a section with only a colour
+  gets General.
+* `@` gives `23`, in a section without numbers or dates. That section is the text section and must be the last.
+  A positive section that is only General (and a colour) doubles as the text section. Otherwise General (`01`)
+  is appended as the text section: every version-18 format has one. A format of only a text section, such as
+  `@`, gets General appended as its number sections, so Excel shows it as `General;@`.
+* For a version-17 file, Save recompiles each format and keeps the first three slots (`47.11`).
+
+Every format in the samples and in the test lists compiles to Excel's own bytes (`Format Compiler` in Excel 1.00,
+`Format Compiler 1.5`).
 
 **How a format shows a number.** Excel's TEXT function, given each sample format and a range of values, shows
 these rules (`TEXT Formats 1`, `TEXT Formats 2`, `TEXT Date Limits` in Excel 1.00; `TEXT Formats 1.5`):

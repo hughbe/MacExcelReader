@@ -1,0 +1,13 @@
+#,##0,,
+0.0,
+[RED]0;[BLUE]-0;0;@
+@" units"
+"$"0
+0 "x";@
+General;[RED]General
+mmm d, yy h:mm
+x0
+[Green]
+0.0;;;
+"pre"@"post"
+#,##0.00_)
