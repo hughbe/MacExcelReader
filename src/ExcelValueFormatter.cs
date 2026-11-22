@@ -246,10 +246,36 @@ public static class ExcelValueFormatter
     /// </summary>
     public static string FormatCell(ExcelCell cell, ExcelDocument? document = null)
     {
+        return FormatCellCore(cell, document, null);
+    }
+
+    /// <summary>
+    /// Formats a cell's value as Excel 1.00 shows it in its column (spec §7): General fits the column, fills repeat
+    /// across it, and a number too wide for it shows as a row of <c>#</c>. Text is returned whole, since Excel lets
+    /// it run into the next cells. Excel measures in pixels with the sheet's font; this counts the column's width
+    /// in digit widths (the cached <see cref="ExcelSheetState.DigitWidth"/>, or the bold one for a bold cell), so it
+    /// is an approximation.
+    /// </summary>
+    public static string FormatCell(ExcelCell cell, ExcelDocument document, int column)
+    {
+        ArgumentNullException.ThrowIfNull(cell);
+        ArgumentNullException.ThrowIfNull(document);
+        int digit = cell.Bold ? document.State.BoldDigitWidth : document.State.DigitWidth;
+        return FormatCellCore(cell, document, document.State.GetColumnWidth(column) / Math.Max(1, digit));
+    }
+
+    private static string FormatCellCore(ExcelCell cell, ExcelDocument? document, int? width)
+    {
         ArgumentNullException.ThrowIfNull(cell);
         if (cell.TryGetNumber(out double number))
         {
-            return Format(number, cell.NumberFormat, document);
+            if (width is not { } columns)
+            {
+                return Format(number, cell.NumberFormat, document);
+            }
+
+            var format = document?.GetNumberFormat(cell.NumberFormat) ?? ExcelNumberFormat.BuiltIn[0];
+            return format.Format(number, columns);
         }
 
         return cell.Value switch

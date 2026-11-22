@@ -107,6 +107,7 @@ document so it can use the sheet's own formats (index 19 and up):
 
 ```csharp
 string shown = ExcelValueFormatter.FormatCell(cell, document); // "1/1/84", "$1,000 ", "22-17-023"…
+string drawn = ExcelValueFormatter.FormatCell(cell, document, column: 2); // fitted to column C: "1.2E+08", "#####"…
 ExcelNumberFormat format = document.GetNumberFormat(cell.NumberFormat)!;
 string text = format.ToText();                                 // "00-00-000", as the Format Number dialog shows it
 string fmt = ExcelValueFormatter.GetBuiltInFormat(10);        // "m/d/yy"

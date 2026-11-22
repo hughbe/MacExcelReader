@@ -134,8 +134,23 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     }
 
     /// <summary>Formats a number with this format.</summary>
-    public string Format(double value)
+    public string Format(double value) => Format(value, null);
+
+    /// <summary>
+    /// Formats a number as Excel shows it in a column with room for <paramref name="width"/> characters (spec §7,
+    /// <c>19.0d</c> and <c>19.0e</c> in Excel 1.00): General gets the characters the rest of the text leaves, a fill
+    /// repeats into the room left, and text that does not fit becomes a row of <c>#</c>. Excel measures in pixels;
+    /// counting every character as one digit width, as this does, is an approximation.
+    /// </summary>
+    public string Format(double value, int width) => Format(value, (int?)width);
+
+    private string Format(double value, int? width)
     {
+        if (width <= 0)
+        {
+            return string.Empty;
+        }
+
         if (double.IsNaN(value) || double.IsInfinity(value))
         {
             return ExcelValueFormatter.FormatGeneral(value);
@@ -157,12 +172,60 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         string? shown = FormatSection(GetSection(section), magnitude);
         if (shown is null)
         {
-            return ExcelValueFormatter.FormatGeneral(value);
+            // A date Excel cannot show: TEXT gives #VALUE!, and a cell a row of #.
+            return width is { } columns ? new string('#', columns) : ExcelValueFormatter.FormatGeneral(value);
         }
 
         // A single-section format shows a negative number as a minus sign and the format of its magnitude, dates
         // included: -1234.567 in m/d/yy is -5/19/07.
-        return value < 0 && section == ExcelNumberFormatSection.Positive && shown.Length > 0 ? "-" + shown : shown;
+        if (value < 0 && section == ExcelNumberFormatSection.Positive && shown.Length > 0)
+        {
+            shown = "-" + shown;
+        }
+
+        return Resolve(shown, magnitude, width);
+    }
+
+    // Stand-ins for a General token and a fill, resolved once the rest of the text is known.
+    private const char GeneralMark = '\uE000';
+    private const char FillMark = '\uE001';
+
+    private static string Resolve(string text, double magnitude, int? width)
+    {
+        int fill = text.IndexOf(FillMark);
+        char fillChar = fill >= 0 && fill + 1 < text.Length ? text[fill + 1] : ' ';
+        if (fill >= 0)
+        {
+            text = text.Remove(fill, Math.Min(2, text.Length - fill));
+        }
+
+        int general = text.IndexOf(GeneralMark);
+        if (general >= 0)
+        {
+            // General gets the room the rest of the text leaves (19.0d).
+            int left = width is { } columns ? Math.Max(1, columns - (text.Length - 1)) : 20;
+            string shown = ExcelValueFormatter.FormatGeneral(magnitude, left);
+            text = text.Remove(general, 1).Insert(general, shown);
+            if (fill > general)
+            {
+                fill += shown.Length - 1;
+            }
+        }
+
+        if (width is not { } room)
+        {
+            return text;
+        }
+
+        if (fill >= 0)
+        {
+            // The fill repeats into what is left, less a pixel (19.0d): one character fewer here.
+            int count = Math.Max(0, room - text.Length - 1);
+            text = text.Insert(Math.Min(fill, text.Length), new string(fillChar, count));
+        }
+
+        // Text wider than the column shows as #s (19.0e).
+        return text.Length > room ? new string('#', room) : text;
     }
 
     private static bool RoundsToZero(ReadOnlySpan<byte> section, double magnitude)
@@ -405,7 +468,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             {
                 if (token.Code == 0x01)
                 {
-                    text.Append(ExcelValueFormatter.FormatGeneral(magnitude));
+                    text.Append(GeneralMark);
                 }
                 else
                 {
@@ -581,6 +644,9 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
                 break;
             case 0x22:
                 text.Append('$');
+                break;
+            case 0x0A when op.Length == 1:
+                text.Append(FillMark).Append(MacRoman.GetString([op[0]]));
                 break;
         }
     }
