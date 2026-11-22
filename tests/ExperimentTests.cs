@@ -199,6 +199,49 @@ public class ExperimentTests
     }
 
     [Fact]
+    public void Excel101_NewSheetHasTheExtraHeaderAndTranslatedNames()
+    {
+        // NEW(1) and SAVE.AS in the French Excel 1.01: a one-byte extra header holding 0, and a new sheet's five
+        // built-in names from its strings (spec §5, §11).
+        var document = Load("New Sheet French");
+        Assert.Equal([0], document.ExtraHeader);
+        Assert.Equal(208, document.FunctionCount);
+        Assert.Equal(
+            ["Base_de_données", "Critères", "Enregistrement", "Impression_des_titres", "Zone_d_impression"],
+            document.Names.Select(n => n.Name));
+    }
+
+    [Fact]
+    public void Excel101_AddsItsNamesToAFileAndKeepsTheTokens()
+    {
+        // A library sheet opened and saved by the French Excel 1.01: it adds its own five built-in names to the
+        // English ones, and the formulas keep the library's tokens (spec §11, §15.4).
+        var document = Load("Formulas French");
+        Assert.Equal(10, document.Names.Count);
+        Assert.Contains(document.Names, n => n.Name == "Critères");
+        Assert.Contains(document.Names, n => n.Name == "Criteria");
+        foreach (var address in new[] { "B4", "B5", "B6", "B9" })
+        {
+            var formula = document.Cells[address].Formula!;
+            Assert.Equal(
+                FormulaTokens.ClearStaleBytes(ExcelFormula.Parse(formula.ToText(document), document).Expression),
+                FormulaTokens.ClearStaleBytes(formula.Expression));
+        }
+    }
+
+    [Theory]
+    [InlineData("A7", "=SOMME(L[-3]C[2],L[-2]C[2])")]
+    [InlineData("A9", "=ARRONDI(L[-4]C[2],0)")]
+    [InlineData("A10", "={1.2;3.4}")]
+    [InlineData("A12", "=VRAI")]
+    public void Excel101_GetFormulaIsFrench(string address, string text)
+    {
+        // GET.FORMULA in the French Excel 1.01 on an English system: French function names, L for row in R1C1, a
+        // comma between arguments and a full stop between array columns (spec §15.4).
+        Assert.Equal(text, Load("Driver French").Cells[address].Value);
+    }
+
+    [Fact]
     public void PieExplodedAll_DefaultSeriesFormatHoldsTheExplosion()
     {
         // GALLERY.PIE(4): every slice pulled out by 20%.

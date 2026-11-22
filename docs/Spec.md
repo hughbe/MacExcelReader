@@ -16,7 +16,7 @@ charts. It was reverse-engineered from the applications' code and checked agains
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00`.
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 46 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 49 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
@@ -25,7 +25,7 @@ experiments. A reader built from this spec reads all of them, and a writer rebui
 | Excel 1.00 program disk | `Resume Excel`, a workspace file (Appendix B) |
 | Excel 1.03 disk | `Worksheet1` (empty worksheet). The disk's other samples are byte-identical to the 1.00 disk's. |
 | Excel 1.5 sampler | 26 worksheets and macro sheets, including one version-18 file (`SIMUL EQUATIONS`), and 2 charts (`BREAK CHART`, `PROFIT CHART`) |
-| Experiments | Files Excel 1.00, 1.03 and 1.5 saved in the test harness (docs/Testing.md), each named for what it shows, such as `Literals`, `Errors`, `Column Widths`, `Table Deleted Input`, `Arrow Heads` and `Legend`. They are in `tests/Samples`, next to the release that saved them. |
+| Experiments | Files Excel 1.00, 1.01, 1.03 and 1.5 saved in the test harness (docs/Testing.md), each named for what it shows, such as `Literals`, `Errors`, `Column Widths`, `Table Deleted Input`, `Arrow Heads` and `Legend`. They are in `tests/Samples`, next to the release that saved them. |
 
 Microsoft's samples hold 1,282 formulas and 206 name definitions. §2.3 explains how to tell which build saved
 each file.
@@ -129,7 +129,7 @@ from memory (above), except in the cell table, where the writer replaces them wi
 |---------|--------------------------|-----------|--------------|
 | 1.00 (September 1985) | 17 | 0–207 | — |
 | 1.01 | 17 | 0–207 | Adds a one-byte extra header (§5) and drops the extra function names (§14), keeping the function-count flag in state word `0x01C` instead (§5, §6). Takes the argument separator and other characters from the system's international settings (§15.4), and moves its words into resources so that it can be translated: function names (§15.3), the built-in names of a new sheet (§11), built-in number formats and format letters (§7), and the workspace file's name (Appendix B). Function table and tokens identical to 1.00's. |
-| 1.03 | 17 | 0–207 | Writes a zero-length name for an external entry that refers to the document itself (§8), and makes its in-memory external entries 16 bytes (§8). Function table and tokens identical to 1.00's. |
+| 1.03 | 17 | 0–207 | Writes a zero-length name for an external entry that refers to the document itself (§8), and makes its in-memory external entries 16 bytes (§8). Function table and tokens identical to 1.01's. |
 | 1.04 | 17 | 0–208 | Adds CHANGE.LINK (208), known only from Excel 1.5's messages. No 1.04 sample or code is available; its encoding is **(assumed)** to be 1.03's. |
 | 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of twelve functions (Appendix A) and the token class of function calls inside IF and CHOOSE (§15.4). Adds frozen panes and gridline colours to windows (§13) and text sections, `@` and colours to number formats (§7). |
 
@@ -656,7 +656,9 @@ Definitions differ from cell formulas:
 A new worksheet always has five names with empty definitions: `Criteria`, `Database`, `Print_Area`,
 `Print_Titles`, `Recorder`. From 1.01 on they come from the string list `STR#` 256, so a translated Excel
 gives its own: the French 1.01's are `Critères`, `Base_de_données`, `Zone_d_impression`,
-`Impression_des_titres` and `Enregistrement`.
+`Impression_des_titres` and `Enregistrement` (`New Sheet French` sample). Excel adds its five names to any
+sheet it opens that lacks them, so a sheet with English names saved by the French Excel has both sets
+(`Formulas French`).
 
 Example (`Expenses`): `08 07 04 | 2D 00 09 00 FF 00 03 | 07 | "Database"`, the area rows 9–255, columns 0–3.
 
@@ -1142,8 +1144,10 @@ and uses their list separator (byte 2) instead: in the compiler, in the formula 
 separator replaces the comma in its operator-character table) and in TABLE's text (`1d.01`). 1.01 forces a
 comma when the settings' country code is 0, the United States (`04.0e` in 1.01); 1.03 reads its exceptions
 from a string resource instead (`02.11` in 1.03). So the French 1.01 on a French system shows `=SOMME(A1;B1)`
-for the same tokens as `=SUM(A1,B1)`. Its own `INTL` 256, which the chart code loads while it works, has `.`,
-`,` and `;`.
+for the same tokens as `=SUM(A1,B1)`. On an English system it keeps the comma, and GET.FORMULA in the French
+1.01 gives `=SOMME(L[-3]C[2],L[-2]C[2])`, with `L` for row in R1C1 references, and `={1.2;3.4}` for
+`{1,2;3,4}`, a full stop between array columns (`Driver French` sample); the tokens are unchanged. Its own
+`INTL` 256, which the chart code loads while it works, has `.`, `,` and `;`.
 
 **Token classes.** For a reference, area or name operand:
 

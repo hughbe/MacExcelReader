@@ -26,7 +26,7 @@ Finally Driver saves itself, so its cells keep Excel's answers.
 
 | Excel | Running Driver |
 |---|---|
-| 1.00, 1.03 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R) |
+| 1.00, 1.01, 1.03 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R; Macro > Exécuter in the French 1.01). `check` cannot turn the French 1.01's GET.FORMULA text into A1, so read it from Driver. |
 | 1.5 | Open Driver. It runs by itself (Auto_Open). Pack with `--excel 1.5`. |
 
 Start Excel from its own disk, not by opening a document from the Finder, which may pick a newer Excel. To
@@ -173,6 +173,7 @@ Things to know:
 | Nov 2026 | 1.00 | Chart > Add Legend on a library chart | Chart header bit 15 is the legend (spec §16.5) |
 | Nov 2026 | 1.00 | Sheets with overflowing text and Fill-aligned runs, saved with state word 0x01A at 0 and 1 | The word has no visible effect (spec §6) |
 | Nov 2026 | 1.00 | DCOUNT with field 1, 0, empty and 2, re-entered with `--recompile` | An empty argument whose type has bit 0x80 is "not given" (spec §15.3) |
+| Nov 2026 | 1.01 (French) | A formula sheet probed with GET.FORMULA, then NEW(1) and SAVE.AS | One-byte extra header; French built-in names, function names and R1C1 letters; same tokens (spec §2.1, §11, §15.4) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every
