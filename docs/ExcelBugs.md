@@ -72,6 +72,18 @@ the relative-column flag instead of from the offset, so a name defined with a re
 up is written `R[+16381]C[-2]` rather than `R[-3]C[-2]`, while one with an absolute column is right (`R[-1]C2`;
 `Relative Names` sample).
 
+## SIGN(-0) is −1 (Excel 1.00)
+
+Excel folds a minus sign into a number constant, so `=SIGN(-0)` stores negative zero (`1F 80 00 00 00 00 00 00 00`),
+and SIGN of negative zero is −1 rather than 0. Excel then shows the formula as `=SIGN(0)` (`Calc 1` sample;
+docs/Calculation.md).
+
+## Some DATE arguments give nonsense (Excel 1.00)
+
+`DATE(1904,1,0)` gives 15824.73037037 and `DATE(2040,12,31)` 328.73037037037, neither a date at all; the day
+before 1 January 1904 should be #NUM! and the last day of 2040 is 49978. `DATE(1984,0,1)` gives 29701 (26 April
+1985) rather than 1 December 1983, and `DATE(1984,1,-1)` gives 1 January 1984 (`Calc 2` sample).
+
 ## ACTIVATE needs the window title (Excel 1.00)
 
 Excel 1.00 titles a window with its volume when the document is not on the startup disk (`Ws:F 01 saved`), so
@@ -99,8 +111,10 @@ Seen in Excel 1.03; the whole-row and array-formula ones also in Excel 1.5. Thes
 
 Seen in Excel 1.03 under Mini vMac. A sheet written with every formula's result set to 0 and state word
 `0x018` at 0 still showed 0 for `=1/0` and `=SQRT(-1)` after CALCULATE.NOW, in automatic calculation. Excel
-recalculates a loaded formula only when something it depends on changes, or when it opens a file whose state
-word `0x018` is 1 or 2 (§6). A writer that cannot work out the results should set that word.
+recalculates a loaded formula only when something it depends on changes, when it opens a file whose state
+word `0x018` is 1 or 2 (§6), or when the formula's own record has a non-zero link at offset 8 other than `FF FE`,
+which puts it on the list of formulas waiting to be recalculated (§12.3; `Dirty` experiment in Excel 1.00). A
+writer that cannot work out the results should set the state word, or `FF FF` at offset 8 of each formula.
 
 ## TABLE with one argument takes a second input it was not given (Excel 1.00, 1.03)
 

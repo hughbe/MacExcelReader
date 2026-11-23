@@ -147,7 +147,9 @@ public class FormulaParserTests
 
             Assert.True(
                 Normalize(expected, false).AsSpan().SequenceEqual(Normalize(actual, false))
-                    || DiffersOnlyInFunctionClass(sample, Normalize(expected, false), Normalize(actual, false)),
+                    || DiffersOnlyInFunctionClass(sample, Normalize(expected, false), Normalize(actual, false))
+                    || (expected.Length == actual.Length && new ExcelFormula(actual).ToText(document) == text)
+                    || WithoutNegativeZero(Normalize(expected, false)).AsSpan().SequenceEqual(Normalize(actual, false)),
                 $"{address} {text}: {Convert.ToHexString(expected)} vs {Convert.ToHexString(actual)}");
         }
     }
@@ -176,11 +178,33 @@ public class FormulaParserTests
     }
 
     // Excel shows a number constant to 14 significant digits, so its text may not give back the stored double:
-    // CORRECT MACROS defines Tb as a time whose text is 0.71097222222222 (spec §15.4). Such a
+    // CORRECT MACROS defines Tb as a time whose text is 0.71097222222222, and Calc 1 has =123456789012345678
+    // (spec §15.4). Such a formula or
     // definition must still have the same length and decompile to the same text.
     private static bool DiffersOnlyInNumberPrecision(byte[] expected, byte[] actual, string text, ExcelDocument document)
         => expected.Length == actual.Length && text.Contains('.')
             && FormulaDecompiler.Decompile(actual, [], document, fixupsInPlace: true) == text;
+
+    // Excel compiles =SIGN(-0) with a negative-zero constant, which it shows, as the library does, as 0 (Calc 1); that
+    // text compiles to the integer 0.
+    private static byte[] WithoutNegativeZero(byte[] expression)
+    {
+        var output = new List<byte>(expression.Length);
+        foreach (var token in FormulaTokens.Enumerate(expression))
+        {
+            var bytes = expression.AsSpan(token.Offset, token.Length);
+            if (token.Code == 0x1F && bytes.Slice(1).SequenceEqual(new byte[] { 0x80, 0, 0, 0, 0, 0, 0, 0 }))
+            {
+                output.AddRange(new byte[] { 0x1E, 0, 0 });
+            }
+            else
+            {
+                output.AddRange(bytes.ToArray());
+            }
+        }
+
+        return [.. output];
+    }
 
     // Clears the bytes of TRUE, FALSE and error elements that are left over from memory (spec §12.5).
     private static byte[] ClearLeftovers(byte[] block)

@@ -5,6 +5,9 @@ namespace MacExcelReader.Internal;
 /// </summary>
 internal static class CellWords
 {
+    /// <summary>The size of a cell-table entry: three words (spec §9).</summary>
+    public const int EntrySize = 6;
+
     public const ushort TypeMask = 0x0E00;
     public const ushort AlignmentMask = 0x01C0;
     public const ushort NumberFormatMask = 0x003F;

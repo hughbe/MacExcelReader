@@ -396,9 +396,15 @@ are only pointers left over from memory. Offsets are relative to the start of th
 | 0x020 | word | 0 / 1 | Which form 0x014 and 0x274 are in: 0 = counts, 1 = last indices (§6.1) |
 | 0x022 | word | | Number of defined names that have a definition (0 for a new sheet, 6 in `REPLACE`). Define Name counts it up; Open and Save carry it through unchanged, so a file written with 0 keeps 0 when Excel re-saves it. Every sample has the true count. |
 | 0x024 | word | | Number of names whose definition is a reference (flag `0x04`, §11; 5 in `REPLACE`). Excel recomputes it when it saves. |
-| 0x026 | long | | Pointer, left over from memory |
-| 0x02A | long | | Head of the in-memory name list, left over from memory |
-| 0x02E | 4 longs | | Pointers and `FFFF` markers, left over from memory |
+| 0x026 | word | `FFFF` | Head of the list of formulas waiting to be recalculated (segment `0x27`, §12.3): the segment word of a pointer, `FFFF` when the list is empty, as it is in every sample with no formula waiting. Open resets it (below) and rebuilds the list. |
+| 0x028 | word | | Recalculation flags: Open sets `0x40` when it puts a formula on the list above and `0x80` for a table waiting to be calculated (`46.06`). Open keeps the file's value and adds to it. |
+| 0x02A | long | | Head of the in-memory name list. Open resets it. |
+| 0x02E | word | | Pointer, used by the name code (`14.08`). Open resets it. |
+| 0x030 | word | | Used by the name code (`14.08`) only. Open keeps the file's value. |
+| 0x032 | long | `FFFF…` | Head of a list of tables waiting to be calculated (`1d.06`, `3f.00`, §12.6). Open resets it. |
+| 0x036 | long | `FFFF…` | Head of a second list of tables, used by recalculation (`27.0c`, `27.0f`, `3f.00`). Open resets it. |
+| 0x03A | word | `FFFF` | Head of the list of all tables (`3f.04`, §12.6). Open resets it and links every table it reads. |
+| 0x03C | word | | Used when a table is unlinked (`1d.06`) only. Open keeps the file's value. |
 | 0x03E | word | 0 / 1 / 2 | 1-based position of the active-sheet external entry (the one named `\0`, §8), or 0 if there is none. Link refresh skips that entry. Excel 1.00 and 1.03 recompute it when they save. |
 | 0x040 | word | 1 | Window counter for the document: set to 1 for a new sheet and updated as windows are opened and closed |
 | 0x042 | 256 words | 75 | **Column widths** in pixels, columns 0…255. Default 75. COLUMN.WIDTH(*w*) stores *w* × the width of `0` in the standard font (`0x254`, 7) + 5, rounded: 1 → 12, 2.5 → 23, 10 → 75, 20 → 145; 0 hides the column (`Column Widths` sample). |
@@ -412,12 +418,12 @@ are only pointers left over from memory. Offsets are relative to the start of th
 | 0x250 | word | | Cached: packed font metric |
 | 0x252 | word | 8 | Cached: width of `0` in bold |
 | 0x254 | word | 7 | Cached: width of `0` in plain |
-| 0x256 | long | | Pointer, left over from memory |
+| 0x256 | long | | Pointer into the document's own record (its offset 38), set by Open and read throughout the application. Open sets it. |
 | 0x25A | long | 0 | Head of the row page-break list in memory (rebuilt from §14) |
 | 0x25E | long | 0 | Head of the column page-break list in memory (rebuilt from §14) |
 | 0x262 | word | 0 | Cached: 1 if a print area is defined |
 | 0x264 | word | 0 | Cached: pixel width of the print-title columns |
-| 0x266 | long | | Pointer, left over from memory |
+| 0x266 | long | | Pointer used by the print-title and print code (`17.16`, `23.01`, `60.0x`). Open resets it. |
 | 0x26A | word | 0 | Cached: number of print-title rows |
 | 0x26C | word | 0 | Cached print-titles value |
 | 0x26E | 6 bytes | 0 | Cached print-titles range (first row word, last row word, first column byte, last column byte) |
@@ -432,7 +438,15 @@ Calculation mode (`0x002`):
 | 1 | Automatic |
 
 Offsets 0x262–0x273 are all derived from the `Print_Area` and `Print_Titles` names by one routine, which is
-re-run whenever a name or a column width changes; a writer can leave them zero.
+re-run whenever a name or a column width changes; a writer can leave them zero. Open does not re-run it: it keeps
+the file's values until then (only New clears them, `10.0b`).
+
+**What Open keeps.** Open reads the whole block into the application's globals for the document (`46.06` in
+1.00), then calls the document initialiser `10.00`, which resets the in-memory fields: the list heads at 0x026,
+0x032, 0x036 and 0x03A to `FFFF` (empty), 0x02A, 0x02E, 0x03E, 0x25A, 0x25E and 0x266 to 0, and 0x256 to a pointer
+into the document's record. It also recomputes the font metrics at 0x248–0x254 (`09.1c`). Every other word keeps
+the file's value, including 0x028, 0x030, 0x03C and the print-title values. A file with junk in all the reset
+fields and the font metrics opens and saves back normally in Excel 1.00 (`excel-test junk`, docs/Testing.md).
 
 The cached font values at 0x248–0x254 are recomputed from the font number and size by a single routine
 (`GetFontInfo` / `CharWidth`); a writer can copy them from a sample.
@@ -740,7 +754,7 @@ A dense, row-major grid: `nRows × nCols` entries of 6 bytes. The entry for (row
 | word 2, bit 15 | Hidden (CELL.PROTECTION) |
 | word 2, bit 14 | Locked (CELL.PROTECTION) |
 | word 2, bit 13 | **Formula uses an array-valued function.** The parser sets it when the formula calls a function whose table entry is marked as returning an array — LINEST, TREND, LOGEST, GROWTH, TRANSPOSE, WINDOWS, DOCUMENTS, LINKS — or ROW or COLUMN in the parser's array mode, or a name whose flags byte has `0x20`. Preserved by Open. |
-| word 2, bits 12–6 | Transient dependency and recalculation marks; Open clears them (`AND 0xE03F`) |
+| word 2, bits 12–6 | Transient dependency and recalculation marks; Open clears them (`AND 0xE03F`) in rows 0 to the last row − 1, every column, but not in the margin row (§6.1, `46.06`), so write them as 0 |
 | word 2, bit 5 | Bottom border |
 | word 2, bit 4 | Top border |
 | word 2, bit 3 | Right border |
@@ -907,8 +921,7 @@ the sheet without recalculating it. Formula text is not stored; Excel decompiles
 | Offset | Size | Meaning |
 |-------:|-----:|---------|
 | 0  | 8 bytes | Current value (below) |
-| 8  | 2 bytes | Left over from memory: values such as `FF FF` and `77 F2` occur in the samples. Ignore; write zero. |
-| 10 | byte | Recalculation scratch; varies. Ignore; write zero. |
+| 8  | 3 bytes | **Link in the list of formulas waiting to be recalculated** (head at state 0x026, §6; segment `0x27`). In memory it points to the next formula on the list, with a segment word of `FFFF` for the last; `00 00` means the formula is not on the list, and `FF FE` that it was taken off (`27.06`). Open puts every formula whose first word is neither `00 00` nor `FF FE` back on the list, so Excel recalculates it as soon as the file is open, even when state word 0x018 is 0: a formula saved with a wrong value is corrected with `FF FF` or `12 34` there and kept with `00 00` or `FF FE` (`Dirty` experiment). The samples' `FF FF`, `77 F2` and similar are formulas that were waiting when the file was saved. Write `00 00 00` to keep the stored value. |
 | 11 | byte | Column |
 | 12 | word | Row and two marks (below) |
 | 14 | byte | `cce` = length of the parsed expression |
