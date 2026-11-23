@@ -381,7 +381,7 @@ are only pointers left over from memory. Offsets are relative to the start of th
 
 | Offset | Size | Samples | Meaning |
 |-------:|-----:|---------|---------|
-| 0x000 | word | 100 | Maximum iterations (Calculation dialog; 1…32767) |
+| 0x000 | word | 100 | Maximum iterations (Calculation dialog; 1…32767). Offsets 0x000–0x013 are Excel's calculation settings, which apply to every open document: see below the table. |
 | 0x002 | word | 1 | Calculation mode (values below; `CALCULATION(2)` saves −1, `CALCULATION(3)` saves 0). Like 0x006 it is a global setting: every sheet Excel saves gets the current one. |
 | 0x004 | word | 1 | Precision: 0 = precision as displayed (results are rounded through the cell format), 1 = full precision |
 | 0x006 | word | 1 | Reference style: 0 = R1C1 (`A1.R1C1(FALSE)` saves it), 1 = A1. It is saved and restored around formula parsing, and is global like 0x002. |
@@ -441,6 +441,13 @@ Calculation mode (`0x002`):
 Offsets 0x262–0x273 are all derived from the `Print_Area` and `Print_Titles` names by one routine, which is
 re-run whenever a name or a column width changes; a writer can leave them zero. Open does not re-run it: it keeps
 the file's values until then (only New clears them, `10.0b`).
+
+**Calculation settings.** Offsets 0x000–0x013 (maximum iterations, calculation mode, precision, reference
+style, maximum change and iteration) are settings of Excel as a whole, not of a sheet. Save writes the ones in
+effect. Open takes them from the file only when no other document is open; otherwise it reads those 20 bytes
+into a scratch buffer and drops them (`46.08`), and Excel carries on with its current settings. A sheet saved
+with iteration on and 5 iterations, opened after another document, does not iterate, and is saved back with
+Excel's settings (docs/Calculation.md).
 
 **What Open keeps.** Open reads the whole block into the application's globals for the document (`46.06` in
 1.00), then calls the document initialiser `10.00`, which resets the in-memory fields: the list heads at 0x026,
