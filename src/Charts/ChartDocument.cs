@@ -329,6 +329,11 @@ public sealed class ChartDocument
         chart.StoredTextCount = (ushort)chart.Texts.Count;
         chart.StoredSeriesWordCount = (ushort)chart.SeriesWords.Count;
         chart.StoredPointFormatCount = (ushort)chart.PointFormats.Count;
+        if (chart.PointFormats.Count == 0)
+        {
+            chart.PointFormatListHead = 0;
+        }
+
         chart.HasXScaleMarker = chart.XAxisScale is not null;
         writer.WriteBytes(chart.Record);
         if (chart.XAxisScale is not null)

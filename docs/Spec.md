@@ -1759,7 +1759,7 @@ come from and go back to.
 | 312 | 250 | 46 | Built-in text object −1 |
 | 358 | 310 | 2 | Pointer, left over from memory; skipped on load |
 | 360 | 312 | 2 | Number of words in the series word list |
-| 362 | 314 | 2 | Pointer, left over from memory |
+| 362 | 314 | 2 | **Head of the list of data-point formats** in memory, which Save walks to write them. Open builds the list, replacing this word, only when the count at 364 is not 0; otherwise it keeps the file's word, so **write 0 when there are no data-point formats**. The samples have 0 exactly when the count is 0. With `A5 A5` here and no formats, Excel 1.00 lost the chart's series and saved garbage records. With formats, the word is left over from memory. |
 | 364 | 316 | 2 | **Number of data-point format records** |
 | 366 | 318 | 12 | **Default series format** (point-format record, §16.8) |
 

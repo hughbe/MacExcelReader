@@ -1026,4 +1026,31 @@ public class ExperimentTests
         Assert.Equal([0, 0, 0], file[position..]);
         Assert.Equal(["MOVE", "SIZE", "FULL"], Enumerable.Range(200, 3).Select(n => ExcelFunctions.Get(n)!.Name));
     }
+
+    [Fact]
+    public void ChartPointFormatListHead_IsZeroWhenThereAreNoPointFormats()
+    {
+        // Record offset 362 heads Excel's list of data-point formats. With junk there and no formats, Excel 1.00 kept
+        // it, lost the chart's series and saved garbage records (docs/Testing.md), so a writer must clear it.
+        var chart = ChartDocument.Read(Sample("Column Fill"));
+        int record = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(Sample("Column Fill").AsSpan(20)) + 8;
+        Assert.NotEqual(0, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(Sample("Column Fill").AsSpan(record + 362)));
+        chart.Charts[0].PointFormats.Clear();
+        byte[] written = chart.ToArray();
+        Assert.Equal(0, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(written.AsSpan(record + 362)));
+        Assert.Equal(0, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(written.AsSpan(record + 364)));
+    }
+
+    [Fact]
+    public void ChartPointFormatListHead_JunkLosesTheSeries()
+    {
+        // Area Drop Lines (no data-point formats) with A5 A5 at record offset 362, opened and saved by Excel 1.00:
+        // Open kept the word as the head of its list of point formats, and Save wrote the chart with its series'
+        // name and references emptied. With 0 there, as in the original, the series survives (spec §16.5).
+        var original = ChartDocument.Read(Sample("Area Drop Lines"));
+        var saved = ChartDocument.Read(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", "Point Format Head Junk 1.00")));
+        Assert.Equal("Margin", original.Series[0].Name);
+        Assert.Equal("", saved.Series[0].Name);
+        Assert.Equal("", saved.Series[0].ValuesReference);
+    }
 }

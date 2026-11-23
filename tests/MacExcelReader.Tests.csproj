@@ -28,6 +28,9 @@
     <Content Include="Data\Sylk 1.5\*.slk">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="Data\Point Format Head Junk 1.00">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="Data\Function Names 1.00 Patched">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
