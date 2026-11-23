@@ -53,9 +53,11 @@ sealed class JunkFiller(byte[] data, byte junk, IReadOnlyCollection<string> cate
 {
     public const string CategoryList = "header, segcount, segments, sections, state, cache, counts, links, rows, cells, formulas, formula-scratch, formula-text, recalc-link, margin-marks, state-live, print-cache, tokens, shared, names, windows, print";
 
+    // rows (the row index, §8) is a size hint Excel allocates from, so junk there runs it out of memory; it is left
+    // out by default.
     // segcount (header word 12) and sections (the section table) are left out by default: the library itself relies
     // on them, so each is tested in Excel on its own.
-    public static readonly string[] All = [.. CategoryList.Split(", ").Where(c => c is not ("segcount" or "sections" or "recalc-link" or "margin-marks" or "state-live" or "print-cache") && !c.StartsWith("formula-", StringComparison.Ordinal))];
+    public static readonly string[] All = [.. CategoryList.Split(", ").Where(c => c is not ("segcount" or "sections" or "recalc-link" or "margin-marks" or "state-live" or "print-cache" or "rows") && !c.StartsWith("formula-", StringComparison.Ordinal))];
 
     public Dictionary<string, int> Counts { get; } = [];
 

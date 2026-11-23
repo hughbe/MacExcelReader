@@ -743,6 +743,10 @@ In memory each row has a 4-byte slot that may point at a per-row auxiliary table
 entry count (low 15 bits of its first word), or 0 if the row has none. Open, for a value greater than 2,
 allocates an *empty* table with that capacity (`2n + 2` bytes) and does not read any contents. So the word is
 only a size hint for a structure Excel rebuilds at run time; a writer can emit 0 and a reader can ignore it.
+Excel trusts the hint, though: a large value costs memory. With `A5 A5` in every row (about 84 KB per row) of
+three files opened and closed one after another, and junk in other fields too, Excel 1.00 ran out of memory and
+hung saving the next large sheet; with the same files and `01 01` in the row index it did not
+(docs/Testing.md). Write 0, or the true count.
 
 The structure is the recalculation dependency index. A row's slot records which rows hold formulas that refer
 to cells in this row; its top two bits tag the form: 1 for a single row held inline, 2 for an inline pair, 3
