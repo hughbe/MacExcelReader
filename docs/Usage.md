@@ -130,12 +130,23 @@ document so it can use the sheet's own formats (index 19 and up):
 
 ```csharp
 string shown = ExcelValueFormatter.FormatCell(cell, document); // "1/1/84", "$1,000 ", "22-17-023"…
-string drawn = ExcelValueFormatter.FormatCell(cell, document, column: 2); // fitted to column C: "1.2E+08", "#####"…
+string drawn = ExcelValueFormatter.FormatCell(cell, document, column: 2); // fitted to column C: "1.2E+08", "####"…
 ExcelNumberFormat format = document.GetNumberFormat(cell.NumberFormat)!;
 string text = format.ToText();                                 // "00-00-000", as the Format Number dialog shows it
 string fmt = ExcelNumberFormat.BuiltIn[10].ToText();         // "m/d/yy"
 DateTime date = ExcelValueFormatter.ToDateTime(29220);        // 1984-01-01
 double serial = ExcelValueFormatter.ToSerial(DateTime.Today);
+```
+
+To draw a sheet as Excel 1.00 did, `LayoutCell` gives each cell's text, where it starts and the stretch of the
+row it may cover, in pixels from the left edge of column A (spec Appendix D):
+
+```csharp
+if (ExcelValueFormatter.LayoutCell(document, row: 0, column: 1) is { } display)
+{
+    // For "General text spills right" in B1 of a sheet with 75-pixel columns: X 77, Width 121,
+    // ClipLeft 75, ClipRight 224 — left aligned, 2 pixels in, running on over a blank C1.
+}
 ```
 
 Excel 1.x for Macintosh uses the **1904 date system**: serial 0 is 1 January 1904.

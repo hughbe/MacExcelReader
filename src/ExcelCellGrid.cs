@@ -99,6 +99,26 @@ public sealed class ExcelCellGrid
         => (uint)row < (uint)RowCount && (uint)column < (uint)ColumnCount ? GetCell(row, column) : null;
 
     /// <summary>
+    /// Gets the alignment of a cell without creating it, or <see cref="ExcelAlignment.General"/> outside the grid.
+    /// Blank cells have an alignment too.
+    /// </summary>
+    public ExcelAlignment GetAlignment(int row, int column)
+    {
+        if ((uint)row >= (uint)RowCount || (uint)column >= (uint)ColumnCount)
+        {
+            return ExcelAlignment.General;
+        }
+
+        var cell = _rows?[row]?[column];
+        if (cell is not null)
+        {
+            return cell.Alignment;
+        }
+
+        return IsSourcePosition(row, column) ? CellWords.Alignment(SourceWord1(row, column)) : ExcelAlignment.General;
+    }
+
+    /// <summary>
     /// Gets the type of a cell without creating it, or <see cref="ExcelCellType.Empty"/> outside the grid.
     /// </summary>
     public ExcelCellType GetCellType(int row, int column)

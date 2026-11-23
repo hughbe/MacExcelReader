@@ -207,10 +207,12 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
   stored bytes. The other 39 were compiled by builds before the releases (the 1.00 disk's macro sheets and two
   of the 1.5 samples) and encode a few things differently; they still decompile correctly
   ([spec §2.3 and §15.4](https://github.com/hughbe/MacExcelReader/blob/main/docs/Spec.md)).
-- **Display is text, not pixels.** `ExcelValueFormatter.FormatCell(cell, document)` gives the text Excel turns a
-  value into. `FormatCell(cell, document, column)` follows how Excel draws it in its column, but counts every
-  character as one digit width where Excel measures pixels, so a value at the edge of its column may differ.
-  Colours are not applied, and format text uses the US letters and separators.
+- **Display.** `ExcelValueFormatter.FormatCell(cell, document)` gives the text Excel turns a value into.
+  `FormatCell(cell, document, column)` and `LayoutCell` follow how Excel 1.00 draws it, in pixels of the sheet's
+  font, for the fonts in Excel 1.00's System (every sample uses Geneva 10). For other fonts and sizes they count
+  every character as one digit width, so a value at the edge of its column may differ. Rows' heights and
+  vertical placement are not modelled, colours are not applied, and format text uses the US letters and
+  separators.
 - **Empty embedded code.** New documents carry empty copies of the code segments every Excel document embeds.
   No released Excel reads them ([spec §4.1](https://github.com/hughbe/MacExcelReader/blob/main/docs/Spec.md)), so this only matters to a build with a
   different code signature reading the file through a link.

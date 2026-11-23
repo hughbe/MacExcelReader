@@ -196,6 +196,16 @@ public sealed class ExcelSheetState
         set => SetWord(0x254, value);
     }
 
+    /// <summary>
+    /// Gets or sets the cached half ascent of the standard font in pixels (spec §6, 0x248): the room Excel allows
+    /// for the slant of italic text.
+    /// </summary>
+    public ushort HalfAscent
+    {
+        get => GetWord(0x248);
+        set => SetWord(0x248, value);
+    }
+
     /// <summary>Gets or sets the cached width in pixels of a bold 0 in the standard font (spec §6, 0x252).</summary>
     public ushort BoldDigitWidth
     {

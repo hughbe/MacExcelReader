@@ -281,10 +281,10 @@ public class FormattingTests
     {
         var document = ExcelDocument.CreateWorksheet();
         document.Cells["A1"].SetNumber(123456789);
-        document.State.SetColumnWidth(0, 40);                              // about 5 digits of 7 pixels
+        document.State.SetColumnWidth(0, 40);                              // room for (40 - 4) / 7 = 5 digits
         Assert.Equal("1E+08", ExcelValueFormatter.FormatCell(document.Cells["A1"], document, 0));
         Assert.Equal("123456789", ExcelValueFormatter.FormatCell(document.Cells["A1"], document));
         document.Cells["A1"].NumberFormat = 3;                             // #,##0
-        Assert.Equal("#####", ExcelValueFormatter.FormatCell(document.Cells["A1"], document, 0));
+        Assert.Equal("####", ExcelValueFormatter.FormatCell(document.Cells["A1"], document, 0)); // (40 - 4) / 9
     }
 }

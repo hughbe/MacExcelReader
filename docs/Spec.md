@@ -102,6 +102,7 @@ misbehaves, for example with a file that breaks a rule given here.
 * [Appendix A. Functions](#appendix-a-functions)
 * [Appendix B. Workspace files](#appendix-b-workspace-files)
 * [Appendix C. SYLK export](#appendix-c-sylk-export)
+* [Appendix D. Drawing cells](#appendix-d-drawing-cells)
 
 ---
 
@@ -678,14 +679,16 @@ gives the rest:
 * Date and time tokens go to `09.1a`, through the date conversion of `09.1b`, which fails past 2^32 − 1 seconds.
   `mmm` and `ddd` are the first three letters of the name, and 12-hour times show 0 as 12.
 
-A cell whose formatted text is wider than its column shows as many `#` as fit instead (`19.0e`).
+A cell whose formatted text is wider than its column shows as many `#` as fit instead (`19.0e`). Appendix D
+gives the widths in pixels.
 
 Excel tests whether a format shows a date in two places. `07.18` looks for a day, month or year token (`0B`–`12`,
 `19`, `1A`) in the positive section; times alone do not count. Its caller `34.04` counts the built-in formats
 10–18, the time-only ones included, and any other format `07.18` accepts.
 
 TEXT will not take `General` or a fill (`*-0`). General (`19.0c`) fits the number into the characters the column
-has room for, W, not counting a minus sign:
+has room for, W, not counting a minus sign (Appendix D gives W in pixels, and what happens to a negative number
+that rounds to nothing):
 
 * It is written with an exponent when it has more integer digits than W, or when it is below 1E-3 and its digits
   do not fit, but not in a column narrower than 5 characters for numbers from 1E-3 to below 1E+4.
@@ -2795,3 +2798,72 @@ Cell type 7 (§9) has no case in the writer, as in every other cell switch.
   `C` record that follows then needs no position. A grid in the count form gets `F` records as in 1.00.
 * The defaults record adds `L` and the gridline and heading colour, counting from 1, when the front window's
   colour is not automatic (window state bytes 127 and 128, §13): `F;P0;DG0G10;L3;N3 10` for red.
+
+---
+
+## Appendix D. Drawing cells
+
+Nothing in the file says how a cell looks on screen; Excel works it out from the value, the cell's format,
+alignment and style, the column widths and the sheet's standard font each time it draws a row. This appendix
+gives those rules, so that a reader can show a sheet as Excel 1.00 did. They come from Excel 1.00's drawing
+code, segment `19` (native 68000 code), and were checked against what Excel 1.00 showed for test sheets of
+General numbers in 13 column widths in plain, bold and italic, and of text, fills, alignments and neighbours
+(docs/Testing.md, `display-1.00.txt`).
+
+**Coordinates.** Columns sit side by side from the left edge of column A, each as wide as its width in the
+state block (§6, `0x042`); a hidden column (width 0) takes no room and nothing in it is drawn. A column of width
+*w* whose left edge is *L* covers pixels *L* to *L* + *w* − 1, the last being its right gridline. Text is
+clipped so that it never covers that gridline.
+
+**Font.** Everything is measured with the sheet's standard font and size (`0x244`, `0x246`), Geneva 10 in every
+sample, with QuickDraw's `TextWidth`. `09.1c` caches its metrics (`0x248`–`0x254`). Bold, which QuickDraw draws by
+smearing each character a pixel to the right, makes every character a pixel wider: the bold `0` is 8 pixels in
+Geneva 10, the plain one 7. Italic text is given half the font's ascent (`0x248`, 5 in Geneva 10) of extra room
+for its slant. The library has the advance widths of every font in the System file on Excel 1.00's Data disk
+(Chicago 12; New York 10, 12, 20 and 24; Geneva 9, 10, 12, 14, 18, 20 and 24; Monaco 9). Excel also allows sizes
+that System has no bitmap for (`RealFont` false); it then adds a pixel to the cached digit widths and to every
+character it measures (a flag it keeps at `0x0976` of its globals). The library does not model that, and measures such sheets in cached digit
+widths.
+
+**The room.** A cell's value has its column's width less 2 pixels each side, and less the italic allowance for
+an italic cell, to fit in (`19.0a`): 71 pixels in a default 75-pixel column.
+
+**Numbers** (`19.0d`, `19.0e`):
+
+* General gets *W* = (room − the width of `-` for a negative number) ÷ the width of `0` characters, rounded
+  down, and is written as §7 describes. A negative number that rounds to nothing there loses its sign: Excel
+  writes the `-`, finds the digits gone and writes `0` over it. So −123 shows as `0` in a 12- or 15-pixel column
+  (*W* = 0), where 123 shows as nothing (see Excel bugs).
+* Any other format fits the room as §7 describes, in pixels: General inside a section gets (room − the width of
+  the rest of the text) ÷ the width of `0` characters, and a fill (`*`) repeats its character
+  (room − 1 − the width of the rest) ÷ its width times, rounded down, to at most 255 characters in all.
+* If the text is then wider than the room, the cell shows as many `#` as fit, room ÷ the width of `#` (9 in
+  Geneva 10, 10 bold), centred whatever the cell's alignment. A 71-pixel room holds 7.
+
+TRUE, FALSE and errors are fitted the same way: `TRUE` (26 pixels in Geneva 10) shows in a 30-pixel column, and
+`FALSE` and `#DIV/0!` become `##`. Text is never turned into `#`.
+
+**Alignment** (`19.0b`). General aligns text left, numbers right, and TRUE, FALSE and errors centre (`19.0e`).
+With *L* and *R* = *L* + *w* the cell's edges and *t* the text's width (with the italic allowance):
+
+| Alignment | Text starts at |
+|---|---|
+| Left | *L* + 2 |
+| Right | *R* − 2 − *t* |
+| Centre | (*L* + *R* − *t*) ÷ 2, rounded down |
+
+**Text running into the next cells** (`19.07`, with `19.04` and `19.05` finding where to stop). Text wider than
+its cell carries on over its neighbours, to the right for left-aligned and General text, to the left for
+right-aligned text and both ways for centred text, as long as each neighbour is blank. A cell with any value
+stops it, even empty text (`=""` or an empty constant) or a number; a blank cell that is only formatted, in any
+alignment including Fill, does not. Hidden columns let it through. The text is cut off at the first cell with a
+value, and at the left edge of column A. Numbers, TRUE, FALSE and errors never run on.
+
+**Fills** (`19.0b`). A Fill-aligned cell repeats its text, formatted as for display when it is a number, across
+a run: the cell itself and the blank Fill-aligned cells after it (hidden columns included). The text starts at
+*L* + 2 and is repeated (run width − 3 − the italic allowance) ÷ *t* times, rounded down: `ab` (11 pixels) 20
+times over three 75-pixel columns, `1.50` (24 pixels) 3 times in one. Text longer than that is drawn once and
+cut off at the run's end. A fill never runs into a blank cell that is not Fill aligned.
+
+The library gives the result of all this as `ExcelValueFormatter.LayoutCell`, and the text alone as
+`ExcelValueFormatter.FormatCell(cell, document, column)`.
