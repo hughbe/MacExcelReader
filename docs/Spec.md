@@ -377,14 +377,16 @@ than the highest function number any formula uses if that is higher. Every sampl
 The document's settings: calculation options, the grid size, column widths, the protection password, the
 standard font and print titles, together with values Excel works out from them. In memory these are a run of
 consecutive global variables for the active document, and Save writes the whole run as it is, so some fields
-are only pointers left over from memory. Offsets are relative to the start of the block.
+are only pointers left over from memory. Offsets are relative to the start of the block. The first 20 bytes,
+0x000–0x013, are Excel's calculation settings rather than the sheet's (**Calculation settings**, after the
+table).
 
 | Offset | Size | Samples | Meaning |
 |-------:|-----:|---------|---------|
-| 0x000 | word | 100 | Maximum iterations (Calculation dialog; 1…32767). Offsets 0x000–0x013 are Excel's calculation settings, which apply to every open document: see below the table. |
-| 0x002 | word | 1 | Calculation mode (values below; `CALCULATION(2)` saves −1, `CALCULATION(3)` saves 0). Like 0x006 it is a global setting: every sheet Excel saves gets the current one. |
+| 0x000 | word | 100 | Maximum iterations (Calculation dialog; 1…32767) |
+| 0x002 | word | 1 | Calculation mode (values below; `CALCULATION(2)` saves −1, `CALCULATION(3)` saves 0) |
 | 0x004 | word | 1 | Precision: 0 = precision as displayed (results are rounded through the cell format), 1 = full precision |
-| 0x006 | word | 1 | Reference style: 0 = R1C1 (`A1.R1C1(FALSE)` saves it), 1 = A1. It is saved and restored around formula parsing, and is global like 0x002. |
+| 0x006 | word | 1 | Reference style: 0 = R1C1 (`A1.R1C1(FALSE)` saves it), 1 = A1. It is saved and restored around formula parsing. |
 | 0x008 | word | 0 | Unused: no code in the application reads or writes it |
 | 0x00A | double | 0.001 | Maximum change (iteration) |
 | 0x012 | word | 0 | Iteration enabled (0 / 1) |
