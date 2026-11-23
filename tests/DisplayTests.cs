@@ -4,7 +4,8 @@ namespace MacExcelReader.Tests;
 
 /// <summary>
 /// How Excel 1.00 draws cells (spec Appendix D), checked against what it showed on screen for sheets built by the library
-/// (docs/Testing.md). Every sheet uses the default font, Geneva 10.
+/// (docs/Testing.md). Unless a test says otherwise, the sheet uses the default font, Geneva 10, and Excel 1.00, 1.03 and
+/// 1.5 drew it the same, pixel for pixel.
 /// </summary>
 public class DisplayTests
 {
@@ -27,9 +28,24 @@ public class DisplayTests
         return data;
     }
 
+    public static TheoryData<string, string, string[], ExcelVersion> FitRowsByRelease()
+    {
+        // Excel 1.00, 1.03 and 1.5 showed the Fit sheet the same, pixel for pixel.
+        var data = new TheoryData<string, string, string[], ExcelVersion>();
+        foreach (var row in FitRows())
+        {
+            foreach (var version in new[] { ExcelVersion.Excel100, ExcelVersion.Excel103, ExcelVersion.Excel150 })
+            {
+                data.Add((string)row[0], (string)row[1], (string[])row[2], version);
+            }
+        }
+
+        return data;
+    }
+
     [Theory]
-    [MemberData(nameof(FitRows))]
-    public void General_FitsTheColumnAsExcelShowsIt(string face, string value, string[] expected)
+    [MemberData(nameof(FitRowsByRelease))]
+    public void General_FitsTheColumnAsExcelShowsIt(string face, string value, string[] expected, ExcelVersion version)
     {
         var document = ExcelDocument.CreateWorksheet();
         for (int c = 0; c < s_fitWidths.Length; c++)
@@ -41,7 +57,7 @@ public class DisplayTests
             cell.Italic = face == "italic";
         }
 
-        string[] actual = [.. Enumerable.Range(0, s_fitWidths.Length).Select(c => ExcelValueFormatter.FormatCell(document.Cells[0, c], document, c))];
+        string[] actual = [.. Enumerable.Range(0, s_fitWidths.Length).Select(c => ExcelValueFormatter.FormatCell(document.Cells[0, c], document, c, version))];
         Assert.Equal(expected, actual);
     }
 
@@ -293,5 +309,46 @@ public class DisplayTests
         document.State.StandardFont = (ushort)font;
         document.State.StandardFontSize = (ushort)size;
         Assert.Equal((height, baseline), ExcelValueFormatter.GetRowMetrics(document));
+    }
+
+    // The Gen11b sheet: Geneva 11, which Excel draws from Geneva 12, in columns 33 to 43 pixels wide.
+    [Theory]
+    [InlineData(ExcelVersion.Excel100, 12345.0, "### ### ### ### ### 1E+04 1E+04 1E+04 1E+04 1E+04 1E+04")]
+    [InlineData(ExcelVersion.Excel150, 12345.0, "### ### ### ### ### 1E+04 1E+04 1E+04 1E+04 1E+04 1E+04")]
+    [InlineData(ExcelVersion.Excel103, 12345.0, "### ### ### ### ### ### ### #### #### #### 1E+04")]
+    [InlineData(ExcelVersion.Excel100, 1234.0, "1230 1230 1230 1234 1234 1234 1234 1234 1234 1234 1234")]
+    [InlineData(ExcelVersion.Excel150, 1234.0, "1230 1230 1230 1234 1234 1234 1234 1234 1234 1234 1234")]
+    [InlineData(ExcelVersion.Excel103, 1234.0, "### ### ### ### 1234 1234 1234 1234 1234 1234 1234")]
+    public void ScaledFont_Excel103AddsAPixelPerCharacter(ExcelVersion version, double value, string expected)
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.State.StandardFont = 3;
+        document.State.StandardFontSize = 11;
+        for (int c = 0; c < 11; c++)
+        {
+            document.State.SetColumnWidth(c, (ushort)(33 + c));
+            document.Cells[0, c].SetNumber(value);
+        }
+
+        Assert.Equal(expected, string.Join(' ', Enumerable.Range(0, 11).Select(c => ExcelValueFormatter.FormatCell(document.Cells[0, c], document, c, version))));
+    }
+
+    [Theory]
+    [InlineData(ExcelVersion.Excel100, "TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE")]
+    [InlineData(ExcelVersion.Excel150, "TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE")]
+    [InlineData(ExcelVersion.Excel103, "### ### ### TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE")]
+    public void ScaledFont_Excel103FitsTrueWithAPixelPerLetter(ExcelVersion version, string expected)
+    {
+        // TRUE is 28 pixels in Geneva 11: it fits 29 pixels of room in 1.00 and 1.5, and needs 32 in 1.03.
+        var document = ExcelDocument.CreateWorksheet();
+        document.State.StandardFont = 3;
+        document.State.StandardFontSize = 11;
+        for (int c = 0; c < 11; c++)
+        {
+            document.State.SetColumnWidth(c, (ushort)(33 + c));
+            document.Cells[0, c].SetBoolean(true);
+        }
+
+        Assert.Equal(expected, string.Join(' ', Enumerable.Range(0, 11).Select(c => ExcelValueFormatter.FormatCell(document.Cells[0, c], document, c, version))));
     }
 }

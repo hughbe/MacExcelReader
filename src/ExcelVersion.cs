@@ -5,8 +5,17 @@ namespace MacExcelReader;
 /// </summary>
 public enum ExcelVersion
 {
-    /// <summary>Excel 1.00 to 1.03 (including 1.01): 208 functions (0–207). Their function tables are identical.</summary>
+    /// <summary>
+    /// Excel 1.00 to 1.03 (including 1.01): 208 functions (0–207). Their function tables are identical, and for
+    /// formulas this value stands for all of them.
+    /// </summary>
     Excel100 = 100,
+
+    /// <summary>
+    /// Excel 1.03: encodes formulas exactly as 1.00 does (<see cref="Excel100"/>), but draws text in a font size the
+    /// System has no bitmap for with a pixel more per character (spec Appendix D).
+    /// </summary>
+    Excel103 = 103,
 
     /// <summary>
     /// Excel 1.04 and 1.06: add CHANGE.LINK (208) and OPEN's third argument; otherwise encode formulas as 1.00–1.03 do.

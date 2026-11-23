@@ -242,7 +242,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     /// <c>19.0d</c> and <c>19.0e</c> in Excel 1.00): General gets the characters the rest of the text leaves, a fill
     /// repeats into the room left, and text that does not fit becomes a row of <c>#</c>. Excel measures in pixels;
     /// this counts every character as one digit width, an approximation. For the pixel-exact result use
-    /// <see cref="ExcelValueFormatter.FormatCell(ExcelCell, ExcelDocument, int)"/> (spec Appendix D).
+    /// <see cref="ExcelValueFormatter.FormatCell(ExcelCell, ExcelDocument, int, ExcelVersion)"/> (spec Appendix D).
     /// </summary>
     public string Format(double value, int width) => Format(value, width, MacExcelReader.Internal.TextMeasure.Characters);
 
@@ -335,7 +335,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         }
 
         // Text wider than the room shows as #s (19.0e).
-        return measure.Width(text) > room ? Hashes(room, measure) : text;
+        return measure.FitWidth(text) > room ? Hashes(room, measure) : text;
     }
 
     // As many #s as fit in the room (19.0e).

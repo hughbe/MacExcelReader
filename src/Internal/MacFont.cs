@@ -173,23 +173,34 @@ internal readonly struct TextMeasure
     private readonly int _unit;
     private readonly bool _bold;
 
-    private TextMeasure(MacFont? font, int unit, bool bold)
+    private readonly bool _fitPerCharacter;
+
+    private TextMeasure(MacFont? font, int unit, bool bold, bool fitPerCharacter = false)
     {
         _font = font;
         _unit = unit;
         _bold = bold;
+        _fitPerCharacter = fitPerCharacter;
     }
 
     /// <summary>Counts characters: every character is one unit wide.</summary>
     public static TextMeasure Characters => new(null, 1, false);
 
-    public static TextMeasure Pixels(MacFont font, bool bold) => new(font, 1, bold);
+    /// <summary>
+    /// Measures in pixels of <paramref name="font"/>. Releases measure alike, except that for a size with no bitmap
+    /// Excel 1.03 adds a pixel per character when it checks whether text fits (spec Appendix D).
+    /// </summary>
+    public static TextMeasure Pixels(MacFont font, bool bold, ExcelVersion version = ExcelVersion.Excel100)
+        => new(font, 1, bold, version == ExcelVersion.Excel103 && !font.IsReal);
 
     public static TextMeasure Fixed(int unit) => new(null, Math.Max(1, unit), false);
 
     public int Width(ReadOnlySpan<char> text) => _font?.Width(text, _bold) ?? text.Length * _unit;
 
     public int Width(char c) => Width([c]);
+
+    /// <summary>The width Excel compares with the room to decide whether text fits.</summary>
+    public int FitWidth(ReadOnlySpan<char> text) => Width(text) + (_fitPerCharacter ? text.Length : 0);
 
     // Excel adds a pixel to the widths of 0 and # it divides by when the font is scaled (09.1c, 19.0e).
     private int Adjust => _font is { IsReal: false } ? 1 : 0;
