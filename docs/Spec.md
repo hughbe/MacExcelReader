@@ -1158,8 +1158,15 @@ that number, refusing the file ("File error", alert `0x2038`) on any difference 
 whose table holds functions beyond its base set checks that a file numbers them the same way. Released
 1.00's base count and table length are both 208, so it never writes the list, and it refuses a file whose count
 is above 208 before reaching it (§5): a sheet the library wrote with count 209 and one name gets "File is not a
-saved worksheet", and the same sheet with count 208 opens. No sample has the list. Excel 1.01 dropped it in
-both Save and Open (`47.0b`, `46.07` in 1.01), and later files carry no names even when their count is higher.
+saved worksheet", and the same sheet with count 208 opens. To see the list, a copy of Excel 1.00 was patched to
+a base count of 200 (the start-up code computes it as the length of a 208-byte table; the patch shortens that by
+8). Entering `=FULL()` (function 202) in a macro sheet and saving gave count 208 and, at the start of section 7,
+`04 "MOVE" 04 "SIZE" 04 "FULL" 01 "8" 01 "9" 0B "CANCEL.COPY" 0D "UNLOCKED.NEXT" 0D "UNLOCKED.PREV"`, then
+`00 00 00` for no page breaks and no print record. The same patched Excel opens that file quietly; with one name
+changed it shows "File error" but leaves the document open. The file does not say which base count wrote it,
+so a reader with a different one, released 1.00 included, takes the names for page breaks. Excel 1.01 dropped
+the list in both Save and Open (`47.0b`, `46.07` in 1.01), and later files carry no names even when their count
+is higher.
 
 1. **Column page breaks**: a sequence of chunks, each a count byte `n` (1…5) followed by `n` bytes, one column
    number per byte. Terminated by `0x00`.

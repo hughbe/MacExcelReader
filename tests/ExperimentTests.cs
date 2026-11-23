@@ -1002,4 +1002,28 @@ public class ExperimentTests
         byte[] cut = ExcelDocument.CreateWorksheet().ToArray()[..^3];
         Assert.ThrowsAny<Exception>(() => ExcelDocument.Read(cut));
     }
+
+    [Fact]
+    public void FunctionNameList_WrittenByABuildWithASmallerBaseCount()
+    {
+        // Saved by a copy of Excel 1.00 patched to a base count of 200, after FORMULA entered =FULL() (function
+        // 202): the count is the table length, 208, and section 7 starts with the names of functions 200–207 as
+        // Pascal strings before the page breaks (spec §5, §14). Released 1.00 never writes the list, since its base
+        // count is 208 too, and a reader cannot tell from the file that it is there.
+        byte[] file = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", "Function Names 1.00 Patched"));
+        var layout = ExcelFileLayout.Read(file);
+        Assert.Equal(208, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(file.AsSpan(layout.DataOffset)));
+        int position = layout.GetSectionOffset(ExcelSection.PrintSettings);
+        var names = new List<string>();
+        for (int i = 0; i < 8; i++)
+        {
+            int length = file[position];
+            names.Add(MacRoman.GetString(file.AsSpan(position + 1, length)));
+            position += 1 + length;
+        }
+
+        Assert.Equal(["MOVE", "SIZE", "FULL", "8", "9", "CANCEL.COPY", "UNLOCKED.NEXT", "UNLOCKED.PREV"], names);
+        Assert.Equal([0, 0, 0], file[position..]);
+        Assert.Equal(["MOVE", "SIZE", "FULL"], Enumerable.Range(200, 3).Select(n => ExcelFunctions.Get(n)!.Name));
+    }
 }
