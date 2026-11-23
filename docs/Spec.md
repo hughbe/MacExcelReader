@@ -447,7 +447,7 @@ the file's values until then (only New clears them, `10.0b`).
 **Calculation settings.** Offsets 0x000–0x013 (maximum iterations, calculation mode, precision, reference
 style, maximum change and iteration) are settings of Excel as a whole, not of a sheet. Save writes the ones in
 effect. Open takes them from the file only when no other document is open; otherwise it reads those 20 bytes
-into a scratch buffer and drops them (`46.08`), and Excel carries on with its current settings. A sheet saved
+into a scratch buffer and drops them (`46.06`), and Excel carries on with its current settings. A sheet saved
 with iteration on and 5 iterations, opened after another document, does not iterate, and is saved back with
 Excel's settings (docs/Calculation.md).
 
