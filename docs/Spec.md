@@ -2808,7 +2808,7 @@ alignment and style, the column widths and the sheet's standard font each time i
 gives those rules, so that a reader can show a sheet as Excel 1.00 did. They come from Excel 1.00's drawing
 code, segment `19` (native 68000 code), and were checked against what Excel 1.00 showed for test sheets of
 General numbers in 13 column widths in plain, bold and italic, and of text, fills, alignments and neighbours
-(docs/Testing.md, `display-1.00.txt`).
+(docs/Testing.md).
 
 **Coordinates.** Columns sit side by side from the left edge of column A, each as wide as its width in the
 state block (§6, `0x042`); a hidden column (width 0) takes no room and nothing in it is drawn. A column of width
@@ -2819,11 +2819,11 @@ clipped so that it never covers that gridline.
 sample, with QuickDraw's `TextWidth`. `09.1c` caches its metrics (`0x248`–`0x254`). Bold, which QuickDraw draws by
 smearing each character a pixel to the right, makes every character a pixel wider: the bold `0` is 8 pixels in
 Geneva 10, the plain one 7. Italic text is given half the font's ascent (`0x248`, 5 in Geneva 10) of extra room
-for its slant. The library has the advance widths of every font in the System file on Excel 1.00's Data disk
-(Chicago 12; New York 10, 12, 20 and 24; Geneva 9, 10, 12, 14, 18, 20 and 24; Monaco 9). Excel also allows sizes
-that System has no bitmap for (`RealFont` false); it then adds a pixel to the cached digit widths and to every
-character it measures (a flag it keeps at `0x0976` of its globals). The library does not model that, and measures such sheets in cached digit
-widths.
+for its slant. The widths are the advance widths in the font's `FONT` resource; the System file on Excel 1.00's
+Data disk has bitmaps of Chicago 12, New York 10, 12, 20 and 24, Geneva 9, 10, 12, 14, 18, 20 and 24, and
+Monaco 9. Excel also allows sizes that the System has no bitmap for (`RealFont` false); it then adds a pixel to
+the cached digit widths and to every character it measures (a flag it keeps at `0x0976` of its globals). How
+QuickDraw scales such a font has not been checked.
 
 **The room.** A cell's value has its column's width less 2 pixels each side, and less the italic allowance for
 an italic cell, to fit in (`19.0a`): 71 pixels in a default 75-pixel column.
@@ -2864,6 +2864,3 @@ a run: the cell itself and the blank Fill-aligned cells after it (hidden columns
 *L* + 2 and is repeated (run width − 3 − the italic allowance) ÷ *t* times, rounded down: `ab` (11 pixels) 20
 times over three 75-pixel columns, `1.50` (24 pixels) 3 times in one. Text longer than that is drawn once and
 cut off at the run's end. A fill never runs into a blank cell that is not Fill aligned.
-
-The library gives the result of all this as `ExcelValueFormatter.LayoutCell`, and the text alone as
-`ExcelValueFormatter.FormatCell(cell, document, column)`.
