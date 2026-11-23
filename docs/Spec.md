@@ -377,14 +377,16 @@ than the highest function number any formula uses if that is higher. Every sampl
 The document's settings: calculation options, the grid size, column widths, the protection password, the
 standard font and print titles, together with values Excel works out from them. In memory these are a run of
 consecutive global variables for the active document, and Save writes the whole run as it is, so some fields
-are only pointers left over from memory. Offsets are relative to the start of the block.
+are only pointers left over from memory. Offsets are relative to the start of the block. The first 20 bytes,
+0x000–0x013, are Excel's calculation settings rather than the sheet's (**Calculation settings**, after the
+table).
 
 | Offset | Size | Samples | Meaning |
 |-------:|-----:|---------|---------|
 | 0x000 | word | 100 | Maximum iterations (Calculation dialog; 1…32767) |
-| 0x002 | word | 1 | Calculation mode (values below; `CALCULATION(2)` saves −1, `CALCULATION(3)` saves 0). Like 0x006 it is a global setting: every sheet Excel saves gets the current one. |
+| 0x002 | word | 1 | Calculation mode (values below; `CALCULATION(2)` saves −1, `CALCULATION(3)` saves 0) |
 | 0x004 | word | 1 | Precision: 0 = precision as displayed (results are rounded through the cell format), 1 = full precision |
-| 0x006 | word | 1 | Reference style: 0 = R1C1 (`A1.R1C1(FALSE)` saves it), 1 = A1. It is saved and restored around formula parsing, and is global like 0x002. |
+| 0x006 | word | 1 | Reference style: 0 = R1C1 (`A1.R1C1(FALSE)` saves it), 1 = A1. It is saved and restored around formula parsing. |
 | 0x008 | word | 0 | Unused: no code in the application reads or writes it |
 | 0x00A | double | 0.001 | Maximum change (iteration) |
 | 0x012 | word | 0 | Iteration enabled (0 / 1) |
@@ -442,12 +444,21 @@ Offsets 0x262–0x273 are all derived from the `Print_Area` and `Print_Titles` n
 re-run whenever a name or a column width changes; a writer can leave them zero. Open does not re-run it: it keeps
 the file's values until then (only New clears them, `10.0b`).
 
+**Calculation settings.** Offsets 0x000–0x013 (maximum iterations, calculation mode, precision, reference
+style, maximum change and iteration) are settings of Excel as a whole, not of a sheet. Save writes the ones in
+effect. Open takes them from the file only when no other document is open; otherwise it reads those 20 bytes
+into a scratch buffer and drops them (`46.08`), and Excel carries on with its current settings. A sheet saved
+with iteration on and 5 iterations, opened after another document, does not iterate, and is saved back with
+Excel's settings (docs/Calculation.md).
+
 **What Open keeps.** Open reads the whole block into the application's globals for the document (`46.06` in
 1.00), then calls the document initialiser `10.00`, which resets the in-memory fields: the list heads at 0x026,
 0x032, 0x036 and 0x03A to `FFFF` (empty), 0x02A, 0x02E, 0x03E, 0x25A, 0x25E and 0x266 to 0, and 0x256 to a pointer
 into the document's record. It also recomputes the font metrics at 0x248–0x254 (`09.1c`). Every other word keeps
 the file's value, including 0x028, 0x030, 0x03C and the print-title values. A file with junk in all the reset
-fields and the font metrics opens and saves back normally in Excel 1.00 (`excel-test junk`, docs/Testing.md).
+fields and the font metrics opens and saves back normally in Excel 1.00, and samples with junk in every
+field the junk test fills open and save back normally in Excel 1.03 and 1.5 too (`excel-test junk`,
+docs/Testing.md).
 
 The cached font values at 0x248–0x254 are recomputed from the font number and size by a single routine
 (`GetFontInfo` / `CharWidth`); a writer can copy them from a sample.
@@ -2245,6 +2256,13 @@ version 17 and uses only functions 0–207:
    Section 7 is `00 00 00` for no page breaks and no print record.
 8. Seek back and write the section table as stream positions (§1.2).
 
+**The smallest file.** Sections 3, 4, 6 and 7 can be their terminators alone: no names (`00`), no window
+(`00`) and no page breaks or print record (`00 00 00`). An empty worksheet written that way is 701 bytes, and
+Excel 1.00, 1.03 and 1.5 all open it. Saving it back, they add their five built-in names, undefined. A sheet
+with no window record opens with no window, so it is open but not shown, and Excel saves it back without one.
+Every byte counts: cut off any part, even the three bytes of section 7, and Excel 1.00 and 1.5 refuse the
+file, while Excel 1.03 stops with a system error on that last case.
+
 Compile formulas with the rules of §15.4 for Excel 1.00–1.03 unless the file is meant for a later release.
 
 This recipe reproduces the samples byte for byte, and files written with it open in Excel 1.00, 1.03 and 1.5
@@ -2821,9 +2839,21 @@ smearing each character a pixel to the right, makes every character a pixel wide
 Geneva 10, the plain one 7. Italic text is given half the font's ascent (`0x248`, 5 in Geneva 10) of extra room
 for its slant. The widths are the advance widths in the font's `FONT` resource; the System file on Excel 1.00's
 Data disk has bitmaps of Chicago 12, New York 10, 12, 20 and 24, Geneva 9, 10, 12, 14, 18, 20 and 24, and
-Monaco 9. Excel also allows sizes that the System has no bitmap for (`RealFont` false); it then adds a pixel to
-the cached digit widths and to every character it measures (a flag it keeps at `0x0976` of its globals). How
-QuickDraw scales such a font has not been checked.
+Monaco 9.
+
+Excel also allows any other size. QuickDraw draws one the System has no bitmap for (`RealFont` false) from the
+next larger bitmap of the family, or from the largest if none is larger, scaling every width by size ÷ that
+bitmap's size and keeping positions in fractions of a pixel: Geneva 11 from Geneva 12 (a `0`, 8 pixels there, is
+7⅓), Geneva 16 from Geneva 18, Monaco 12 from Monaco 9. `TextWidth` adds up the fractions and rounds the total
+down, so `1E+04` in Geneva 11 is 34 pixels. The ascent and descent scale to the nearest pixel (Geneva 11: 11 and
+3). Excel then adds a pixel to the widths it divides by: the cached digit widths (`09.1c`, which keeps the flag
+at `0x0976` of its globals) and the width of `#` (`19.0e`). So a Geneva 11 digit counts as 8 pixels and a `#` as 9,
+while text is checked against the room at its plain width: `TRUE` (27½ pixels) fits a 29-pixel room.
+
+**Rows.** Every row has the same height, the font's ascent + descent + 1 (`09.1c`; 13 in Geneva 10, 15 in Geneva
+11), and its bottom pixel is its gridline. `09.1c` also sets a floor from the screen's size that no font reaches.
+Text sits on a baseline one ascent below the row's top: in Geneva 10 capitals cover pixel rows 3–10 of 13 and
+descenders reach row 12.
 
 **The room.** A cell's value has its column's width less 2 pixels each side, and less the italic allowance for
 an italic cell, to fit in (`19.0a`): 71 pixels in a default 75-pixel column.

@@ -85,6 +85,12 @@ the room the column has, Excel writes `0` over the sign: −123 shows as `0` in 
 10), where 123 shows as nothing and −7 as `#`, and −0.4 shows as `0` in a 19-pixel column. A positive number
 never shows as a 0 it is not (spec Appendix D; `display-1.00.txt`).
 
+## A file cut short before its print section crashes Excel 1.03
+
+An empty worksheet missing only its last 3 bytes (section 7's page-break counts and print flag) stops Excel 1.03
+with "Sorry, a system error occurred. coprocessor not installed". Excel 1.00 and 1.5 refuse the same file with
+an error, as all three do for files cut shorter (spec §17.2; docs/Testing.md).
+
 ## Some DATE arguments give nonsense (Excel 1.00)
 
 `DATE(1904,1,0)` gives 15824.73037037 and `DATE(2040,12,31)` 328.73037037037, neither a date at all; the day

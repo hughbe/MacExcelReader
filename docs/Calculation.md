@@ -62,3 +62,29 @@ formulas Excel calculates only when they run as a macro, and CALCULATE.NOW on fo
 * An operator returns the error of its first operand that has one: `1/0+NA()` is #DIV/0! and `NA()+1/0` is #N/A.
 * `COUNT(1,"a",TRUE,1/0)` is 2: it counts the number and TRUE.
 * `INDEX` outside its array is #REF!; `IRR` that does not converge is #NUM!; `STDEV` of one value is #DIV/0!.
+
+## Recalculation and iteration
+
+Measured with sheets whose formulas were all marked waiting (`Order`, `Circ`), or entered by the test harness with
+`FORMULA` after `CALCULATION(1,TRUE,max,change)` (`It` sheets), then saved by Excel 1.00 and read back.
+
+* **Order.** One recalculation follows the dependencies, whatever the layout: the chain `A1 = A2+1` … `A9 = A10+1`
+  with `A10` = 1, written top to bottom, comes out 10, 9, … 1 at once, as do chains across columns and a `SUM` of
+  formulas. The calculate loop (`27.10`) runs a pass (`28.03`, native code) over each open document with formulas
+  waiting, and repeats while a pass reports more to do. A pass checks for keystrokes and mouse clicks, so a long
+  recalculation can be interrupted.
+* **Circular references, iteration off.** Excel says "Can't resolve circular references" (no alert when a macro
+  does it) and leaves the cells in the loop with the values they had; formulas that depend on them are not
+  calculated either (`Circ`: `A1 = B1+1`, `B1 = A1+1`, `A3 = A1*10` all stay 0).
+* **Iteration on.** Excel repeats the pass until, in one iteration, every value changes by strictly less than the
+  maximum change, or until it has run the maximum number of iterations:
+  * `A1 = A1+1` gives exactly 100 with the default settings, and 5 with a maximum of 5;
+  * `A1 = A1/2+1` gives 1.9990234375 (2 − 2⁻¹⁰): the 11th iteration was the first to change it by less than
+    0.001;
+  * with a maximum change of 0.5 it gives 1.75 after 3 iterations, because the second iteration's change of
+    exactly 0.5 does not stop it.
+* **Within an iteration** the cell that started the recalculation goes first, then the cells that depend on it:
+  with `B1 = A1+1` in place and `A1 = B1+1` entered, 100 iterations give `A1` 199 and `B1` 200.
+* A formula just entered starts from 0, whatever its cell held.
+* The settings themselves belong to Excel, not to the sheet: a file's maximum iterations, maximum change and
+  iteration flag take effect only when it is the first document opened (spec §6).

@@ -243,4 +243,55 @@ public class DisplayTests
             }
         }
     }
+
+    [Theory]
+    // Sizes the System has no bitmap for (the Gen11, Gen11b, Gen16 and Mon12 sheets). QuickDraw scales the next
+    // larger size, or Monaco 9, and Excel adds a pixel to the widths of 0 and # it divides by.
+    [InlineData(3, 11, 40, 123456789, "1E+08")]
+    [InlineData(3, 11, 40, 1234.5678, "1235")]
+    [InlineData(3, 16, 40, 123456789, "##")]
+    [InlineData(3, 16, 40, 1234.5678, "##")]
+    [InlineData(4, 12, 40, 123456789, "####")]
+    [InlineData(4, 12, 40, 1234.5678, "1235")]
+    [InlineData(3, 11, 33, 1234, "1230")]   // a digit counts as 8 pixels (7.33, rounded down, + 1): 29 / 8 = 3
+    [InlineData(3, 11, 36, 1234, "1234")]
+    [InlineData(3, 11, 37, 12345, "###")]   // 1E+04 is 34 pixels; # counts as 9 (8.25 + 1)
+    [InlineData(3, 11, 38, 12345, "1E+04")]
+    [InlineData(3, 11, 43, 12345, "1E+04")]
+    public void ScaledFont_FitsAsExcelShowsIt(int font, int size, int width, double value, string expected)
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.State.StandardFont = (ushort)font;
+        document.State.StandardFontSize = (ushort)size;
+        document.State.SetColumnWidth(0, (ushort)width);
+        document.Cells[0, 0].SetNumber(value);
+        Assert.Equal(expected, ExcelValueFormatter.FormatCell(document.Cells[0, 0], document, 0));
+    }
+
+    [Theory]
+    [InlineData(33)]
+    [InlineData(43)]
+    public void ScaledFont_TrueFitsByItsScaledWidth(int width)
+    {
+        // TRUE is 27.5 pixels in Geneva 11; Excel adds nothing when it checks the fit.
+        var document = ExcelDocument.CreateWorksheet();
+        document.State.StandardFont = 3;
+        document.State.StandardFontSize = 11;
+        document.State.SetColumnWidth(0, (ushort)width);
+        document.Cells[0, 0].SetBoolean(true);
+        Assert.Equal("TRUE", ExcelValueFormatter.FormatCell(document.Cells[0, 0], document, 0));
+    }
+
+    [Theory]
+    [InlineData(3, 10, 13, 10)]  // measured on screen: ink on rows 3-10 of 13, descenders to 12
+    [InlineData(3, 11, 15, 11)]  // scaled from Geneva 12: descent 2.75 rounds to 3
+    [InlineData(3, 16, 21, 16)]  // scaled from Geneva 18
+    [InlineData(4, 12, 16, 12)]  // scaled up from Monaco 9
+    public void RowMetrics_ComeFromTheFont(int font, int size, int height, int baseline)
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.State.StandardFont = (ushort)font;
+        document.State.StandardFontSize = (ushort)size;
+        Assert.Equal((height, baseline), ExcelValueFormatter.GetRowMetrics(document));
+    }
 }

@@ -55,6 +55,10 @@ internal sealed class MacFont
 
     private readonly string _widths;
 
+    // A size the System has no bitmap for is drawn by QuickDraw from another size of the family, every width
+    // scaled by _size / _source and positions kept in fractions of a pixel.
+    private readonly MacFont? _bitmap;
+
     private MacFont(int number, int size, int ascent, int descent, int leading, string widths)
     {
         Number = number;
@@ -63,6 +67,18 @@ internal sealed class MacFont
         Descent = descent;
         Leading = leading;
         _widths = widths;
+    }
+
+    private MacFont(MacFont bitmap, int size)
+    {
+        _bitmap = bitmap;
+        _widths = bitmap._widths;
+        Number = bitmap.Number;
+        Size = size;
+        // The font's metrics scale to the nearest pixel.
+        Ascent = (2 * bitmap.Ascent * size + bitmap.Size) / (2 * bitmap.Size);
+        Descent = (2 * bitmap.Descent * size + bitmap.Size) / (2 * bitmap.Size);
+        Leading = (2 * bitmap.Leading * size + bitmap.Size) / (2 * bitmap.Size);
     }
 
     /// <summary>The font number: 0 Chicago, 2 New York, 3 Geneva, 4 Monaco.</summary>
@@ -77,25 +93,51 @@ internal sealed class MacFont
 
     public int Leading { get; }
 
+    /// <summary>Whether the System has a bitmap of this size (QuickDraw's <c>RealFont</c>).</summary>
+    public bool IsReal => _bitmap is null;
+
     /// <summary>The room Excel allows for the slant of italic text: half the ascent (spec §6, 0x248).</summary>
     public int ItalicExtra => Ascent / 2;
 
-    /// <summary>Finds the font Excel 1.00 would draw with, or null if its System has no bitmap of that size.</summary>
+    /// <summary>The height of every row: ascent + descent + 1 (spec Appendix D).</summary>
+    public int RowHeight => Ascent + Descent + 1;
+
+    /// <summary>
+    /// Finds the font Excel 1.00 draws with, or null for a family its System lacks. A size with no bitmap is
+    /// scaled from the next larger size, or the largest there is (spec Appendix D).
+    /// </summary>
     public static MacFont? Find(int number, int size)
     {
+        MacFont? larger = null;
+        MacFont? largest = null;
         foreach (var font in s_fonts)
         {
-            if (font.Number == number && font.Size == size)
+            if (font.Number != number)
+            {
+                continue;
+            }
+
+            if (font.Size == size)
             {
                 return font;
             }
+
+            if (font.Size > size && (larger is null || font.Size < larger.Size))
+            {
+                larger = font;
+            }
+
+            if (largest is null || font.Size > largest.Size)
+            {
+                largest = font;
+            }
         }
 
-        return null;
+        return size <= 0 || (larger ?? largest) is not { } bitmap ? null : new MacFont(bitmap, size);
     }
 
-    /// <summary>Gets the advance width of a Mac Roman character.</summary>
-    public int CharWidth(byte c, bool bold) => HexValue(_widths[2 * c]) * 16 + HexValue(_widths[2 * c + 1]) + (bold ? 1 : 0);
+    /// <summary>Gets the advance width of a Mac Roman character, as <c>CharWidth</c> gives it.</summary>
+    public int CharWidth(byte c, bool bold) => Scale(BitmapWidth(c), Size, BitmapSize) + (bold ? 1 : 0);
 
     /// <summary>Gets the width of text, as QuickDraw's <c>TextWidth</c> gives it.</summary>
     public int Width(ReadOnlySpan<char> text, bool bold)
@@ -105,11 +147,18 @@ internal sealed class MacFont
         int width = 0;
         foreach (byte b in bytes)
         {
-            width += CharWidth(b, bold);
+            width += BitmapWidth(b);
         }
 
-        return width;
+        // Scaled widths add up in fractions of a pixel, and the total is rounded down.
+        return Scale(width, Size, BitmapSize) + (bold ? text.Length : 0);
     }
+
+    private int BitmapSize => _bitmap?.Size ?? Size;
+
+    private int BitmapWidth(byte c) => HexValue(_widths[2 * c]) * 16 + HexValue(_widths[2 * c + 1]);
+
+    private static int Scale(int value, int numerator, int denominator) => value * numerator / denominator;
 
     private static int HexValue(char c) => c <= '9' ? c - '0' : c - 'A' + 10;
 }
@@ -141,4 +190,13 @@ internal readonly struct TextMeasure
     public int Width(ReadOnlySpan<char> text) => _font?.Width(text, _bold) ?? text.Length * _unit;
 
     public int Width(char c) => Width([c]);
+
+    // Excel adds a pixel to the widths of 0 and # it divides by when the font is scaled (09.1c, 19.0e).
+    private int Adjust => _font is { IsReal: false } ? 1 : 0;
+
+    /// <summary>The width of a digit, as Excel divides by it to count the characters that fit.</summary>
+    public int DigitWidth => Width('0') + Adjust;
+
+    /// <summary>The width of <c>#</c>, as Excel divides by it to fill a cell with them.</summary>
+    public int HashWidth => Width('#') + Adjust;
 }

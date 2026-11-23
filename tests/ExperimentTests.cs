@@ -899,4 +899,107 @@ public class ExperimentTests
             Assert.Equal(names[defined].Definition, copy.Definition);
         }
     }
+
+    [Fact]
+    public void RecalculationOrder_FollowsDependencies()
+    {
+        // Every formula marked waiting (offset 8 = FF FF) with a stored 0, opened by Excel 1.00: one recalculation
+        // gets chains right whichever way they run (docs/Calculation.md).
+        var document = Load("Recalculation Order");
+        for (int row = 1; row <= 9; row++)
+        {
+            Assert.Equal(11 - row, document.Cells[$"A{row}"].Formula!.Result.Number);   // A1 = A2+1 … A10 = 1
+            Assert.Equal(row + 1, document.Cells[$"B{row + 1}"].Formula!.Result.Number); // B1 = 1, B2 = B1+1 …
+        }
+
+        Assert.Equal(12, document.Cells["C1"].Formula!.Result.Number);  // =D1*2, D1 =E1*2, E1 3
+        Assert.Equal(180, document.Cells["C3"].Formula!.Result.Number); // =SUM of four formulas
+        Assert.Equal(15, document.Cells["C8"].Formula!.Result.Number);  // =E8+C9 with E8 and C9 formulas
+    }
+
+    [Fact]
+    public void CircularReference_WithoutIteration_KeepsTheValues()
+    {
+        // A1 = B1+1, B1 = A1+1 and A3 = A1*10, all waiting with stored 0: none is calculated.
+        var document = Load("Circular No Iteration");
+        Assert.All(["A1", "B1", "A3"], a => Assert.Equal(0, document.Cells[a].Formula!.Result.Number));
+    }
+
+    [Theory]
+    [InlineData("Iteration Count", 100, 0.001, 100)]                // A1 = A1+1: exactly the maximum iterations
+    [InlineData("Iteration Five", 5, 0.001, 5)]
+    [InlineData("Iteration Converge", 100, 0.001, 1.9990234375)]    // A1 = A1/2+1: stops after 11, change < 0.001
+    [InlineData("Iteration Big Change", 100, 0.5, 1.75)]            // a change of exactly 0.5 does not stop it
+    public void Iteration_StopsAsExcelDoes(string sample, int maxIterations, double maxChange, double a1)
+    {
+        // CALCULATION(1,TRUE,max,change), then FORMULA in A1 (docs/Calculation.md).
+        var document = Load(sample);
+        Assert.True(document.State.Iteration);
+        Assert.Equal(maxIterations, document.State.MaxIterations);
+        Assert.Equal(maxChange, document.State.MaxChange);
+        Assert.Equal(a1, document.Cells["A1"].Formula!.Result.Number);
+    }
+
+    [Fact]
+    public void Iteration_CalculatesTheEnteredCellFirst()
+    {
+        // B1 = A1+1 already there, A1 = B1+1 entered: each of 100 iterations does A1, then B1.
+        var document = Load("Iteration Pair");
+        Assert.Equal(199, document.Cells["A1"].Formula!.Result.Number);
+        Assert.Equal(200, document.Cells["B1"].Formula!.Result.Number);
+    }
+
+    [Fact]
+    public void CalculationSettings_AreExcelsNotTheFiles()
+    {
+        // Built with iteration on and 5 iterations, opened while another document was open:
+        // Open drops the file's settings and Save writes Excel's (spec §6).
+        var document = Load("Iteration Settings Kept");
+        Assert.False(document.State.Iteration);
+        Assert.Equal(100, document.State.MaxIterations);
+        Assert.Equal(0.001, document.State.MaxChange);
+        Assert.Equal(0, document.Cells["A1"].Formula!.Result.Number);
+    }
+
+    // An empty worksheet cut down as in the smallest-file experiment: no names, no window record, no page breaks or
+    // print record, so the sections after the cell data are just their terminators (docs/Testing.md).
+    private static byte[] MinimalBare()
+    {
+        byte[] full = ExcelDocument.CreateWorksheet().ToArray();
+        int names = ExcelFileLayout.Read(full).GetSectionOffset(ExcelSection.DefinedNames);
+        return [.. full.AsSpan(0, names), 0x00, 0x00, 0x00, 0x00, 0x00];
+    }
+
+    [Fact]
+    public void Minimal_SmallestFileEveryReleaseOpens()
+    {
+        // 701 bytes: Excel 1.00, 1.03 and 1.5 all open it; cut any shorter and they refuse it.
+        byte[] bare = MinimalBare();
+        Assert.Equal(701, bare.Length);
+        var document = ExcelDocument.Read(bare);
+        Assert.Empty(document.Names);
+        Assert.Empty(document.Windows);
+    }
+
+    [Theory]
+    [InlineData("Excel 1.00/Minimal Bare")]
+    [InlineData("Excel 1.03/Minimal Bare")]
+    [InlineData("Excel 1.5/Minimal Bare")]
+    [InlineData("Excel 1.00/Minimal No Window")]
+    public void Minimal_ExcelAddsItsNamesButNoWindow(string sample)
+    {
+        // Saved back, the sheet has Excel's five built-in names again, undefined, and still no window: a document
+        // opened without a window record has none.
+        var document = ExcelDocument.Read(File.ReadAllBytes(SampleFile(sample)));
+        Assert.Equal(["Criteria", "Database", "Print_Area", "Print_Titles", "Recorder"], document.Names.Select(n => n.Name));
+        Assert.Empty(document.Windows);
+    }
+
+    [Fact]
+    public void Minimal_MissingThePrintSection_IsRefused()
+    {
+        // Excel 1.00 and 1.5 refuse a file that stops before the 3 bytes of section 7; Excel 1.03 crashes on it.
+        byte[] cut = ExcelDocument.CreateWorksheet().ToArray()[..^3];
+        Assert.ThrowsAny<Exception>(() => ExcelDocument.Read(cut));
+    }
 }
