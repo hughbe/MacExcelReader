@@ -2865,9 +2865,11 @@ while text is checked against the room at its plain width: `TRUE` (27½ pixels) 
 
 **Releases.** In a size the System has a bitmap for, Excel 1.03 and 1.5 draw cells exactly as 1.00 does:
 every test sheet in Geneva 10 came out the same, pixel for pixel. In a size with no bitmap, Excel 1.5 still
-matches 1.00 cell for cell, though it draws the column letters with slightly different glyphs. Excel 1.03 does
-not: when it checks whether text fits, it adds a pixel per character on top of the scaled width. In Geneva 11,
-`TRUE` (28 pixels) needs 32 pixels of room in 1.03 and 28 in 1.00 and 1.5, and `1E+04` (34) needs 39.
+matches 1.00 cell for cell, while Excel 1.03 does not: when it checks whether text fits, it adds a pixel per
+character on top of the scaled width. In Geneva 11, `TRUE` (28 pixels) needs 32 pixels of room in 1.03 and 28 in
+1.00 and 1.5, and `1E+04` (34) needs 39. The bold column and row headings of a scaled size depend on the System
+rather than on Excel: Excel 1.00 draws them with heavier letters under the System on its own Data disk than under
+a later System, where it matches 1.03 and 1.5 pixel for pixel. The cells look the same under both.
 
 **Rows.** Every row has the same height, the font's ascent + descent + 1 (`09.1c`; 13 in Geneva 10, 15 in Geneva
 11), and its bottom pixel is its gridline. `09.1c` also sets a floor from the screen's size that no font reaches.
