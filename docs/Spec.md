@@ -178,7 +178,7 @@ file records with the function count (§5).
 | 1.00 (September 1985) | 17 | 0–207 | — |
 | 1.01 | 17 | 0–207 | Adds a one-byte extra header (§5) and drops the extra function names (§14), keeping the function-count flag in state word `0x01C` instead (§5, §6). Takes the argument separator and other characters from the system's international settings (§15.4), and moves its words into resources so that it can be translated: function names (§15.3), the built-in names of a new sheet (§11), built-in number formats and format letters (§7), and the workspace file's name (Appendix B). Its code asks for a string by number (`0d.0d` in 1.01): below `0x2000` the `STR` resource with that ID, from `0x2000` up item number − `0x2000`, counting from 0, of `STR#` 256. Function table and tokens identical to 1.00's. |
 | 1.03 | 17 | 0–207 | Writes a zero-length name for an external entry that refers to the document itself (§8), and makes its in-memory external entries 16 bytes (§8). Function table and tokens identical to 1.01's. |
-| 1.04 | 17 | 0–208 | Adds CHANGE.LINK (208, a command with up to two text arguments, carried out by `44.00` in 1.04) and a third argument to OPEN, matching the Read Only box its Open dialog gains (Appendix A). Its Save writes the function count as one more than the highest function number a formula uses (§5): 209 for a sheet calling CHANGE.LINK, and 208 for one that calls nothing newer even when the file it opened said 209 (`Changes 1.04`, `No New Functions 1.04` samples). It keeps a document's file reference between saves and flushes the volume after saving (`44.0c`, `44.0d` in 1.04), which does not change the bytes written. Embedded code identical to 1.03's apart from the import word (§2.3). Compiler and tokens identical to 1.03's. |
+| 1.04 | 17 | 0–208 | Adds CHANGE.LINK (208, a command with up to two text arguments, carried out by `44.00` in 1.04) and a third argument to OPEN, matching the Read Only box its Open dialog gains (Appendix A). Its Save writes the function count as one more than the highest function number a formula uses (§5): 209 for a sheet calling CHANGE.LINK, and 208 for one that calls nothing newer even when the file it opened said 209 (`Changes 1.04`, `No New Functions 1.04` samples). It keeps a document's file reference between saves and flushes the volume after saving (`44.0c`, `44.0d` in 1.04), which does not change the bytes written. Embedded code differs from 1.03's only in the import word (§2.3). Compiler and tokens identical to 1.03's. |
 | 1.06 (December 1987) | 17 | 0–208 | Writes the same files as 1.04, with byte-identical embedded code, so its files cannot be told from 1.04's (§2.3); compiler, function table and tokens unchanged (`Changes 1.06` and `No New Functions 1.06` samples). Its other changes are inside the application: a `SIZE` resource for MultiFinder, one routine (`01.1a` in 1.06) for all its checks for pending events, and no longer reserving master pointers around Open (1.04's `15.2b`, `15.2c`). |
 | 1.5 (May 1988) | 17, or 18 when needed | 0–291 | Adds functions 209–291 (tokens `0x39`, `0x3A` for 256 and up, §15.2). Changes the argument rules of eleven more functions (Appendix A; OPEN's had changed in 1.04). Marks charts with more than 102 categories as chart version 1, which earlier releases refuse (§16.2). Adds frozen panes and gridline colours to windows (§13) and text sections, scaling by trailing commas, `@` and colours to number formats (§7). |
 
@@ -2731,14 +2731,16 @@ Save As and `SAVE.AS(name, type)` take type 1 Normal, 2 SYLK, 3 Text (tab-delimi
 Excel 1.00 numbers them 0–3 internally and dispatches in `47.05`: Normal goes to the document writer (`47.0b`),
 the others through `72.01` to the SYLK writer (`69.00`), the text writer (`6e.00`) and the WKS writer
 (`74.00`). The SYLK writer is described here from its code (`69.00`–`69.10`, with `72.20` for format codes) and
-checked against 84 samples Excel 1.00 exported and 94 Excel 1.5 exported: `ExcelDocument.ExportSylk` writes
-the same bytes for all of them. Excel 1.01–1.06 have the same writer (`6a` in 1.04 and 1.06), apart from taking
-TRUE, FALSE and the error names from a string list that a translation can change. Excel 1.5's (`70`) differs in
+checked against 84 samples Excel 1.00 exported and 94 Excel 1.5 exported: a writer that follows this
+description produces the same bytes for all of them. The writers of Excel 1.01–1.06 (`6a` in 1.04 and 1.06)
+differ from 1.00's in one way: they take TRUE, FALSE and the error names from a string list that a translation
+can change. Excel 1.5's (`70`) differs in
 three ways, given under **Excel 1.5** below.
 
-SYLK is a text form of the same model, so it also shows how Excel reads each field. Comparing the 84 exports
-with the library's reading (7,936 cells, 2,853 formulas) agreed on every constant, number format, alignment,
-style, border, protection flag and name, apart from the format-text and whole-row rules now in §7 and §15.4.
+SYLK is a text form of the same model, so it also shows how Excel reads each field. The 84 exports
+(7,936 cells, 2,853 formulas) were compared with what this specification says the files hold. They disagreed
+in two places only, the format-text and whole-row rules, which §7 and §15.4 now give; every constant, number
+format, alignment, style, border, protection flag and name agreed.
 
 **Lines.** Each record is a line of Mac OS Roman text ending in a carriage return. Fields are separated by `;`,
 so a `;` inside a format, a text value or a formula is doubled. In `P`, `NN`, `NE` and `C` records a byte below
