@@ -2,7 +2,7 @@ namespace MacExcelReader;
 
 /// <summary>
 /// How Excel 1.00 draws a cell's value in its row (spec Appendix D), from
-/// <see cref="ExcelValueFormatter.LayoutCell(ExcelDocument, int, int)"/>. Positions are in pixels from the left edge
+/// <see cref="ExcelValueFormatter.LayoutCell(ExcelDocument, int, int, ExcelVersion)"/>. Positions are in pixels from the left edge
 /// of column A, with the sheet's columns side by side and hidden ones taking no room.
 /// </summary>
 /// <param name="Text">The text drawn: the formatted value, a row of <c>#</c> for one too wide for its column, or a

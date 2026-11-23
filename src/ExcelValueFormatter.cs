@@ -364,35 +364,38 @@ public static class ExcelValueFormatter
     public static string FormatCell(ExcelCellRef cell, ExcelDocument? document = null)
         => FormatValue(cell.Value, cell.NumberFormat, document);
     /// <summary>
-    /// Formats a cell's value as Excel 1.00 shows it in its column (spec Appendix D): General fits the column, fills repeat
+    /// Formats a cell's value as Excel shows it in its column (spec Appendix D): General fits the column, fills repeat
     /// across it, and a number, TRUE, FALSE or error too wide for it shows as a row of <c>#</c>. Text is returned
     /// whole, since Excel lets it run into the next cells (<see cref="LayoutCell"/>). Excel measures in pixels with
     /// the sheet's standard font; for a font or size missing from Excel 1.00's System, every character counts as one
-    /// cached digit width (<see cref="ExcelSheetState.DigitWidth"/>), an approximation.
+    /// cached digit width (<see cref="ExcelSheetState.DigitWidth"/>), an approximation. Excel 1.00 and 1.5 draw
+    /// alike; pass <see cref="ExcelVersion.Excel103"/> for Excel 1.03, which differs in font sizes the System has no
+    /// bitmap for.
     /// </summary>
-    public static string FormatCell(ExcelCell cell, ExcelDocument document, int column)
+    public static string FormatCell(ExcelCell cell, ExcelDocument document, int column, ExcelVersion version = ExcelVersion.Excel100)
     {
         ArgumentNullException.ThrowIfNull(cell);
         ArgumentNullException.ThrowIfNull(document);
-        return Fit(cell.Value, cell.NumberFormat, cell.Bold, cell.Italic, document, column).Text;
+        return Fit(cell.Value, cell.NumberFormat, cell.Bold, cell.Italic, document, column, version).Text;
     }
 
     /// <summary>
-    /// Formats a cell's value as Excel 1.00 shows it in its column, as
-    /// <see cref="FormatCell(ExcelCell, ExcelDocument, int)"/> does, without creating the cell.
+    /// Formats a cell's value as Excel shows it in its column, as
+    /// <see cref="FormatCell(ExcelCell, ExcelDocument, int, ExcelVersion)"/> does, without creating the cell.
     /// </summary>
-    public static string FormatCell(ExcelCellRef cell, ExcelDocument document, int column)
+    public static string FormatCell(ExcelCellRef cell, ExcelDocument document, int column, ExcelVersion version = ExcelVersion.Excel100)
     {
         ArgumentNullException.ThrowIfNull(document);
-        return Fit(cell.Value, cell.NumberFormat, cell.Bold, cell.Italic, document, column).Text;
+        return Fit(cell.Value, cell.NumberFormat, cell.Bold, cell.Italic, document, column, version).Text;
     }
 
     /// <summary>
-    /// Works out how Excel 1.00 draws a cell (spec Appendix D): the text it shows, where it starts and the stretch of the
+    /// Works out how Excel draws a cell (spec Appendix D), as 1.00 and 1.5 do, or 1.03 with
+    /// <see cref="ExcelVersion.Excel103"/>: the text it shows, where it starts and the stretch of the
     /// row it is clipped to, in pixels from the left edge of column A. Returns null for a cell with no value or in a
     /// hidden column.
     /// </summary>
-    public static ExcelCellDisplay? LayoutCell(ExcelDocument document, int row, int column)
+    public static ExcelCellDisplay? LayoutCell(ExcelDocument document, int row, int column, ExcelVersion version = ExcelVersion.Excel100)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentOutOfRangeException.ThrowIfNegative(column);
@@ -413,7 +416,7 @@ public static class ExcelValueFormatter
 
         int right = left + width;
         var value = cell.Value;
-        var (text, measure, italicExtra, hashes) = Fit(value, cell.NumberFormat, cell.Bold, cell.Italic, document, column);
+        var (text, measure, italicExtra, hashes) = Fit(value, cell.NumberFormat, cell.Bold, cell.Italic, document, column, version);
         var alignment = hashes ? ExcelAlignment.Center : cell.Alignment;
         if (alignment == ExcelAlignment.General)
         {
@@ -507,12 +510,12 @@ public static class ExcelValueFormatter
     // A value as Excel 1.00 fits it into its column (19.0a, 19.0e): the text, how it was measured, the room italic
     // takes, and whether it became a row of #s.
     private static (string Text, TextMeasure Measure, int ItalicExtra, bool Hashes) Fit(
-        ExcelValue value, int numberFormat, bool bold, bool italic, ExcelDocument document, int column)
+        ExcelValue value, int numberFormat, bool bold, bool italic, ExcelDocument document, int column, ExcelVersion version)
     {
         var state = document.State;
         var font = MacFont.Find(state.StandardFont, state.StandardFontSize);
         var measure = font is not null
-            ? TextMeasure.Pixels(font, bold)
+            ? TextMeasure.Pixels(font, bold, version)
             : TextMeasure.Fixed(bold ? state.BoldDigitWidth : state.DigitWidth);
         int italicExtra = !italic ? 0 : font?.ItalicExtra ?? state.HalfAscent;
 
@@ -540,7 +543,7 @@ public static class ExcelValueFormatter
                     }
                 }
 
-                return measure.Width(text) > room
+                return measure.FitWidth(text) > room
                     ? (ExcelNumberFormat.Hashes(room, measure), measure, italicExtra, true)
                     : (text, measure, italicExtra, false);
             }
@@ -553,7 +556,7 @@ public static class ExcelValueFormatter
             {
                 // TRUE, FALSE and errors show as they are, whatever the cell's format, or as #s (19.0e).
                 string text = value.ToString();
-                return measure.Width(text) > room
+                return measure.FitWidth(text) > room
                     ? (ExcelNumberFormat.Hashes(room, measure), measure, italicExtra, true)
                     : (text, measure, italicExtra, false);
             }

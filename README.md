@@ -208,7 +208,8 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
   of the 1.5 samples) and encode a few things differently; they still decompile correctly
   ([spec §2.3 and §15.4](https://github.com/hughbe/MacExcelReader/blob/main/docs/Spec.md)).
 - **Display.** `ExcelValueFormatter.FormatCell(cell, document)` gives the text Excel turns a value into.
-  `FormatCell(cell, document, column)`, `LayoutCell` and `GetRowMetrics` follow how Excel 1.00 draws it, in
+  `FormatCell(cell, document, column)`, `LayoutCell` and `GetRowMetrics` follow how Excel 1.00 and 1.5 draw it
+  (pass `ExcelVersion.Excel103` for 1.03's one difference), in
   pixels of the sheet's font at any size, for the font families in Excel 1.00's System (every sample uses Geneva
   10). For other families they count every character as one digit width, so a value at the edge of its column
   may differ. Colours are not applied, and format text uses the US letters and separators.

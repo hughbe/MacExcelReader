@@ -2850,6 +2850,12 @@ down, so `1E+04` in Geneva 11 is 34 pixels. The ascent and descent scale to the 
 at `0x0976` of its globals) and the width of `#` (`19.0e`). So a Geneva 11 digit counts as 8 pixels and a `#` as 9,
 while text is checked against the room at its plain width: `TRUE` (27½ pixels) fits a 29-pixel room.
 
+**Releases.** Excel 1.03 and 1.5 draw cells as Excel 1.00 does: every test sheet in Geneva 10 came out the
+same, pixel for pixel. The one difference is in Excel 1.03, for sizes with no bitmap: when it checks whether
+text fits, it adds a pixel per character on top of the scaled width, where 1.00 and 1.5 do not. In Geneva 11,
+`TRUE` (28 pixels) needs 32 pixels of room in 1.03 and 28 in 1.00 and 1.5, and `1E+04` (34) needs 39. Excel 1.5
+also draws the column letters of such a size with slightly different glyphs, in the same places.
+
 **Rows.** Every row has the same height, the font's ascent + descent + 1 (`09.1c`; 13 in Geneva 10, 15 in Geneva
 11), and its bottom pixel is its gridline. `09.1c` also sets a floor from the screen's size that no font reaches.
 Text sits on a baseline one ascent below the row's top: in Geneva 10 capitals cover pixel rows 3–10 of 13 and
