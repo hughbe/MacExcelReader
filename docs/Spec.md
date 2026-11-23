@@ -454,7 +454,9 @@ Excel's settings (docs/Calculation.md).
 0x032, 0x036 and 0x03A to `FFFF` (empty), 0x02A, 0x02E, 0x03E, 0x25A, 0x25E and 0x266 to 0, and 0x256 to a pointer
 into the document's record. It also recomputes the font metrics at 0x248–0x254 (`09.1c`). Every other word keeps
 the file's value, including 0x028, 0x030, 0x03C and the print-title values. A file with junk in all the reset
-fields and the font metrics opens and saves back normally in Excel 1.00 (`excel-test junk`, docs/Testing.md).
+fields and the font metrics opens and saves back normally in Excel 1.00, and samples with junk in every
+field the junk test fills open and save back normally in Excel 1.03 and 1.5 too (`excel-test junk`,
+docs/Testing.md).
 
 The cached font values at 0x248–0x254 are recomputed from the font number and size by a single routine
 (`GetFontInfo` / `CharWidth`); a writer can copy them from a sample.
