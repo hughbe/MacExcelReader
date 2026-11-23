@@ -1002,4 +1002,55 @@ public class ExperimentTests
         byte[] cut = ExcelDocument.CreateWorksheet().ToArray()[..^3];
         Assert.ThrowsAny<Exception>(() => ExcelDocument.Read(cut));
     }
+
+    [Fact]
+    public void FunctionNameList_WrittenByABuildWithASmallerBaseCount()
+    {
+        // Saved by a copy of Excel 1.00 patched to a base count of 200, after FORMULA entered =FULL() (function
+        // 202): the count is the table length, 208, and section 7 starts with the names of functions 200–207 as
+        // Pascal strings before the page breaks (spec §5, §14). Released 1.00 never writes the list, since its base
+        // count is 208 too, and a reader cannot tell from the file that it is there.
+        byte[] file = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", "Function Names 1.00 Patched"));
+        var layout = ExcelFileLayout.Read(file);
+        Assert.Equal(208, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(file.AsSpan(layout.DataOffset)));
+        int position = layout.GetSectionOffset(ExcelSection.PrintSettings);
+        var names = new List<string>();
+        for (int i = 0; i < 8; i++)
+        {
+            int length = file[position];
+            names.Add(MacRoman.GetString(file.AsSpan(position + 1, length)));
+            position += 1 + length;
+        }
+
+        Assert.Equal(["MOVE", "SIZE", "FULL", "8", "9", "CANCEL.COPY", "UNLOCKED.NEXT", "UNLOCKED.PREV"], names);
+        Assert.Equal([0, 0, 0], file[position..]);
+        Assert.Equal(["MOVE", "SIZE", "FULL"], Enumerable.Range(200, 3).Select(n => ExcelFunctions.Get(n)!.Name));
+    }
+
+    [Fact]
+    public void ChartPointFormatListHead_IsZeroWhenThereAreNoPointFormats()
+    {
+        // Record offset 362 heads Excel's list of data-point formats. With junk there and no formats, Excel 1.00 kept
+        // it, lost the chart's series and saved garbage records (docs/Testing.md), so a writer must clear it.
+        var chart = ChartDocument.Read(Sample("Column Fill"));
+        int record = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(Sample("Column Fill").AsSpan(20)) + 8;
+        Assert.NotEqual(0, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(Sample("Column Fill").AsSpan(record + 362)));
+        chart.Charts[0].PointFormats.Clear();
+        byte[] written = chart.ToArray();
+        Assert.Equal(0, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(written.AsSpan(record + 362)));
+        Assert.Equal(0, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(written.AsSpan(record + 364)));
+    }
+
+    [Fact]
+    public void ChartPointFormatListHead_JunkLosesTheSeries()
+    {
+        // Area Drop Lines (no data-point formats) with A5 A5 at record offset 362, opened and saved by Excel 1.00:
+        // Open kept the word as the head of its list of point formats, and Save wrote the chart with its series'
+        // name and references emptied. With 0 there, as in the original, the series survives (spec §16.5).
+        var original = ChartDocument.Read(Sample("Area Drop Lines"));
+        var saved = ChartDocument.Read(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", "Point Format Head Junk 1.00")));
+        Assert.Equal("Margin", original.Series[0].Name);
+        Assert.Equal("", saved.Series[0].Name);
+        Assert.Equal("", saved.Series[0].ValuesReference);
+    }
 }

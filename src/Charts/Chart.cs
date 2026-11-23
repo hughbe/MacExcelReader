@@ -309,6 +309,10 @@ public sealed class Chart
 
     internal ushort StoredPointFormatCount { get => GetWord(364); set => SetWord(364, value); }
 
+    // The head of Excel's in-memory list of data-point formats (spec §16.5, record offset 362). Open builds the list
+    // only when the count at 364 is not 0, and otherwise keeps this word and walks it, so it must be 0 then.
+    internal ushort PointFormatListHead { get => GetWord(362); set => SetWord(362, value); }
+
     internal bool HasXScaleMarker
     {
         get => GetWord(136) != 0;

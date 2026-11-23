@@ -447,7 +447,7 @@ the file's values until then (only New clears them, `10.0b`).
 **Calculation settings.** Offsets 0x000–0x013 (maximum iterations, calculation mode, precision, reference
 style, maximum change and iteration) are settings of Excel as a whole, not of a sheet. Save writes the ones in
 effect. Open takes them from the file only when no other document is open; otherwise it reads those 20 bytes
-into a scratch buffer and drops them (`46.08`), and Excel carries on with its current settings. A sheet saved
+into a scratch buffer and drops them (`46.06`), and Excel carries on with its current settings. A sheet saved
 with iteration on and 5 iterations, opened after another document, does not iterate, and is saved back with
 Excel's settings (docs/Calculation.md).
 
@@ -743,6 +743,10 @@ In memory each row has a 4-byte slot that may point at a per-row auxiliary table
 entry count (low 15 bits of its first word), or 0 if the row has none. Open, for a value greater than 2,
 allocates an *empty* table with that capacity (`2n + 2` bytes) and does not read any contents. So the word is
 only a size hint for a structure Excel rebuilds at run time; a writer can emit 0 and a reader can ignore it.
+Excel trusts the hint, though: a large value costs memory. With `A5 A5` in every row (about 84 KB per row) of
+three files opened and closed one after another, and junk in other fields too, Excel 1.00 ran out of memory and
+hung saving the next large sheet; with the same files and `01 01` in the row index it did not
+(docs/Testing.md). Write 0, or the true count.
 
 The structure is the recalculation dependency index. A row's slot records which rows hold formulas that refer
 to cells in this row; its top two bits tag the form: 1 for a single row held inline, 2 for an inline pair, 3
@@ -1158,8 +1162,15 @@ that number, refusing the file ("File error", alert `0x2038`) on any difference 
 whose table holds functions beyond its base set checks that a file numbers them the same way. Released
 1.00's base count and table length are both 208, so it never writes the list, and it refuses a file whose count
 is above 208 before reaching it (§5): a sheet the library wrote with count 209 and one name gets "File is not a
-saved worksheet", and the same sheet with count 208 opens. No sample has the list. Excel 1.01 dropped it in
-both Save and Open (`47.0b`, `46.07` in 1.01), and later files carry no names even when their count is higher.
+saved worksheet", and the same sheet with count 208 opens. To see the list, a copy of Excel 1.00 was patched to
+a base count of 200 (the start-up code computes it as the length of a 208-byte table; the patch shortens that by
+8). Entering `=FULL()` (function 202) in a macro sheet and saving gave count 208 and, at the start of section 7,
+`04 "MOVE" 04 "SIZE" 04 "FULL" 01 "8" 01 "9" 0B "CANCEL.COPY" 0D "UNLOCKED.NEXT" 0D "UNLOCKED.PREV"`, then
+`00 00 00` for no page breaks and no print record. The same patched Excel opens that file quietly; with one name
+changed it shows "File error" but leaves the document open. The file does not say which base count wrote it,
+so a reader with a different one, released 1.00 included, takes the names for page breaks. Excel 1.01 dropped
+the list in both Save and Open (`47.0b`, `46.07` in 1.01), and later files carry no names even when their count
+is higher.
 
 1. **Column page breaks**: a sequence of chunks, each a count byte `n` (1…5) followed by `n` bytes, one column
    number per byte. Terminated by `0x00`.
@@ -1752,7 +1763,7 @@ come from and go back to.
 | 312 | 250 | 46 | Built-in text object −1 |
 | 358 | 310 | 2 | Pointer, left over from memory; skipped on load |
 | 360 | 312 | 2 | Number of words in the series word list |
-| 362 | 314 | 2 | Pointer, left over from memory |
+| 362 | 314 | 2 | **Head of the list of data-point formats** in memory, which Save walks to write them. Open builds the list, replacing this word, only when the count at 364 is not 0; otherwise it keeps the file's word, so **write 0 when there are no data-point formats**. The samples have 0 exactly when the count is 0. With `A5 A5` here and no formats, Excel 1.00 lost the chart's series and saved garbage records. With formats, the word is left over from memory. |
 | 364 | 316 | 2 | **Number of data-point format records** |
 | 366 | 318 | 12 | **Default series format** (point-format record, §16.8) |
 
@@ -2854,9 +2865,11 @@ while text is checked against the room at its plain width: `TRUE` (27½ pixels) 
 
 **Releases.** In a size the System has a bitmap for, Excel 1.03 and 1.5 draw cells exactly as 1.00 does:
 every test sheet in Geneva 10 came out the same, pixel for pixel. In a size with no bitmap, Excel 1.5 still
-matches 1.00 cell for cell, though it draws the column letters with slightly different glyphs. Excel 1.03 does
-not: when it checks whether text fits, it adds a pixel per character on top of the scaled width. In Geneva 11,
-`TRUE` (28 pixels) needs 32 pixels of room in 1.03 and 28 in 1.00 and 1.5, and `1E+04` (34) needs 39.
+matches 1.00 cell for cell, while Excel 1.03 does not: when it checks whether text fits, it adds a pixel per
+character on top of the scaled width. In Geneva 11, `TRUE` (28 pixels) needs 32 pixels of room in 1.03 and 28 in
+1.00 and 1.5, and `1E+04` (34) needs 39. The bold column and row headings of a scaled size depend on the System
+rather than on Excel: Excel 1.00 draws them with heavier letters under the System on its own Data disk than under
+a later System, where it matches 1.03 and 1.5 pixel for pixel. The cells look the same under both.
 
 **Rows.** Every row has the same height, the font's ascent + descent + 1 (`09.1c`; 13 in Geneva 10, 15 in Geneva
 11), and its bottom pixel is its gridline. `09.1c` also sets a floor from the screen's size that no font reaches.
