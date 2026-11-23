@@ -2256,6 +2256,13 @@ version 17 and uses only functions 0–207:
    Section 7 is `00 00 00` for no page breaks and no print record.
 8. Seek back and write the section table as stream positions (§1.2).
 
+**The smallest file.** Sections 3, 4, 6 and 7 can be their terminators alone: no names (`00`), no window
+(`00`) and no page breaks or print record (`00 00 00`). An empty worksheet written that way is 701 bytes, and
+Excel 1.00, 1.03 and 1.5 all open it. Saving it back, they add their five built-in names, undefined. A sheet
+with no window record opens with no window, so it is open but not shown, and Excel saves it back without one.
+Every byte counts: cut off any part, even the three bytes of section 7, and Excel 1.00 and 1.5 refuse the
+file, while Excel 1.03 stops with a system error on that last case.
+
 Compile formulas with the rules of §15.4 for Excel 1.00–1.03 unless the file is meant for a later release.
 
 This recipe reproduces the samples byte for byte, and files written with it open in Excel 1.00, 1.03 and 1.5

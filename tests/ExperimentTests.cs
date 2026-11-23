@@ -960,4 +960,46 @@ public class ExperimentTests
         Assert.Equal(0.001, document.State.MaxChange);
         Assert.Equal(0, document.Cells["A1"].Formula!.Result.Number);
     }
+
+    // An empty worksheet cut down as in the smallest-file experiment: no names, no window record, no page breaks or
+    // print record, so the sections after the cell data are just their terminators (docs/Testing.md).
+    private static byte[] MinimalBare()
+    {
+        byte[] full = ExcelDocument.CreateWorksheet().ToArray();
+        int names = ExcelFileLayout.Read(full).GetSectionOffset(ExcelSection.DefinedNames);
+        return [.. full.AsSpan(0, names), 0x00, 0x00, 0x00, 0x00, 0x00];
+    }
+
+    [Fact]
+    public void Minimal_SmallestFileEveryReleaseOpens()
+    {
+        // 701 bytes: Excel 1.00, 1.03 and 1.5 all open it; cut any shorter and they refuse it.
+        byte[] bare = MinimalBare();
+        Assert.Equal(701, bare.Length);
+        var document = ExcelDocument.Read(bare);
+        Assert.Empty(document.Names);
+        Assert.Empty(document.Windows);
+    }
+
+    [Theory]
+    [InlineData("Excel 1.00/Minimal Bare")]
+    [InlineData("Excel 1.03/Minimal Bare")]
+    [InlineData("Excel 1.5/Minimal Bare")]
+    [InlineData("Excel 1.00/Minimal No Window")]
+    public void Minimal_ExcelAddsItsNamesButNoWindow(string sample)
+    {
+        // Saved back, the sheet has Excel's five built-in names again, undefined, and still no window: a document
+        // opened without a window record has none.
+        var document = ExcelDocument.Read(File.ReadAllBytes(SampleFile(sample)));
+        Assert.Equal(["Criteria", "Database", "Print_Area", "Print_Titles", "Recorder"], document.Names.Select(n => n.Name));
+        Assert.Empty(document.Windows);
+    }
+
+    [Fact]
+    public void Minimal_MissingThePrintSection_IsRefused()
+    {
+        // Excel 1.00 and 1.5 refuse a file that stops before the 3 bytes of section 7; Excel 1.03 crashes on it.
+        byte[] cut = ExcelDocument.CreateWorksheet().ToArray()[..^3];
+        Assert.ThrowsAny<Exception>(() => ExcelDocument.Read(cut));
+    }
 }
