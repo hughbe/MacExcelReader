@@ -128,6 +128,7 @@ The [usage guide](https://github.com/hughbe/MacExcelReader/blob/main/docs/Usage.
 | [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) | The harness that runs files in Excel under Mini vMac, and every experiment's results |
 | [Excel bugs and quirks](https://github.com/hughbe/MacExcelReader/blob/main/docs/ExcelBugs.md) | Excel's own bugs and oddities found along the way |
 | [Excel 1.x and BIFF2](https://github.com/hughbe/MacExcelReader/blob/main/docs/Biff2.md) | How the format differs from BIFF2, Excel 2.x's format |
+| [How Excel 1.x calculates](https://github.com/hughbe/MacExcelReader/blob/main/docs/Calculation.md) | What Excel 1.00 calculates, measured: arithmetic, functions, dates, text and errors |
 
 ---
 
