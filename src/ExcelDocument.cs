@@ -289,14 +289,12 @@ public sealed class ExcelDocument
 
         ushort signature = reader.ReadUInt16();
         var headerReserved = reader.ReadBytes(6);
-        int segmentCount = reader.ReadUInt16();
-        if (segmentCount != 2)
-        {
-            throw new ExcelFormatException($"Expected 2 embedded code segments, not {segmentCount}.");
-        }
-
-        var segmentInfo = new (int Length, int Offset)[segmentCount];
-        for (int i = 0; i < segmentCount; i++)
+        // Excel's Open reads neither the segment count nor the segment table (spec §4), and opens a file with junk in
+        // them; it uses the segments only to link to a closed document. Keep the two segments the table describes when
+        // it describes them, and two empty ones otherwise.
+        reader.ReadUInt16();
+        var segmentInfo = new (int Length, int Offset)[2];
+        for (int i = 0; i < segmentInfo.Length; i++)
         {
             segmentInfo[i] = (reader.ReadUInt16(), reader.ReadUInt16());
         }
@@ -319,50 +317,53 @@ public sealed class ExcelDocument
             },
         };
 
+        bool segmentsInFile = segmentInfo.All(s => s.Offset >= 0 && s.Offset + s.Length <= dataOffset);
         foreach (var (length, offset) in segmentInfo)
         {
-            if (offset + length > data.Length)
-            {
-                throw new ExcelFormatException("An embedded code segment lies outside the file.");
-            }
-
-            document.CodeSegments.Add(data.AsSpan(offset, length).ToArray());
+            document.CodeSegments.Add(segmentsInFile ? data.AsSpan(offset, length).ToArray() : []);
         }
 
-        var sections = new int[8];
-        for (int i = 0; i < sections.Length; i++)
+        var table = new int[8];
+        for (int i = 0; i < table.Length; i++)
         {
             uint position = reader.ReadUInt32();
-            sections[i] = (int)((position >> 16) * 512 + (position & 0xFFFF));
-            if (sections[i] > data.Length)
-            {
-                throw new ExcelFormatException($"Section {i} starts beyond the end of the file.");
-            }
+            table[i] = (int)((position >> 16) * 512 + (position & 0xFFFF));
         }
 
         document.ExtraHeader = reader.ReadBytes(reader.ReadUInt16());
         int rows = document.State.RowCount;
         int columns = document.State.ColumnCountInTable;
 
-        document.ReadNumberFormats(new BigEndianReader(data, sections[0]));
-        document.ReadExternalDocuments(new BigEndianReader(data, sections[1]), rows);
-        document.Cells.AttachSource(data, sections[2], sections[5], rows, columns);
-        // Section 3: for each external document, the names used from it, ending with a zero byte.
-        if (sections[3] < sections[4])
+        // Like Excel's Open, read the sections one after another rather than trusting the section table (spec §5):
+        // a file with junk in the table opens in Excel. Only the end of the cell data needs the table, or failing
+        // that a pass over the cell table.
+        document.ReadNumberFormats(reader);
+        document.ReadExternalDocuments(reader, rows);
+        int cellTable = reader.Position;
+        reader.Position = checked(cellTable + rows * columns * CellWords.EntrySize);
+        if (reader.Position > data.Length)
         {
-            var namesReader = new BigEndianReader(data, sections[3]);
-            foreach (var external in document.ExternalDocuments)
+            throw new ExcelFormatException("The cell table runs past the end of the file.");
+        }
+
+        // Section 3: for each external document, the names used from it, ending with a zero byte.
+        foreach (var external in document.ExternalDocuments)
+        {
+            for (byte length; (length = reader.ReadByte()) != 0;)
             {
-                for (byte length; (length = namesReader.ReadByte()) != 0;)
-                {
-                    external.Names.Add(MacRoman.GetString(namesReader.ReadSpan(length)));
-                }
+                external.Names.Add(MacRoman.GetString(reader.ReadSpan(length)));
             }
         }
 
-        document.ReadNames(new BigEndianReader(data, sections[4]));
-        document.ReadWindows(new BigEndianReader(data, sections[6]));
-        var printSettings = new BigEndianReader(data, sections[7]);
+        document.ReadNames(reader);
+        int cellData = reader.Position;
+        document.Cells.AttachSource(data, cellTable, cellData, rows, columns);
+        int windows = table[6] >= cellData && table[6] <= table[7] && table[7] <= data.Length
+            ? table[6]
+            : MeasureCellData(data, cellTable, cellData, rows, columns);
+        reader.Position = windows;
+        document.ReadWindows(reader);
+        var printSettings = reader;
         if (document.ExtraHeader.Length == 0)
         {
             for (int i = ExcelFunctions.Count; i < document.FunctionCount; i++)
@@ -373,6 +374,33 @@ public sealed class ExcelDocument
 
         document.ReadPrintSettings(printSettings);
         return document;
+    }
+
+    // The end of the cell data: the furthest end of any cell's record (spec §9, §12).
+    private static int MeasureCellData(byte[] data, int cellTable, int cellData, int rows, int columns)
+    {
+        int end = cellData;
+        for (int i = 0; i < rows * columns; i++)
+        {
+            var entry = data.AsSpan(cellTable + i * CellWords.EntrySize);
+            ushort word0 = BinaryPrimitives.ReadUInt16BigEndian(entry);
+            ushort word1 = BinaryPrimitives.ReadUInt16BigEndian(entry.Slice(2));
+            var type = CellWords.Type(word1);
+            if (!ExcelCellGrid.HasCellData(type))
+            {
+                continue;
+            }
+
+            int offset = cellData + (word0 << 4) + (word1 >> 12);
+            if (offset >= data.Length)
+            {
+                throw new ExcelFormatException("A cell's data lies outside the file.");
+            }
+
+            end = Math.Max(end, offset + ExcelFormula.MeasureCellData(type, data.AsSpan(offset)));
+        }
+
+        return end;
     }
 
     private void ReadNumberFormats(BigEndianReader reader)
@@ -433,6 +461,8 @@ public sealed class ExcelDocument
                 name.ArrayConstants.AddRange(blocks);
             }
         }
+
+        reader.Position += position;
     }
 
     private void ReadWindows(BigEndianReader reader)

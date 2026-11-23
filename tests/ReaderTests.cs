@@ -102,12 +102,25 @@ public class ReaderTests
         Assert.Contains("version", ex.Message);
     }
 
-    [Fact]
-    public void Read_WrongCodeSegmentCount_Throws()
+    // Excel 1.00's Open reads neither the segment count nor the section table, and opened and saved copies of
+    // Expenses, DB.FORM and LOAN1 with junk in them (spec §4, §5; docs/Testing.md). The library reads them too.
+    [Theory]
+    [InlineData("Expenses")]
+    [InlineData("DB.FORM")]
+    [InlineData("LOAN1")]
+    public void Read_IgnoresSegmentCountAndSectionTable(string sample)
     {
-        var bytes = Sample("Worksheet1.xls");
-        bytes[13] = 1;
-        Assert.Throws<ExcelFormatException>(() => ExcelDocument.Read(bytes));
+        var bytes = Sample(sample);
+        var clean = ExcelDocument.Read(bytes);
+        var layout = ExcelFileLayout.Read(bytes);
+        bytes.AsSpan(12, 2).Fill(0xA5);
+        bytes.AsSpan(layout.SectionTableOffset, 32).Fill(0xA5);
+
+        var junk = ExcelDocument.Read(bytes);
+        Assert.Equal(clean.ToArray().Length, junk.ToArray().Length);
+        Assert.Equal(clean.Cells.CountNonEmpty(), junk.Cells.CountNonEmpty());
+        Assert.Equal(clean.Windows.Count, junk.Windows.Count);
+        Assert.Equal(clean.Names.Select(n => n.Name), junk.Names.Select(n => n.Name));
     }
 
     [Fact]

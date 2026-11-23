@@ -113,11 +113,22 @@ sealed class PackCommand : Command<PackSettings>
                 files.Add(new MfsFile(name, "MCBN", "XCEL", data, []));
                 targets.Add((name, null));
             }
-            else
+            else if (TryRead(data, out var sheet))
             {
-                var sheet = ExcelDocument.Read(data);
                 files.Add(new MfsFile(name, sheet.FinderType, "XCEL", data, []));
                 targets.Add((name, sheet));
+            }
+            else if (settings.NoProbe)
+            {
+                // A file the library refuses, to see whether Excel opens it (excel-test junk): its Finder type comes
+                // from the document-kind byte after the state block (spec §5).
+                int kind = ((data[22] << 8) | data[23]) + 2 + ExcelSheetState.Size;
+                files.Add(new MfsFile(name, kind < data.Length && data[kind] == 0x40 ? "XLPG" : "XLBN", "XCEL", data, []));
+                targets.Add((name, null));
+            }
+            else
+            {
+                throw new InvalidOperationException($"The library cannot read {path}; pack it with --no-probe to test it in Excel anyway.");
             }
         }
 
@@ -153,6 +164,20 @@ sealed class PackCommand : Command<PackSettings>
         }
 
         return false;
+    }
+
+    private static bool TryRead(byte[] data, out ExcelDocument sheet)
+    {
+        try
+        {
+            sheet = ExcelDocument.Read(data);
+            return true;
+        }
+        catch (ExcelFormatException)
+        {
+            sheet = null!;
+            return false;
+        }
     }
 
     private static (ExcelDocument Driver, int Probes) BuildDriver(PackSettings settings, ExcelVersion version, List<(string Name, ExcelDocument? Sheet)> targets, Dictionary<string, string[]> commands)
