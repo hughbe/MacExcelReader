@@ -490,6 +490,20 @@ public static class ExcelValueFormatter
         return new ExcelCellDisplay(text, alignment, x, textWidth, clipLeft, clipRight);
     }
 
+    /// <summary>
+    /// Gets the height of every row of a sheet, and how far below a row's top its text sits, in pixels (spec
+    /// Appendix D): the standard font's ascent + descent + 1, with the baseline one ascent down. 13 and 10 in
+    /// Geneva 10. For a font family Excel 1.00's System lacks, the cached values in the sheet state are used.
+    /// </summary>
+    public static (int Height, int Baseline) GetRowMetrics(ExcelDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        var state = document.State;
+        return MacFont.Find(state.StandardFont, state.StandardFontSize) is { } font
+            ? (font.RowHeight, font.Ascent)
+            : (state.CachedRowHeight, state.CachedAscent);
+    }
+
     // A value as Excel 1.00 fits it into its column (19.0a, 19.0e): the text, how it was measured, the room italic
     // takes, and whether it became a row of #s.
     private static (string Text, TextMeasure Measure, int ItalicExtra, bool Hashes) Fit(
@@ -514,7 +528,7 @@ public static class ExcelValueFormatter
                 if (format is null || numberFormat == 0)
                 {
                     // General: as many characters as there are digit widths, less a minus sign (19.0d).
-                    int digits = (room - (number < 0 ? measure.Width('-') : 0)) / measure.Width('0');
+                    int digits = (room - (number < 0 ? measure.Width('-') : 0)) / measure.DigitWidth;
                     text = FormatGeneral(number, Math.Max(0, digits));
                 }
                 else

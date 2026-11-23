@@ -206,6 +206,20 @@ public sealed class ExcelSheetState
         set => SetWord(0x248, value);
     }
 
+    /// <summary>Gets or sets the cached row height in pixels (spec §6, 0x24C).</summary>
+    public ushort CachedRowHeight
+    {
+        get => GetWord(0x24C);
+        set => SetWord(0x24C, value);
+    }
+
+    /// <summary>Gets or sets the cached ascent of the standard font in pixels (spec §6, 0x24E).</summary>
+    public ushort CachedAscent
+    {
+        get => GetWord(0x24E);
+        set => SetWord(0x24E, value);
+    }
+
     /// <summary>Gets or sets the cached width in pixels of a bold 0 in the standard font (spec §6, 0x252).</summary>
     public ushort BoldDigitWidth
     {

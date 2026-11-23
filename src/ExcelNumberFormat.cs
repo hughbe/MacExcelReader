@@ -310,7 +310,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             if (width is { } columns)
             {
                 int rest = measure.Width(text.AsSpan(0, general)) + measure.Width(text.AsSpan(general + 1));
-                left = Math.Max(0, (columns - rest) / measure.Width('0'));
+                left = Math.Max(0, (columns - rest) / measure.DigitWidth);
             }
 
             string shown = ExcelValueFormatter.FormatGeneral(magnitude, left);
@@ -340,7 +340,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
 
     // As many #s as fit in the room (19.0e).
     internal static string Hashes(int room, MacExcelReader.Internal.TextMeasure measure)
-        => new('#', Math.Max(0, room / measure.Width('#')));
+        => new('#', Math.Max(0, room / measure.HashWidth));
 
     private static bool RoundsToZero(ReadOnlySpan<byte> section, double magnitude)
     {

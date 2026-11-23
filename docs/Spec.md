@@ -2821,9 +2821,21 @@ smearing each character a pixel to the right, makes every character a pixel wide
 Geneva 10, the plain one 7. Italic text is given half the font's ascent (`0x248`, 5 in Geneva 10) of extra room
 for its slant. The widths are the advance widths in the font's `FONT` resource; the System file on Excel 1.00's
 Data disk has bitmaps of Chicago 12, New York 10, 12, 20 and 24, Geneva 9, 10, 12, 14, 18, 20 and 24, and
-Monaco 9. Excel also allows sizes that the System has no bitmap for (`RealFont` false); it then adds a pixel to
-the cached digit widths and to every character it measures (a flag it keeps at `0x0976` of its globals). How
-QuickDraw scales such a font has not been checked.
+Monaco 9.
+
+Excel also allows any other size. QuickDraw draws one the System has no bitmap for (`RealFont` false) from the
+next larger bitmap of the family, or from the largest if none is larger, scaling every width by size ÷ that
+bitmap's size and keeping positions in fractions of a pixel: Geneva 11 from Geneva 12 (a `0`, 8 pixels there, is
+7⅓), Geneva 16 from Geneva 18, Monaco 12 from Monaco 9. `TextWidth` adds up the fractions and rounds the total
+down, so `1E+04` in Geneva 11 is 34 pixels. The ascent and descent scale to the nearest pixel (Geneva 11: 11 and
+3). Excel then adds a pixel to the widths it divides by: the cached digit widths (`09.1c`, which keeps the flag
+at `0x0976` of its globals) and the width of `#` (`19.0e`). So a Geneva 11 digit counts as 8 pixels and a `#` as 9,
+while text is checked against the room at its plain width: `TRUE` (27½ pixels) fits a 29-pixel room.
+
+**Rows.** Every row has the same height, the font's ascent + descent + 1 (`09.1c`; 13 in Geneva 10, 15 in Geneva
+11), and its bottom pixel is its gridline. `09.1c` also sets a floor from the screen's size that no font reaches.
+Text sits on a baseline one ascent below the row's top: in Geneva 10 capitals cover pixel rows 3–10 of 13 and
+descenders reach row 12.
 
 **The room.** A cell's value has its column's width less 2 pixels each side, and less the italic allowance for
 an italic cell, to fit in (`19.0a`): 71 pixels in a default 75-pixel column.
