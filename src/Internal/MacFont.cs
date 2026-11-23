@@ -187,8 +187,8 @@ internal readonly struct TextMeasure
     public static TextMeasure Characters => new(null, 1, false);
 
     /// <summary>
-    /// Measures in pixels of <paramref name="font"/>. Excel 1.03 adds a pixel per character when it checks whether
-    /// text in a scaled size fits (spec Appendix D).
+    /// Measures in pixels of <paramref name="font"/>. Releases measure alike, except that for a size with no bitmap
+    /// Excel 1.03 adds a pixel per character when it checks whether text fits (spec Appendix D).
     /// </summary>
     public static TextMeasure Pixels(MacFont font, bool bold, ExcelVersion version = ExcelVersion.Excel100)
         => new(font, 1, bold, version == ExcelVersion.Excel103 && !font.IsReal);
