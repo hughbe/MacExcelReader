@@ -78,6 +78,13 @@ Excel folds a minus sign into a number constant, so `=SIGN(-0)` stores negative 
 and SIGN of negative zero is −1 rather than 0. Excel then shows the formula as `=SIGN(0)` (`Calc 1` sample;
 docs/Calculation.md).
 
+## A negative number in a narrow column can show as 0 (Excel 1.00)
+
+General writes the minus sign before it knows whether any digits will fit. When the number rounds to nothing in
+the room the column has, Excel writes `0` over the sign: −123 shows as `0` in a 12- or 15-pixel column (Geneva
+10), where 123 shows as nothing and −7 as `#`, and −0.4 shows as `0` in a 19-pixel column. A positive number
+never shows as a 0 it is not (spec Appendix D; `display-1.00.txt`).
+
 ## Some DATE arguments give nonsense (Excel 1.00)
 
 `DATE(1904,1,0)` gives 15824.73037037 and `DATE(2040,12,31)` 328.73037037037, neither a date at all; the day

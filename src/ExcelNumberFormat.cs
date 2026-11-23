@@ -235,17 +235,19 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     }
 
     /// <summary>Formats a number with this format.</summary>
-    public string Format(double value) => Format(value, null);
+    public string Format(double value) => Format(value, null, MacExcelReader.Internal.TextMeasure.Characters);
 
     /// <summary>
     /// Formats a number as Excel shows it in a column with room for <paramref name="width"/> characters (spec §7,
     /// <c>19.0d</c> and <c>19.0e</c> in Excel 1.00): General gets the characters the rest of the text leaves, a fill
     /// repeats into the room left, and text that does not fit becomes a row of <c>#</c>. Excel measures in pixels;
-    /// counting every character as one digit width, as this does, is an approximation.
+    /// this counts every character as one digit width, an approximation. For the pixel-exact result use
+    /// <see cref="ExcelValueFormatter.FormatCell(ExcelCell, ExcelDocument, int)"/> (spec Appendix D).
     /// </summary>
-    public string Format(double value, int width) => Format(value, (int?)width);
+    public string Format(double value, int width) => Format(value, width, MacExcelReader.Internal.TextMeasure.Characters);
 
-    private string Format(double value, int? width)
+    // Formats into a room of `width` units of `measure`: characters, or pixels of the sheet's font (19.0d, 19.0e).
+    internal string Format(double value, int? width, MacExcelReader.Internal.TextMeasure measure)
     {
         if (width <= 0)
         {
@@ -274,7 +276,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         if (shown is null)
         {
             // A date Excel cannot show: TEXT gives #VALUE!, and a cell a row of #.
-            return width is { } columns ? new string('#', columns) : ExcelValueFormatter.FormatGeneral(value);
+            return width is { } columns ? Hashes(columns, measure) : ExcelValueFormatter.FormatGeneral(value);
         }
 
         // A single-section format shows a negative number as a minus sign and the format of its magnitude, dates
@@ -284,14 +286,14 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             shown = "-" + shown;
         }
 
-        return Resolve(shown, magnitude, width);
+        return Resolve(shown, magnitude, width, measure);
     }
 
     // Stand-ins for a General token and a fill, resolved once the rest of the text is known.
     private const char GeneralMark = '\uE000';
     private const char FillMark = '\uE001';
 
-    private static string Resolve(string text, double magnitude, int? width)
+    private static string Resolve(string text, double magnitude, int? width, MacExcelReader.Internal.TextMeasure measure)
     {
         int fill = text.IndexOf(FillMark);
         char fillChar = fill >= 0 && fill + 1 < text.Length ? text[fill + 1] : ' ';
@@ -303,8 +305,14 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         int general = text.IndexOf(GeneralMark);
         if (general >= 0)
         {
-            // General gets the room the rest of the text leaves (19.0d).
-            int left = width is { } columns ? Math.Max(1, columns - (text.Length - 1)) : 20;
+            // General gets the room the rest of the text leaves, in digit widths (19.0d).
+            int left = 20;
+            if (width is { } columns)
+            {
+                int rest = measure.Width(text.AsSpan(0, general)) + measure.Width(text.AsSpan(general + 1));
+                left = Math.Max(0, (columns - rest) / measure.Width('0'));
+            }
+
             string shown = ExcelValueFormatter.FormatGeneral(magnitude, left);
             text = text.Remove(general, 1).Insert(general, shown);
             if (fill > general)
@@ -320,14 +328,19 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
 
         if (fill >= 0)
         {
-            // The fill repeats into what is left, less a pixel (19.0d): one character fewer here.
-            int count = Math.Max(0, room - text.Length - 1);
+            // The fill repeats into what is left, less a pixel, up to 255 characters in all (19.0d).
+            int count = (room - 1 - measure.Width(text)) / Math.Max(1, measure.Width(fillChar));
+            count = Math.Clamp(count, 0, Math.Max(0, 255 - text.Length));
             text = text.Insert(Math.Min(fill, text.Length), new string(fillChar, count));
         }
 
-        // Text wider than the column shows as #s (19.0e).
-        return text.Length > room ? new string('#', room) : text;
+        // Text wider than the room shows as #s (19.0e).
+        return measure.Width(text) > room ? Hashes(room, measure) : text;
     }
+
+    // As many #s as fit in the room (19.0e).
+    internal static string Hashes(int room, MacExcelReader.Internal.TextMeasure measure)
+        => new('#', Math.Max(0, room / measure.Width('#')));
 
     private static bool RoundsToZero(ReadOnlySpan<byte> section, double magnitude)
     {

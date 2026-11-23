@@ -51,11 +51,12 @@ public static class ExcelValueFormatter
     /// <summary>
     /// Formats a number the way the General format shows it in a column with room for <paramref name="width"/>
     /// characters, not counting a minus sign (spec §7, <c>19.0c</c> in Excel 1.00): as many digits as fit,
-    /// switching to an exponent when the number does not fit written out.
+    /// switching to an exponent when the number does not fit written out. A negative number that rounds to nothing
+    /// shows as <c>0</c>, without its sign (<c>19.0d</c>).
     /// </summary>
     public static string FormatGeneral(double value, int width)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
+        ArgumentOutOfRangeException.ThrowIfNegative(width);
         int size = GeneralSize(width);
         char[]? rented = size > 256 ? System.Buffers.ArrayPool<char>.Shared.Rent(size) : null;
         Span<char> buffer = rented ?? stackalloc char[256];
@@ -136,6 +137,13 @@ public static class ExcelValueFormatter
 
             if (!scientific)
             {
+                if (digits.Length == 0)
+                {
+                    // Rounded to nothing: Excel writes 0 over the minus sign (19.0d).
+                    destination[0] = '0';
+                    return 1;
+                }
+
                 return n + Fixed(digits, exponent, destination[n..]);
             }
         }
@@ -346,7 +354,7 @@ public static class ExcelValueFormatter
     public static string FormatCell(ExcelCell cell, ExcelDocument? document = null)
     {
         ArgumentNullException.ThrowIfNull(cell);
-        return FormatValue(cell.Value, cell.NumberFormat, document, null);
+        return FormatValue(cell.Value, cell.NumberFormat, document);
     }
 
     /// <summary>
@@ -354,20 +362,19 @@ public static class ExcelValueFormatter
     /// creating the cell.
     /// </summary>
     public static string FormatCell(ExcelCellRef cell, ExcelDocument? document = null)
-        => FormatValue(cell.Value, cell.NumberFormat, document, null);
-
+        => FormatValue(cell.Value, cell.NumberFormat, document);
     /// <summary>
-    /// Formats a cell's value as Excel 1.00 shows it in its column (spec §7): General fits the column, fills repeat
-    /// across it, and a number too wide for it shows as a row of <c>#</c>. Text is returned whole, since Excel lets
-    /// it run into the next cells. Excel measures in pixels with the sheet's font; this counts the column's width
-    /// in digit widths (the cached <see cref="ExcelSheetState.DigitWidth"/>, or the bold one for a bold cell), so it
-    /// is an approximation.
+    /// Formats a cell's value as Excel 1.00 shows it in its column (spec Appendix D): General fits the column, fills repeat
+    /// across it, and a number, TRUE, FALSE or error too wide for it shows as a row of <c>#</c>. Text is returned
+    /// whole, since Excel lets it run into the next cells (<see cref="LayoutCell"/>). Excel measures in pixels with
+    /// the sheet's standard font; for a font or size missing from Excel 1.00's System, every character counts as one
+    /// cached digit width (<see cref="ExcelSheetState.DigitWidth"/>), an approximation.
     /// </summary>
     public static string FormatCell(ExcelCell cell, ExcelDocument document, int column)
     {
         ArgumentNullException.ThrowIfNull(cell);
         ArgumentNullException.ThrowIfNull(document);
-        return FormatValue(cell.Value, cell.NumberFormat, document, ColumnDigits(document, column, cell.Bold));
+        return Fit(cell.Value, cell.NumberFormat, cell.Bold, cell.Italic, document, column).Text;
     }
 
     /// <summary>
@@ -377,24 +384,174 @@ public static class ExcelValueFormatter
     public static string FormatCell(ExcelCellRef cell, ExcelDocument document, int column)
     {
         ArgumentNullException.ThrowIfNull(document);
-        return FormatValue(cell.Value, cell.NumberFormat, document, ColumnDigits(document, column, cell.Bold));
+        return Fit(cell.Value, cell.NumberFormat, cell.Bold, cell.Italic, document, column).Text;
     }
 
-    private static int ColumnDigits(ExcelDocument document, int column, bool bold)
-        => document.State.GetColumnWidth(column) / Math.Max(1, (int)(bold ? document.State.BoldDigitWidth : document.State.DigitWidth));
+    /// <summary>
+    /// Works out how Excel 1.00 draws a cell (spec Appendix D): the text it shows, where it starts and the stretch of the
+    /// row it is clipped to, in pixels from the left edge of column A. Returns null for a cell with no value or in a
+    /// hidden column.
+    /// </summary>
+    public static ExcelCellDisplay? LayoutCell(ExcelDocument document, int row, int column)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentOutOfRangeException.ThrowIfNegative(column);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(column, ExcelCellGrid.MaxColumns);
+        var cell = document.Cells.Find(row, column);
+        var state = document.State;
+        int width = state.GetColumnWidth(column);
+        if (cell is null || cell.Type == ExcelCellType.Empty || width == 0)
+        {
+            return null;
+        }
 
-    private static string FormatValue(ExcelValue value, int numberFormat, ExcelDocument? document, int? width)
+        int left = 0;
+        for (int c = 0; c < column; c++)
+        {
+            left += state.GetColumnWidth(c);
+        }
+
+        int right = left + width;
+        var value = cell.Value;
+        var (text, measure, italicExtra, hashes) = Fit(value, cell.NumberFormat, cell.Bold, cell.Italic, document, column);
+        var alignment = hashes ? ExcelAlignment.Center : cell.Alignment;
+        if (alignment == ExcelAlignment.General)
+        {
+            // General puts text on the left, numbers on the right and TRUE, FALSE and errors in the middle (19.0e).
+            alignment = value.Kind switch
+            {
+                ExcelValueKind.Text => ExcelAlignment.Left,
+                ExcelValueKind.Number => ExcelAlignment.Right,
+                _ => ExcelAlignment.Center,
+            };
+        }
+
+        if (alignment == ExcelAlignment.Fill)
+        {
+            // A fill runs on over the following blank cells that are Fill aligned, and hidden columns (19.06), and
+            // repeats its text as many whole times as fit, at least once (19.0b).
+            int last = column;
+            int runRight = right;
+            for (int c = column + 1; c < ExcelCellGrid.MaxColumns; c++)
+            {
+                int w = state.GetColumnWidth(c);
+                if (w != 0 && !(document.Cells.GetCellType(row, c) == ExcelCellType.Empty && document.Cells.GetAlignment(row, c) == ExcelAlignment.Fill))
+                {
+                    break;
+                }
+
+                last = c;
+                runRight += w;
+            }
+
+            int once = measure.Width(text);
+            int count = once == 0 ? 0 : Math.Max(1, (runRight - left - 3 - italicExtra) / once);
+            var repeated = new System.Text.StringBuilder(text.Length * count);
+            for (int i = 0; i < count; i++)
+            {
+                repeated.Append(text);
+            }
+
+            text = repeated.ToString();
+            return new ExcelCellDisplay(text, alignment, left + 2, once * count + italicExtra, left, runRight - 1);
+        }
+
+        int textWidth = measure.Width(text) + italicExtra;
+        int x = alignment switch
+        {
+            ExcelAlignment.Right => right - 2 - textWidth,
+            ExcelAlignment.Center => (left + right - textWidth) >> 1,
+            _ => left + 2,
+        };
+
+        int clipLeft = left;
+        int clipRight = right - 1;
+        if (value.Kind == ExcelValueKind.Text)
+        {
+            // Text runs into blank neighbours, on the side it is aligned away from, until a cell with a value
+            // (19.07, 19.04, 19.05). Formatting alone does not stop it, and hidden columns let it through.
+            if (alignment != ExcelAlignment.Right)
+            {
+                for (int c = column + 1; x + textWidth > clipRight && c < ExcelCellGrid.MaxColumns && document.Cells.GetCellType(row, c) == ExcelCellType.Empty; c++)
+                {
+                    clipRight += state.GetColumnWidth(c);
+                }
+            }
+
+            if (alignment != ExcelAlignment.Left)
+            {
+                for (int c = column - 1; x < clipLeft && c >= 0 && document.Cells.GetCellType(row, c) == ExcelCellType.Empty; c--)
+                {
+                    clipLeft -= state.GetColumnWidth(c);
+                }
+            }
+        }
+
+        return new ExcelCellDisplay(text, alignment, x, textWidth, clipLeft, clipRight);
+    }
+
+    // A value as Excel 1.00 fits it into its column (19.0a, 19.0e): the text, how it was measured, the room italic
+    // takes, and whether it became a row of #s.
+    private static (string Text, TextMeasure Measure, int ItalicExtra, bool Hashes) Fit(
+        ExcelValue value, int numberFormat, bool bold, bool italic, ExcelDocument document, int column)
+    {
+        var state = document.State;
+        var font = MacFont.Find(state.StandardFont, state.StandardFontSize);
+        var measure = font is not null
+            ? TextMeasure.Pixels(font, bold)
+            : TextMeasure.Fixed(bold ? state.BoldDigitWidth : state.DigitWidth);
+        int italicExtra = !italic ? 0 : font?.ItalicExtra ?? state.HalfAscent;
+
+        // The room is the column less 2 pixels each side and the italic allowance.
+        int room = state.GetColumnWidth(column) - 4 - italicExtra;
+        switch (value.Kind)
+        {
+            case ExcelValueKind.Number:
+            {
+                double number = value.Number;
+                var format = document.GetNumberFormat(numberFormat);
+                string text;
+                if (format is null || numberFormat == 0)
+                {
+                    // General: as many characters as there are digit widths, less a minus sign (19.0d).
+                    int digits = (room - (number < 0 ? measure.Width('-') : 0)) / measure.Width('0');
+                    text = FormatGeneral(number, Math.Max(0, digits));
+                }
+                else
+                {
+                    text = format.Format(number, room, measure);
+                    if (text.Length > 0 && !text.AsSpan().ContainsAnyExcept('#'))
+                    {
+                        return (text, measure, italicExtra, true);
+                    }
+                }
+
+                return measure.Width(text) > room
+                    ? (ExcelNumberFormat.Hashes(room, measure), measure, italicExtra, true)
+                    : (text, measure, italicExtra, false);
+            }
+
+            case ExcelValueKind.Text:
+                return (document.GetNumberFormat(numberFormat)?.Format(value.Text) ?? value.Text, measure, italicExtra, false);
+            case ExcelValueKind.Empty:
+                return (string.Empty, measure, italicExtra, false);
+            default:
+            {
+                // TRUE, FALSE and errors show as they are, whatever the cell's format, or as #s (19.0e).
+                string text = value.ToString();
+                return measure.Width(text) > room
+                    ? (ExcelNumberFormat.Hashes(room, measure), measure, italicExtra, true)
+                    : (text, measure, italicExtra, false);
+            }
+        }
+    }
+
+    private static string FormatValue(ExcelValue value, int numberFormat, ExcelDocument? document)
     {
         switch (value.Kind)
         {
             case ExcelValueKind.Number:
-                if (width is not { } columns)
-                {
-                    return Format(value.Number, numberFormat, document);
-                }
-
-                var format = document?.GetNumberFormat(numberFormat) ?? ExcelNumberFormat.BuiltIn[0];
-                return format.Format(value.Number, columns);
+                return Format(value.Number, numberFormat, document);
             case ExcelValueKind.Text:
                 // Excel 1.5's text section, when the format has one.
                 return document?.GetNumberFormat(numberFormat)?.Format(value.Text) ?? value.Text;
