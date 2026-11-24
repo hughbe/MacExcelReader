@@ -1154,7 +1154,10 @@ right 239 and bottom 209.
 
 `SPLIT(1,2)` then `FREEZE.PANES(TRUE)` saves 1, 2 and 1 at offsets 121, 123 and 125 (`Frozen Panes`). A window
 with panes frozen (121) or a colour that is not automatic (127 = 0) makes Excel 1.5 save version 18 (§2.1),
-since a version-17 file cannot hold either.
+since a version-17 file cannot hold either. With several windows each has its own 129-byte state: after two
+NEW.WINDOW commands, one window frozen with SPLIT(2,1) and FREEZE.PANES and another given red gridlines, Excel 1.5
+saves version 18 with 1, 2 and 1 at offsets 121, 123 and 125 of the frozen window only, colour 2 with offset 127
+at 0 in the red one only, and leftover values at 123–126 of the windows never frozen (`Three Windows 1.5`).
 
 ---
 
@@ -2627,6 +2630,10 @@ A workspace file (Finder type `XLIN`, creator `XCEL`; on the 1.00 program disk i
 Excel had open, so that opening it reopens the same documents in the same windows with the same calculation
 settings. It holds no cell data. Written by `64.00` and read by `64.01` in Excel 1.00 (`63.00`, `63.01` in
 1.03, which build the folder string differently but write the same fields).
+
+Excel 1.00 writes the workspace whenever it quits without a document refusing to close (`Resume Excel 3`).
+In the same test Excel 1.03 and 1.5 quit without writing or changing any workspace file, on their own disks or
+the startup disk; why is not known.
 
 | Size | Meaning |
 |-----:|---------|

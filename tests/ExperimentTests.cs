@@ -1118,4 +1118,23 @@ public class ExperimentTests
         var reread = ExcelDocument.Read(document.ToArray());
         Assert.Equal((16385, 257), (reread.Cells.RowCount, reread.Cells.ColumnCount));
     }
+
+    [Fact]
+    public void ThreeWindows_Excel103SavesThemAs100Does()
+    {
+        var document = Load("Three Windows 1.03");
+        Assert.Equal(["B10:D12", "C5", "A1"], document.Windows.Select(w => w.Selection[0].ToString()));
+    }
+
+    [Fact]
+    public void ThreeWindows_Excel15KeepsEachWindowsVersion18Settings()
+    {
+        // One window frozen after SPLIT(2,1), another with DISPLAY(..., 3) (red): version 18, three 129-byte states,
+        // each with its own panes and colour (spec §13).
+        var document = Load("Three Windows 1.5");
+        Assert.Equal(ExcelFormatVersion.Version18, document.Version);
+        Assert.All(document.Windows, w => Assert.Equal(129, w.State.Length));
+        Assert.Equal([(0, 0, 2), (1, 1, 0), (0, 1, 0)], document.Windows.Select(w => ((int)w.State[121], (int)w.State[127], (int)w.State[128])));
+        Assert.Equal((1, 2), (document.Windows[1].State[123] << 8 | document.Windows[1].State[124], document.Windows[1].State[125] << 8 | document.Windows[1].State[126]));
+    }
 }
