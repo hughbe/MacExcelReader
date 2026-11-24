@@ -50,7 +50,7 @@ and comparing the bytes ([Testing in a real Excel](Testing.md)).
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00` (see Background).
 
-**Samples.** 37 documents and one workspace file from Microsoft's disks, and 85 files Excel saved in
+**Samples.** 37 documents and one workspace file from Microsoft's disks, and 87 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
 
 | Source | Files |
@@ -2633,10 +2633,12 @@ settings. It holds no cell data. Written by `64.00` and read by `64.01` in Excel
 1.03, which build the folder string differently but write the same fields).
 
 Excel 1.00 writes the workspace whenever it quits without a document refusing to close (`Resume Excel 3`),
-in the folder Excel started from. Excel 1.03's Quit (`0a.01`) is the same code and calls its writer the same
-way, and its program disk holds a 35-byte `Resume Excel` with no windows that 1.03 wrote on quitting. The
-writer does not flush the disk, so the file can stay in the system's disk cache until the disk is ejected or
-the Mac shuts down: a copy of the disk taken right after Quit may not show it yet.
+in the folder Excel started from. Excel 1.03's Quit (`0a.01`) is the same code and does the same, also in
+the folder it started from (`Resume Excel 1.03`). Excel 1.5 writes the same layout to the System Folder of the
+startup disk instead (`Resume Excel 1.5`). Each document name is the full path, volume first, and the folder
+the volume name and a colon; the directory word is 23 in 1.03's file and 0 in 1.5's. The writer does not
+flush the disk, so the file's length and date can stay in the system's disk cache until the disk is ejected
+or the Mac shuts down: a copy of the disk taken right after Quit shows the old file.
 
 | Size | Meaning |
 |-----:|---------|

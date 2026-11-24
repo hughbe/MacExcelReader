@@ -1098,6 +1098,20 @@ public class ExperimentTests
         Assert.Equal(3, workspace.Windows.Count(w => w.DocumentName.EndsWith("Windows saved", StringComparison.Ordinal)));
     }
 
+    [Theory]
+    [InlineData("Resume Excel 1.03", ExcelDocumentKind.Worksheet, "Excel Program:Sample Documents:Expenses", "Excel Program:", 23)]
+    [InlineData("Resume Excel 1.5", ExcelDocumentKind.MacroSheet, "Excel 1.5 Test:Formulas 1.5", "Excel 1.5 Test:", 0)]
+    public void QuitWithADocumentOpen_WritesTheSameWorkspaceAs100(string name, ExcelDocumentKind kind, string document, string folder, int directory)
+    {
+        // Excel 1.03 (to its own disk) and 1.5 (to the startup disk's System Folder), quit with one document
+        // open and the disks flushed by Shut Down (spec Appendix B).
+        var bytes = Sample(name);
+        var workspace = ExcelWorkspace.Read(bytes);
+        var window = Assert.Single(workspace.Windows);
+        Assert.Equal((kind, document, folder, directory), (window.Kind, window.DocumentName, window.Folder, (int)window.Directory));
+        Assert.Equal(bytes, workspace.ToArray());
+    }
+
     [Fact]
     public void EdgeColumn_KeepsAMarginColumnPastTheSheet()
     {
