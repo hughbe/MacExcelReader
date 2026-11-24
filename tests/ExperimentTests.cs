@@ -1053,4 +1053,48 @@ public class ExperimentTests
         Assert.Equal("", saved.Series[0].Name);
         Assert.Equal("", saved.Series[0].ValuesReference);
     }
+
+    [Fact]
+    public void EdgeLastRow_KeepsAMarginRowPastTheSheet()
+    {
+        // A value in A16384 (and A1): Excel 1.00 saved a 16385-row table, its blank margin past the sheet's last row
+        // (spec §6.1). IV1, IV16384 and an array at the corner ran it out of memory and were not kept.
+        var document = Load("Edge Last Row");
+        Assert.Equal(16385, document.Cells.RowCount);
+        Assert.Equal(1, document.Cells["A16384"].Value.Number);
+        Assert.Equal(ExcelCellType.Empty, document.Cells.GetCellType(16384, 0));
+        Assert.Equal(document.ToArray(), Sample("Edge Last Row"));
+    }
+
+    [Fact]
+    public void ThreeWindows_AreSavedFrontToBack()
+    {
+        // NEW.WINDOW twice, each with its own SELECT, MOVE and SIZE: the newest window is first.
+        var document = Load("Three Windows");
+        Assert.Equal(["B10:D12", "C5", "A1"], document.Windows.Select(w => w.Selection[0].ToString()));
+        Assert.Equal([(107, 259, 269, 479), (77, 39, 209, 239), (61, 9, 335, 502)],
+            document.Windows.Select(w => ((int)w.Top, (int)w.Left, (int)w.Bottom, (int)w.Right)));
+    }
+
+    [Fact]
+    public void ChartPageSetup_HoldsMarginsHeaderAndFooter()
+    {
+        // PAGE.SETUP("Top","Bottom",0.5,0.6,0.7,0.8) on a chart (left, right, top, bottom): the record stores the
+        // margins top, bottom, left, right as decimal numbers, then the header and footer (spec §16.6).
+        var chart = ChartDocument.Read(Sample("Chart Page Setup"));
+        byte[] setup = chart.PageSetup!;
+        double[] margins = [.. Enumerable.Range(0, 4).Select(i => MicrosoftDecimal.FromBytes(setup.AsSpan(120 + 8 * i, 8)).ToDouble())];
+        Assert.Equal([0.7, 0.8, 0.5, 0.6], margins);
+        Assert.Equal("Top", MacRoman.GetString(setup.AsSpan(153, setup[152])));
+        Assert.Equal("Bottom", MacRoman.GetString(setup.AsSpan(409, setup[408])));
+    }
+
+    [Fact]
+    public void Workspace_ListsEveryWindowOfEachDocument()
+    {
+        // Excel 1.00 quit with Driver, a chart, a sheet with three windows and another sheet open.
+        var workspace = ExcelWorkspace.Read(Sample("Resume Excel 3"));
+        Assert.Equal(6, workspace.Windows.Count);
+        Assert.Equal(3, workspace.Windows.Count(w => w.DocumentName.EndsWith("Windows saved", StringComparison.Ordinal)));
+    }
 }

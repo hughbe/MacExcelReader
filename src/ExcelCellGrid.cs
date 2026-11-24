@@ -299,8 +299,10 @@ public sealed class ExcelCellGrid
     {
         ArgumentOutOfRangeException.ThrowIfNegative(rows);
         ArgumentOutOfRangeException.ThrowIfNegative(columns);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(rows, MaxRows);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(columns, MaxColumns);
+        // The table can hold one row and column past the sheet's last: the blank margin Excel keeps after the last
+        // row and column in use, even after row 16384 (spec §6.1).
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(rows, MaxRows + 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(columns, MaxColumns + 1);
         if (columns > ColumnCount)
         {
             for (int r = 0; r < _rowCount; r++)

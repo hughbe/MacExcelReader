@@ -151,8 +151,9 @@ public class CellTests
         Assert.Equal(5, grid.RowCount);
         Assert.NotNull(grid.Find("C5"));
         Assert.Null(grid.Find("D5"));
-        Assert.Throws<ArgumentOutOfRangeException>(() => grid.EnsureSize(16385, 1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => grid.EnsureSize(1, 257));
+        // The table may hold the blank margin past the sheet's last row and column (spec §6.1), and no more.
+        Assert.Throws<ArgumentOutOfRangeException>(() => grid.EnsureSize(16386, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => grid.EnsureSize(1, 258));
     }
 
     [Fact]

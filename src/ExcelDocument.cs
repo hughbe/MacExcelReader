@@ -694,7 +694,8 @@ public sealed class ExcelDocument
         // row and column after the last one in use. A table read in the count form is kept as it is.
         if (rows > 0 && !State.HoldsCountForm(rows, columns))
         {
-            bool padRow = rows < ExcelCellGrid.MaxRows && !IsBlankRow(rows - 1, columns);
+            // Excel keeps the margin even after the sheet's last row: a value in row 16384 makes a 16385-row table.
+            bool padRow = rows <= ExcelCellGrid.MaxRows && !IsBlankRow(rows - 1, columns);
             bool padColumn = columns < ExcelCellGrid.MaxColumns && !IsBlankColumn(columns - 1, rows);
             if (padRow || padColumn)
             {
