@@ -61,10 +61,10 @@ public class FormulaTokensTests
     }
 
     [Fact]
-    public void GetFixupWords_ReturnsNameIndices()
+    public void FixupWords_ReturnsNameIndices()
     {
         var formula = new ExcelFormula(Concat([0x23, 0, 0, 0, 0, 0, 0, 0], [0x23, 0, 0, 0, 0, 0, 0, 0], [0x03]), [0, 3, 0, 4]);
-        Assert.Equal([3, 4], formula.GetFixupWords());
+        Assert.Equal([3, 4], formula.FixupWords.ToArray());
     }
 
     [Fact]

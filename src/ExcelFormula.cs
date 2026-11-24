@@ -178,8 +178,10 @@ public sealed class ExcelFormula
     public static ExcelFormula Parse(string text, ExcelDocument? document = null, ExcelVersion version = ExcelVersion.Excel100)
         => ExcelFormulaParser.Parse(text, document, version);
 
-    /// <summary>Gets the name indices and external-document indices from the fix-ups, in token order.</summary>
-    public IReadOnlyList<ushort> GetFixupWords() => FormulaTokens.ReadFixupWords(Expression, Fixups);
+    /// <summary>
+    /// Gets the name indices and external-document indices from the fix-ups, in token order, without allocating.
+    /// </summary>
+    public FormulaTokens.FixupWordCollection FixupWords => new(Expression, Fixups);
 
     /// <summary>
     /// Converts the formula to A1-style text, such as <c>=SUM(A1:A5)</c>.
@@ -193,6 +195,32 @@ public sealed class ExcelFormula
         }
 
         return FormulaDecompiler.Decompile(Expression, Fixups, document, "=", string.Empty);
+    }
+
+    /// <summary>
+    /// Writes the formula's A1-style text, as <see cref="ToText"/> gives it, into <paramref name="destination"/>
+    /// without allocating (an array formula or table cell aside, whose text is built from its shared record).
+    /// </summary>
+    /// <returns>False if the text does not fit in <paramref name="destination"/>.</returns>
+    public bool TryFormatText(Span<char> destination, out int charsWritten, ExcelDocument? document = null)
+    {
+        if (IsArrayFormula || IsTable)
+        {
+            string shared = SharedText(document);
+            charsWritten = shared.TryCopyTo(destination) ? shared.Length : 0;
+            return charsWritten == shared.Length;
+        }
+
+        var text = new TextBuffer(stackalloc char[256]);
+        try
+        {
+            FormulaDecompiler.Append(ref text, Expression, Fixups, document, "=", default);
+            return text.TryCopyTo(destination, out charsWritten);
+        }
+        finally
+        {
+            text.Dispose();
+        }
     }
 
     /// <summary>Gets whether the cell is part of an array formula (spec §12.6).</summary>

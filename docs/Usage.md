@@ -148,6 +148,18 @@ DateTime date = ExcelValueFormatter.ToDateTime(29220);        // 1984-01-01
 double serial = ExcelValueFormatter.ToSerial(DateTime.Today);
 ```
 
+Each has a `Try` form that writes into a span instead of returning a string, and allocates nothing:
+`ExcelValueFormatter.TryFormatCell` and `TryFormat`, `ExcelNumberFormat.TryFormat`, `ExcelValue.TryFormat`
+(`ExcelValue` is `ISpanFormattable`) and `ExcelFormula.TryFormatText`.
+
+```csharp
+Span<char> buffer = stackalloc char[512];
+foreach (var c in document.Cells.NonEmptyCells)
+{
+    if (ExcelValueFormatter.TryFormatCell(c, document, buffer, out int length)) Write(buffer[..length]);
+}
+```
+
 To draw a sheet as Excel 1.00 did, `LayoutCell` gives each cell's text, where it starts and the stretch of the
 row it may cover, in pixels from the left edge of column A (spec Appendix D):
 

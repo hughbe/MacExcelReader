@@ -27,6 +27,37 @@ internal ref struct TextBuffer
         _chars[Length++] = c;
     }
 
+    public void Append(char c, int count)
+    {
+        if (count <= 0)
+        {
+            return;
+        }
+
+        if (Length + count > _chars.Length)
+        {
+            Grow(count);
+        }
+
+        _chars.Slice(Length, count).Fill(c);
+        Length += count;
+    }
+
+    public void Clear() => Length = 0;
+
+    // Copies the text out, as a TryFormat method does.
+    public readonly bool TryCopyTo(Span<char> destination, out int charsWritten)
+    {
+        if (_chars[..Length].TryCopyTo(destination))
+        {
+            charsWritten = Length;
+            return true;
+        }
+
+        charsWritten = 0;
+        return false;
+    }
+
     public void Append(scoped ReadOnlySpan<char> value)
     {
         if (Length + value.Length > _chars.Length)

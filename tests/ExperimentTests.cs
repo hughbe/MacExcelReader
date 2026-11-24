@@ -1219,7 +1219,7 @@ public class ExperimentTests
         foreach (var cell in new[] { "B1", "B2", "B4", "B6" })
         {
             var formula = document.Cells[cell].Formula!;
-            var words = formula.GetFixupWords().Select(w => w > 1 ? w - 1 : w).Select(w => (byte[])[(byte)(w >> 8), (byte)w]).SelectMany(b => b).ToArray();
+            var words = formula.FixupWords.ToArray().Select(w => w > 1 ? w - 1 : w).Select(w => (byte[])[(byte)(w >> 8), (byte)w]).SelectMany(b => b).ToArray();
             document.Cells[cell].SetFormula(new ExcelFormula(formula.Expression, words));
         }
 

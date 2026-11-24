@@ -163,7 +163,7 @@ public class FormulaParserTests
                 expected = formula.Expression;
                 var parsed = ExcelFormula.Parse(text, document, version);
                 actual = parsed.Expression.ToArray();
-                Assert.Equal(formula.GetFixupWords(), parsed.GetFixupWords());
+                Assert.Equal(formula.FixupWords.ToArray(), parsed.FixupWords.ToArray());
             }
 
             Assert.True(
@@ -361,7 +361,7 @@ public class FormulaParserTests
         Assert.Equal("=SELECT(INDEX(!FORM,2,2):INDEX(!FORM,2,COLUMNS(!DATABASE)+1))", document.Cells["C146"].Formula!.ToText(document));
 
         var parsed = ExcelFormula.Parse("=ROWS(!database)", document);
-        Assert.Equal([1, 1], parsed.GetFixupWords());
+        Assert.Equal([1, 1], parsed.FixupWords.ToArray());
         Assert.Equal("=ROWS(!DATABASE)", parsed.ToText(document));
         Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=ROWS(!ADD)", document));
     }
@@ -372,7 +372,7 @@ public class FormulaParserTests
         var document = Load("REPLACE.xlm");
         var name = document.Names[0];
         var formula = ExcelFormula.Parse("=" + name.Name, document);
-        Assert.Equal([1], formula.GetFixupWords());
+        Assert.Equal([1], formula.FixupWords.ToArray());
         Assert.Equal("=" + name.Name, formula.ToText(document));
     }
 
@@ -442,7 +442,7 @@ public class FormulaParserTests
         var externalDocument = new ExcelExternalDocument("Book") { Names = { "Missing" } };
         document.ExternalDocuments.Add(externalDocument);
         var external = ExcelFormula.Parse("='Book'!A1:B2", document);
-        Assert.Equal([1], external.GetFixupWords());
+        Assert.Equal([1], external.FixupWords.ToArray());
         Assert.Equal("=Book!A1:B2", external.ToText(document));
         Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=Book!A1:Missing", document));
 

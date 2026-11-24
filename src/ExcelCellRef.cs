@@ -172,6 +172,26 @@ public readonly struct ExcelCellRef
         return true;
     }
 
+    // The text result of an untouched formula cell, as Mac OS Roman bytes in the file (spec §12.3, §12.4).
+    internal bool TryGetRawFormulaText(out ReadOnlySpan<byte> text)
+    {
+        text = default;
+        if (Type != ExcelCellType.Formula || !_grid.TryGetRawData(Row, Column, out var record) || record.Length < 15
+            || record[0] != 0xFF || record[1] != 0xFF || record[2] != 0)
+        {
+            return false;
+        }
+
+        int at = 15 + record[14];
+        if (at >= record.Length || at + 1 + record[at] > record.Length)
+        {
+            return false;
+        }
+
+        text = record.Slice(at + 1, record[at]);
+        return true;
+    }
+
     /// <summary>
     /// Gets the full <see cref="ExcelCell"/>, creating it if needed.
     /// </summary>

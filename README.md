@@ -158,6 +158,10 @@ Measured with BenchmarkDotNet (`benchmarks/`) on an Apple Silicon Mac with .NET 
 
 The 854 KB when reading the large sheet is the copy of the input; pass `copyData: false` to avoid it.
 
+Displaying values allocates only the strings it returns, and nothing through the span forms
+(`ExcelValueFormatter.TryFormatCell`, `ExcelNumberFormat.TryFormat`, `ExcelValue.TryFormat`,
+`ExcelFormula.TryFormatText`): formatting every cell of DB.FORM that way allocates 0 bytes.
+
 Before the lazy design, reading Expenses took 36 µs (192 KB) and the large sheet 3.4 ms (7.6 MB).
 
 Run them yourself:

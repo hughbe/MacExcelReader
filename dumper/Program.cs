@@ -289,7 +289,7 @@ sealed class ParseCommand : Command<ParseSettings>
                 var formula = ExcelFormula.Parse(settings.Formula, document, version);
                 expression = formula.Expression.ToArray();
                 table.AddRow("Decompiled", Program.Escape(formula.ToText(document)));
-                table.AddRow("Fix-ups", $"{Program.Hex(formula.Fixups)}  words: {string.Join(", ", formula.GetFixupWords())}");
+                table.AddRow("Fix-ups", $"{Program.Hex(formula.Fixups)}  words: {string.Join(", ", formula.FixupWords.ToArray())}");
             }
 
             table.AddRow("Expression", $"{Program.Hex(expression)} ({expression.Length} bytes)");
@@ -352,7 +352,7 @@ sealed class CellCommand : Command<CellSettings>
             table.AddRow("Stored row/column", $"row word 0x{formula.StoredRowWord:X4}, column {formula.StoredColumn}");
             table.AddRow("Reserved bytes", Program.Hex(formula.Reserved));
             table.AddRow("Expression", Program.Hex(formula.Expression));
-            table.AddRow("Fix-ups", $"{Program.Hex(formula.Fixups)}  words: {string.Join(", ", formula.GetFixupWords())}");
+            table.AddRow("Fix-ups", $"{Program.Hex(formula.Fixups)}  words: {string.Join(", ", formula.FixupWords.ToArray())}");
         }
 
         AnsiConsole.Write(table);
