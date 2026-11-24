@@ -111,6 +111,9 @@ misbehaves, for example with a file that breaks a rule given here.
 * All multi-byte integers are **big-endian**.
 * `byte` = 8 bits, `word` = 16 bits, `long` = 32 bits, `double` = IEEE 754 64-bit.
 * *Pascal string* = one length byte followed by that many characters (Mac Roman).
+* **Mac Roman** is read with Apple's current table. Excel 1.00's System fonts have no character at `0xDB`,
+  `0xDE`, `0xDF` or `0xF0`, and draw the missing-character box there (`Roman Glyphs` on screen), so the table
+  of the time gives them no meaning; Apple later made `0xDB` the euro sign.
 * *Rectangle* = four words, top, left, bottom, right: the Macintosh Toolbox's (QuickDraw's) `Rect`, in pixels
   unless a field says otherwise.
 * Bits are numbered from 0, the least significant: bit 15 is the top bit of a word. A field that packs several
@@ -589,7 +592,7 @@ international character table at run time, so the ones shown are the US defaults
 |------:|----------|---------------|
 | `01` | | `General` |
 | `02` | 1 byte `c` | Literal character `c`. A backslash is written before it unless it is one of the characters that may appear unescaped. |
-| `03` | 3 bytes `a b c` | Starts a number section; produces no text. `a` = number of integer digit positions (drives thousands-separator placement), `b` = decimal places, `c` a signed byte: `(c − b) / 2` = number of percent signs. Excel 1.5: when `c` is below `b`, `(b − c) / 3` is the number of trailing thousands separators, each dividing the number by 1000 (`#,##0,` is `03 04 00 FD`, `Format Scaling`). |
+| `03` | 3 bytes `a b c` | Starts a number section; produces no text. `a` = number of integer digit positions (drives thousands-separator placement), `b` = decimal places, `c` = `b` plus two per percent sign. `c − b` is worked out in 8 bits, as a signed byte: `(c − b) / 2` = number of percent signs. Excel 1.5: when it is negative, `(b − c) / 3` is the number of trailing thousands separators, each dividing the number by 1000 (`#,##0,` is `03 04 00 FD`, `Format Scaling`). A format with 128 or more decimal places has `b` and `c` of `0x80` or more and no percent signs or scaling: Excel 1.00 compiles `0.` and 200 zeros to `03 01 C8 C8` and shows plain decimals (`Many Decimals`). |
 | `04` | 1 byte `n` | `n` × `#` |
 | `05` | | Decimal point; digit runs after it are written without separators |
 | `06` | 1 byte `n` | `n` × `0` |
@@ -855,9 +858,16 @@ Its formulas refer to these as `!DATABASE` (index 1) and `!FORM` (index 2).
 
 The defined names, then the data of the array constants their definitions contain.
 
-**Names.** A sequence of entries in case-insensitive alphabetical order, ending with a `0x00` byte. A name's
-1-based position is the index `0x23` tokens use, so Save numbers the names in this order (`47.0b` in 1.00,
-`45.0c` in 1.03).
+**Names.** A sequence of entries in alphabetical order, ending with a `0x00` byte. The order ignores case and
+accents: the French 1.01 puts `Critères` before `Criteria`. How it orders letters without a plain-letter base,
+such as `æ` and `ß`, is **(unknown)**. A name's 1-based position is the index `0x23` tokens use, so Save numbers
+the names in this order (`47.0b` in 1.00, `45.0c` in 1.03).
+
+Excel finds a name typed in a formula by searching this order, and keeps the order by inserting each new name in
+its place; it never sorts the names it reads. In `Names Unsorted` the library wrote `Zeta` and `Alpha` after the
+built-in names: formulas already holding their indices calculated, `=Zeta*10` typed afterwards found `Zeta`, but
+`=Alpha*10` gave `#NAME?` and added a second, undefined `Alpha` in its alphabetical place. A writer must sort the
+names and number the tokens to match.
 
 | Size | Meaning |
 |-----:|---------|
@@ -933,6 +943,12 @@ its record (§9). Records carry no type of their own; the cell type says how to 
 ### 12.1 Number (type 2)
 
 8 bytes, IEEE double.
+
+Excel never stores an infinity or a NaN: a formula that overflows gives `#NUM!` (`=1E300*1E300`, `Huge
+Constants`). It keeps one it finds in a file and calculates with it as an IEEE double (`=A1+1` of +infinity is
++infinity; a NaN equals itself), and its decimal conversion reads the exponent field `0x7FF` as a number: General
+shows ±infinity as `±1.7976931348623E+308` and a NaN of either sign as `-2.6965397022935E+308`; any other format
+shows a row of `#` (`NaN Cells`, `NaN Wide`).
 
 ### 12.2 Text (type 3)
 
@@ -1536,6 +1552,12 @@ rounding down. GET.FORMULA gives `=0.12345678901235` for `=0.12345678901234567`,
 `=99999999999999.5` and `=1.2345678901235E-20` for `=1.2345678901234567E-20`, and SYLK writes the same text. Text with more digits therefore comes back shorter, and entering the shorter text again can give a
 slightly different double: `CORRECT MACROS` defines `Tb` as a time that shows as `0.71097222222222`, whose
 double differs from the stored one in the last bit.
+
+Excel 1.00 takes a constant other than 0 only from 1E-307 up to, but not including, 1E+306, judged by its value
+and not by how it is written: `=9.99999E305`, `=100E-309` and `=0.01E-305` compile, while `=0.1E307`, `=10E305`,
+`=9.9E-308` and `=1E-400` are not formulas (`Constant Limits`, `Constant Range`, `Constant Edges`). The same
+number typed as a constant on its own is taken as text (`1E306`, `1E-308`). Tokens from a file are not checked:
+`Calc 1` holds `=1E+308*10`, which Excel calculates to `#NUM!`.
 
 **Whole rows and columns.** Excel 1.00 shows an area that spans every column (A to IV) as rows, `=$1:$16384` or
 `=1:2`, and one that spans every row (1 to 16384) as columns, `=A:B`, and accepts both forms when typed. A row
@@ -2274,8 +2296,8 @@ version 17 and uses only functions 0–207:
 4. **Section 2.** Reserve `nRows × nCols × 6` bytes and fill them in as you write the cell data. Every cell
    needs an entry; an empty cell is type 0.
 5. **Sections 3 and 4.** Section 3 is empty unless there are external documents. Section 4 is the names in
-   case-insensitive alphabetical order, `00`, then any array-constant data. Name tokens refer to names by
-   position in this order, so sort the names before compiling formulas that use them.
+   alphabetical order, ignoring case and accents (§11), `00`, then any array-constant data. Name tokens refer to
+   names by position in this order, so sort the names before compiling formulas that use them.
 6. **Section 5.** The cell data, in cell-table order. Set each data cell's offset fields as you go: the offset
    from the start of section 5, with bits 19–4 in word 0 and bits 3–0 in bits 15–12 of word 1. Cell data is
    therefore limited to 1 MB.
@@ -2304,6 +2326,8 @@ recalculate the sheet when it opens it (§6; five 1.00 samples and seven 1.5 sam
 None of these affects reading the samples or writing valid files.
 
 * Which build saved Microsoft's version-18 `SIMUL EQUATIONS`, whose version rule differs from the released 1.5's (§2.1).
+* Where Excel's name order puts letters with no plain-letter base, such as `æ`, `ø` and `ß` (§11); the library
+  compares them by their own codes.
 
 ---
 

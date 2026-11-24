@@ -274,4 +274,88 @@ public class CellTests
         Assert.Equal([0x2C, 0xFF, 0xFF, 0x00], above.Definition);   // row −1 and column 0, both relative
         Assert.Equal("D9", above.GetDefinitionText(document, new ExcelCellAddress(9, 3)));
     }
+
+    [Fact]
+    public void FormulaCell_TypeFollowsResultSetAfterwards()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        var formula = ExcelFormula.Parse("=\"a\"&\"b\"");
+        formula.SetResult(3);
+        document.Cells[0, 0].SetFormula(formula);
+        Assert.Equal(ExcelCellType.NumericFormula, document.Cells[0, 0].Type);
+
+        // Changing the result after the formula is in the cell changes the cell's type with it (spec §9, §12.4).
+        formula.SetResult("ab");
+        Assert.Equal(ExcelCellType.Formula, document.Cells[0, 0].Type);
+        var reread = ExcelDocument.Read(document.ToArray());
+        Assert.Equal(ExcelCellType.Formula, reread.Cells[0, 0].Type);
+        Assert.Equal("ab", reread.Cells[0, 0].Value.Text);
+        Assert.False(reread.Cells[0, 0].TryGetNumber(out _));
+    }
+
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(0, -1)]
+    [InlineData(ExcelCellGrid.MaxRows, 0)]
+    [InlineData(0, ExcelCellGrid.MaxColumns)]
+    public void Indexer_OutsideTheSheet_Throws(int row, int column)
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        Assert.Throws<ArgumentOutOfRangeException>(() => document.Cells[row, column]);
+        Assert.Null(document.Cells.Find(row, column));
+    }
+
+    [Fact]
+    public void SetResult_TextLongerThan255_Throws()
+    {
+        var formula = ExcelFormula.Parse("=\"a\"");
+        Assert.Throws<ArgumentException>(() => formula.SetResult(new string('x', 256)));
+        formula.SetResult(new string('x', 255));
+    }
+
+    [Fact]
+    public void SetNumber_ReadsBack()
+    {
+        var cell = new ExcelCell();
+        cell.SetNumber(2.5);
+        Assert.Equal(2.5, cell.NumberValue);
+        cell.SetText("t");
+        cell.SetNumber(-1);
+        Assert.Equal(-1, cell.NumberValue);
+        cell.Clear();
+        Assert.False(cell.TryGetNumber(out _));
+    }
+
+    [Fact]
+    public void CellRef_TryGetText_CopiesWithoutAString()
+    {
+        var document = TestData.Load("Expenses");
+        Span<char> buffer = stackalloc char[255];
+        int texts = 0;
+        foreach (var cell in document.Cells.NonEmptyCells)
+        {
+            if (cell.TryGetText(buffer, out int written))
+            {
+                Assert.Equal(cell.Value.Text, buffer[..written].ToString());
+                texts++;
+            }
+            else
+            {
+                Assert.NotEqual(ExcelCellType.Text, cell.Type);
+            }
+        }
+
+        Assert.True(texts > 0);
+        var changed = document.Cells.NonEmptyCells.First(c => c.Type == ExcelCellType.Text);
+        changed.GetCell().SetText("Résumé");
+        foreach (var cell in document.Cells.NonEmptyCells)
+        {
+            if (cell.Row == changed.Row && cell.Column == changed.Column)
+            {
+                Assert.True(cell.TryGetText(buffer, out int written));
+                Assert.Equal("Résumé", buffer[..written].ToString());
+                Assert.False(cell.TryGetText(buffer[..3], out _));
+            }
+        }
+    }
 }

@@ -32,7 +32,7 @@ public enum ExcelValueKind : byte
 /// Numbers, text and logical values convert implicitly: <c>cell.SetValue(2.5)</c>, <c>formula.SetResult("total")</c>.
 /// Errors do not, since a literal <c>0</c> would then be ambiguous: use <see cref="FromError"/>.
 /// </remarks>
-public readonly struct ExcelValue : IEquatable<ExcelValue>
+public readonly struct ExcelValue : IEquatable<ExcelValue>, ISpanFormattable
 {
     private readonly double _number;
     private readonly string? _text;
@@ -132,6 +132,40 @@ public readonly struct ExcelValue : IEquatable<ExcelValue>
         ExcelValueKind.Error => ((ExcelError)_number).ToText(),
         _ => string.Empty,
     };
+
+    /// <summary>Gets the value as <see cref="ToString()"/> does; the format and provider are not used.</summary>
+    public string ToString(string? format, IFormatProvider? formatProvider) => ToString();
+
+    /// <summary>
+    /// Writes the value as <see cref="ToString()"/> does into <paramref name="destination"/> without allocating; the
+    /// format and provider are not used.
+    /// </summary>
+    public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider? provider = null)
+    {
+        Span<char> number = stackalloc char[ExcelValueFormatter.GeneralSize(20)];
+        scoped ReadOnlySpan<char> text;
+        switch (Kind)
+        {
+            case ExcelValueKind.Number:
+                text = number[..ExcelValueFormatter.FormatGeneral(_number, 20, number)];
+                break;
+            case ExcelValueKind.Text:
+                text = _text;
+                break;
+            case ExcelValueKind.Boolean:
+                text = BooleanText.Of(_number != 0);
+                break;
+            case ExcelValueKind.Error:
+                text = ((ExcelError)_number).ToText();
+                break;
+            default:
+                text = [];
+                break;
+        }
+
+        charsWritten = text.TryCopyTo(destination) ? text.Length : 0;
+        return charsWritten == text.Length;
+    }
 
     /// <inheritdoc/>
     public bool Equals(ExcelValue other)

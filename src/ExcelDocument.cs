@@ -14,12 +14,39 @@ public sealed class ExcelDocument
 
     /// <summary>
     /// Gets or sets the format version: 17, readable by every Excel 1.x, or 18, written by Excel 1.5 when the
-    /// document uses something only Excel 1.5 can read (spec §2.1).
+    /// document uses something only Excel 1.5 can read (spec §2.1). Changing it converts <see cref="NumberFormats"/> to
+    /// the form that version stores.
     /// </summary>
+    /// <exception cref="InvalidOperationException">Set to 17 while a number format needs Excel 1.5.</exception>
     public ExcelFormatVersion Version
     {
         get => _version;
-        set => _version = Enum.IsDefined(value) ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "The format version is 17 or 18.");
+        set
+        {
+            if (!Enum.IsDefined(value))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, "The format version is 17 or 18.");
+            }
+
+            if (value == _version)
+            {
+                return;
+            }
+
+            // Number formats have four slots in a version-18 file and three in a version-17 one (spec §7).
+            if (value < ExcelFormatVersion.Version18 && NumberFormats.Find(f => f.RequiresVersion18) is { } format)
+            {
+                throw new InvalidOperationException($"The number format \"{format.ToText(ExcelVersion.Excel150)}\" can only be read by Excel 1.5, so the document must stay version 18.");
+            }
+
+            int slots = value >= ExcelFormatVersion.Version18 ? 4 : 3;
+            for (int i = 0; i < NumberFormats.Count; i++)
+            {
+                NumberFormats[i] = NumberFormats[i].ForSlotCount(slots);
+            }
+
+            _version = value;
+        }
     }
 
     private ExcelFormatVersion _version = ExcelFormatVersion.Version17;
@@ -212,30 +239,12 @@ public sealed class ExcelDocument
     /// Reads a document from a stream asynchronously, from its current position to its end.
     /// </summary>
     public static async Task<ExcelDocument> ReadAsync(Stream stream, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(stream);
-        using var copy = stream.CanSeek ? new MemoryStream(checked((int)(stream.Length - stream.Position))) : new MemoryStream();
-        await stream.CopyToAsync(copy, cancellationToken).ConfigureAwait(false);
-        return ReadOwned(copy.Length == copy.Capacity ? copy.GetBuffer() : copy.ToArray());
-    }
+        => ReadOwned(await StreamBytes.ReadToEndAsync(stream, cancellationToken).ConfigureAwait(false));
 
     /// <summary>
-    /// Reads a document from a stream.
+    /// Reads a document from a stream, from its current position to its end.
     /// </summary>
-    public static ExcelDocument Read(Stream stream)
-    {
-        ArgumentNullException.ThrowIfNull(stream);
-        if (stream.CanSeek)
-        {
-            var buffer = new byte[stream.Length - stream.Position];
-            stream.ReadExactly(buffer);
-            return ReadOwned(buffer);
-        }
-
-        using var copy = new MemoryStream();
-        stream.CopyTo(copy);
-        return ReadOwned(copy.ToArray());
-    }
+    public static ExcelDocument Read(Stream stream) => ReadOwned(StreamBytes.ReadToEnd(stream));
 
     /// <summary>
     /// Reads a document from its bytes (the data fork of the Macintosh file). The bytes are copied, so
@@ -448,6 +457,12 @@ public sealed class ExcelDocument
         for (byte length; (length = reader.ReadByte()) != 0;)
         {
             Names.Add(ExcelDefinedName.Read(reader, length));
+        }
+
+        _namesAsRead = [.. Names];
+        foreach (var name in Names)
+        {
+            name.MarkUnchanged();
         }
 
         // After the terminator: the data of every array constant in the definitions, name by name.
@@ -714,8 +729,128 @@ public sealed class ExcelDocument
     /// </summary>
     public byte[] ToArray() => Serialize().ToArray();
 
+    /// <summary>
+    /// Puts <see cref="Names"/> in the alphabetical order Excel keeps them in, ignoring case and accents, renumbering the name
+    /// tokens of every formula and definition to match (spec §11). Excel finds a name typed in a formula by searching
+    /// that order, so a name out of place gives <c>#NAME?</c> (<c>Names Unsorted</c>). Saving does this first unless
+    /// the names are the ones read from the file, unchanged: Excel saves the names it read in the order it read them.
+    /// </summary>
+    public void SortNames()
+    {
+        var order = SortedNameOrder();
+        if (IsIdentity(order))
+        {
+            return;
+        }
+
+        // map[old 1-based index] = new 1-based index.
+        var map = new ushort[Names.Count + 1];
+        for (int i = 0; i < order.Length; i++)
+        {
+            map[order[i] + 1] = (ushort)(i + 1);
+        }
+
+        foreach (var entry in Cells.NonEmptyCells)
+        {
+            if (entry.Type is ExcelCellType.Formula or ExcelCellType.NumericFormula)
+            {
+                entry.GetCell().Formula!.RemapNames(map);
+            }
+        }
+
+        var names = order.Select(i => Names[i]).ToList();
+        foreach (var name in names)
+        {
+            if (name.Definition.Length > 0)
+            {
+                var definition = (byte[])name.Definition.Clone();
+                FormulaTokens.RemapNames(definition, definition, map, definition: true);
+                name.Definition = definition;
+            }
+        }
+
+        Names.Clear();
+        Names.AddRange(names);
+    }
+
+    /// <summary>
+    /// Gets whether <see cref="Names"/> are in the order Excel searches them (see <see cref="SortNames"/>). A file
+    /// whose names are not gives <c>#NAME?</c> for some names typed in Excel.
+    /// </summary>
+    public bool NamesAreSorted => IsIdentity(SortedNameOrder());
+
+    private int[] SortedNameOrder()
+    {
+        var keys = Names.Select(n => NameSortKey(n.Name)).ToArray();
+        var order = Enumerable.Range(0, Names.Count).ToArray();
+        Array.Sort(order, (a, b) =>
+        {
+            int compared = string.CompareOrdinal(keys[a], keys[b]);
+            return compared != 0 ? compared : a.CompareTo(b);
+        });
+
+        return order;
+    }
+
+    private static bool IsIdentity(int[] order)
+    {
+        for (int i = 0; i < order.Length; i++)
+        {
+            if (order[i] != i)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Excel's order ignores case and accents: the French 1.01 puts "Critères" before "Criteria". Letters are compared
+    // without their accents and in upper case; everything else by its character code.
+    private static string NameSortKey(string name)
+    {
+        var decomposed = name.Normalize(System.Text.NormalizationForm.FormD);
+        var key = new System.Text.StringBuilder(decomposed.Length);
+        foreach (char c in decomposed)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                key.Append(char.ToUpperInvariant(c));
+            }
+        }
+
+        return key.ToString();
+    }
+
+    // The names as read from the file. Excel never reorders the names it reads, so a document whose names are still
+    // these is saved as it came; one whose names changed is sorted first.
+    private ExcelDefinedName[]? _namesAsRead;
+
+    private bool NamesUnchanged()
+    {
+        if (_namesAsRead is null || _namesAsRead.Length != Names.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < Names.Count; i++)
+        {
+            if (!ReferenceEquals(_namesAsRead[i], Names[i]) || !_namesAsRead[i].IsUnchanged)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private BigEndianWriter Serialize()
     {
+        if (!NamesUnchanged())
+        {
+            SortNames();
+        }
+
         UpdateExtent();
         int rows = State.RowCount;
         int columns = State.ColumnCountInTable;
@@ -837,6 +972,12 @@ public sealed class ExcelDocument
         {
             foreach (var name in external.Names)
             {
+                // A zero-length name would end the list early (spec §10).
+                if (string.IsNullOrEmpty(name))
+                {
+                    throw new InvalidOperationException($"The names used from external document '{external.Name}' cannot include an empty name.");
+                }
+
                 writer.WritePascalString(name);
             }
 
@@ -956,7 +1097,7 @@ public sealed class ExcelDocument
                 {
                     var cell = Cells.Find(r, c)!;
                     word0 = cell.Word0;
-                    word1 = cell.Word1;
+                    word1 = cell.TableWord1;
                     word2 = cell.Word2;
                     switch (cell.Type)
                     {

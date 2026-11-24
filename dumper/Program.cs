@@ -289,7 +289,7 @@ sealed class ParseCommand : Command<ParseSettings>
                 var formula = ExcelFormula.Parse(settings.Formula, document, version);
                 expression = formula.Expression.ToArray();
                 table.AddRow("Decompiled", Program.Escape(formula.ToText(document)));
-                table.AddRow("Fix-ups", $"{Program.Hex(formula.Fixups)}  words: {string.Join(", ", formula.GetFixupWords())}");
+                table.AddRow("Fix-ups", $"{Program.Hex(formula.Fixups)}  words: {string.Join(", ", formula.FixupWords.ToArray())}");
             }
 
             table.AddRow("Expression", $"{Program.Hex(expression)} ({expression.Length} bytes)");
@@ -352,7 +352,7 @@ sealed class CellCommand : Command<CellSettings>
             table.AddRow("Stored row/column", $"row word 0x{formula.StoredRowWord:X4}, column {formula.StoredColumn}");
             table.AddRow("Reserved bytes", Program.Hex(formula.Reserved));
             table.AddRow("Expression", Program.Hex(formula.Expression));
-            table.AddRow("Fix-ups", $"{Program.Hex(formula.Fixups)}  words: {string.Join(", ", formula.GetFixupWords())}");
+            table.AddRow("Fix-ups", $"{Program.Hex(formula.Fixups)}  words: {string.Join(", ", formula.FixupWords.ToArray())}");
         }
 
         AnsiConsole.Write(table);
@@ -659,6 +659,10 @@ sealed class DumpCommand : Command<FileSettings>
         }
 
         AnsiConsole.Write(names);
+        if (!document.NamesAreSorted)
+        {
+            AnsiConsole.MarkupLine("[yellow]The names are not in Excel's order (spec §11): Excel gives #NAME? for some of them typed in a formula.[/]");
+        }
     }
 }
 
@@ -871,7 +875,7 @@ sealed class JsonCommand : Command<JsonSettings>
 
     public override int Execute(CommandContext context, JsonSettings settings, CancellationToken cancellationToken)
     {
-        var options = new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        var options = new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
         object model = Program.IsChart(settings.Input) ? ChartModel(ChartDocument.Load(settings.Input)) : SheetModel(ExcelDocument.Load(settings.Input), settings.Empty);
         string json = JsonSerializer.Serialize(model, options);
         if (settings.Output is null)

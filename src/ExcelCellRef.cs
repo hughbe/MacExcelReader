@@ -138,6 +138,61 @@ public readonly struct ExcelCellRef
     }
 
     /// <summary>
+    /// Copies the text of a text cell into <paramref name="destination"/> without allocating a string. Text is at
+    /// most 255 characters, so a 255-character buffer always has room.
+    /// </summary>
+    /// <returns>False if the cell is not a text cell or the text does not fit.</returns>
+    public bool TryGetText(Span<char> destination, out int charsWritten)
+    {
+        charsWritten = 0;
+        if (Type != ExcelCellType.Text)
+        {
+            return false;
+        }
+
+        if (_grid.TryGetRawData(Row, Column, out var data) && data.Length >= 1 + data[0])
+        {
+            var bytes = data.Slice(1, data[0]);
+            if (bytes.Length > destination.Length)
+            {
+                return false;
+            }
+
+            charsWritten = MacRoman.GetChars(bytes, destination);
+            return true;
+        }
+
+        string text = GetCell().TextValue;
+        if (!text.AsSpan().TryCopyTo(destination))
+        {
+            return false;
+        }
+
+        charsWritten = text.Length;
+        return true;
+    }
+
+    // The text result of an untouched formula cell, as Mac OS Roman bytes in the file (spec §12.3, §12.4).
+    internal bool TryGetRawFormulaText(out ReadOnlySpan<byte> text)
+    {
+        text = default;
+        if (Type != ExcelCellType.Formula || !_grid.TryGetRawData(Row, Column, out var record) || record.Length < 15
+            || record[0] != 0xFF || record[1] != 0xFF || record[2] != 0)
+        {
+            return false;
+        }
+
+        int at = 15 + record[14];
+        if (at >= record.Length || at + 1 + record[at] > record.Length)
+        {
+            return false;
+        }
+
+        text = record.Slice(at + 1, record[at]);
+        return true;
+    }
+
+    /// <summary>
     /// Gets the full <see cref="ExcelCell"/>, creating it if needed.
     /// </summary>
     public ExcelCell GetCell() => _grid.Find(Row, Column)!;

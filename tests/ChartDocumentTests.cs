@@ -295,4 +295,27 @@ public class ChartDocumentTests
             });
         }
     }
+
+    [Fact]
+    public void MainChart_WithNoCharts_Throws()
+    {
+        var document = ChartDocument.Create(ChartType.ColumnOrBar);
+        document.Charts.Clear();
+        Assert.Throws<InvalidOperationException>(() => document.MainChart);
+        Assert.Null(document.OverlayChart);
+    }
+
+    [Fact]
+    public async Task StreamsAndSpans_RoundTrip()
+    {
+        var bytes = Sample("PROFIT CHART");
+        var stream = new MemoryStream();
+        ChartDocument.Read(bytes.AsSpan()).Write(stream);
+        Assert.Equal(bytes, stream.ToArray());
+        stream.Position = 0;
+        var reread = await ChartDocument.ReadAsync(stream);
+        var output = new MemoryStream();
+        await reread.WriteAsync(output);
+        Assert.Equal(bytes, output.ToArray());
+    }
 }

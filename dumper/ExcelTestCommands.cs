@@ -449,7 +449,7 @@ sealed class CheckCommand : Command<CheckSettings>
             compared++;
             var a = FormulaTokens.ClearStaleBytes(formula.IsArrayFormula ? formula.SharedExpression : formula.Expression);
             var b = FormulaTokens.ClearStaleBytes(theirs.IsArrayFormula ? theirs.SharedExpression : theirs.Expression);
-            bool sameFixups = formula.IsArrayFormula || formula.GetFixupWords().SequenceEqual(theirs.GetFixupWords());
+            bool sameFixups = formula.IsArrayFormula || formula.FixupWords.ToArray().SequenceEqual(theirs.FixupWords.ToArray());
             if (!a.AsSpan().SequenceEqual(b) || !sameFixups)
             {
                 AnsiConsole.MarkupLine($"  [yellow]{new ExcelCellAddress(r, c)} tokens[/] {Markup.Escape(formula.ToText(ours))}: ours {Convert.ToHexString(a)}, Excel {Convert.ToHexString(b)}" + (sameFixups ? "" : " (fix-ups differ)"));
@@ -475,7 +475,7 @@ sealed class CheckCommand : Command<CheckSettings>
     // to change: formula results (it recalculates), windows, the code signature and the table's size.
     private static int CompareJson(object ours, object excel, bool all)
     {
-        var options = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        var options = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
         var a = JsonSerializer.SerializeToNode(ours, options)!;
         var b = JsonSerializer.SerializeToNode(excel, options)!;
         var differences = new List<string>();

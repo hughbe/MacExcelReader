@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using MacExcelReader.Internal;
 
 namespace MacExcelReader;
 
@@ -28,13 +29,31 @@ public sealed class ExcelPrintSetup
     public byte[] Record { get; }
 
     /// <summary>Gets or sets the page header, or null if there is none.</summary>
-    public string? Header { get; set; }
+    public string? Header
+    {
+        get => _header;
+        set => _header = PascalText.CheckOptional(value, nameof(value));
+    }
+
+    private string? _header;
 
     /// <summary>Gets or sets the page footer, or null if there is none.</summary>
-    public string? Footer { get; set; }
+    public string? Footer
+    {
+        get => _footer;
+        set => _footer = PascalText.CheckOptional(value, nameof(value));
+    }
+
+    private string? _footer;
 
     /// <summary>Gets or sets the printer set-up message for serial printers, or null if there is none.</summary>
-    public string? PrinterMessage { get; set; }
+    public string? PrinterMessage
+    {
+        get => _printerMessage;
+        set => _printerMessage = PascalText.CheckOptional(value, nameof(value));
+    }
+
+    private string? _printerMessage;
 
     /// <summary>Gets or sets the left margin in inches (spec §14, offset 62).</summary>
     public double LeftMargin { get => GetDouble(62); set => SetDouble(62, value); }

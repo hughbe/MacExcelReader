@@ -34,12 +34,76 @@ public static class ExcelValueFormatter
     /// need the document that defines them; without it, or past its last format, the number is shown as General.
     /// </summary>
     public static string Format(double value, int formatIndex, ExcelDocument? document = null)
+        => FindFormat(formatIndex, document)?.Format(value) ?? FormatGeneral(value);
+
+    /// <summary>
+    /// Formats a number as <see cref="Format(double, int, ExcelDocument?)"/> does into <paramref name="destination"/>
+    /// without allocating.
+    /// </summary>
+    /// <returns>False if the text does not fit in <paramref name="destination"/>.</returns>
+    public static bool TryFormat(double value, int formatIndex, ExcelDocument? document, Span<char> destination, out int charsWritten)
     {
-        var format = formatIndex < 0 ? null
+        if (FindFormat(formatIndex, document) is { } format)
+        {
+            return format.TryFormat(value, destination, out charsWritten);
+        }
+
+        return ExcelValue.FromNumber(value).TryFormat(destination, out charsWritten);
+    }
+
+    /// <summary>
+    /// Formats a cell's value for display as <see cref="FormatCell(ExcelCellRef, ExcelDocument?)"/> does, into
+    /// <paramref name="destination"/> without allocating: text is copied straight from the file.
+    /// </summary>
+    /// <returns>False if the text does not fit in <paramref name="destination"/>.</returns>
+    public static bool TryFormatCell(ExcelCellRef cell, ExcelDocument? document, Span<char> destination, out int charsWritten)
+    {
+        switch (cell.Type)
+        {
+            case ExcelCellType.Integer or ExcelCellType.Number:
+                cell.TryGetNumber(out double number);
+                return TryFormat(number, cell.NumberFormat, document, destination, out charsWritten);
+            case ExcelCellType.Text when document?.GetNumberFormat(cell.NumberFormat) is not { SectionCount: 4 }:
+                return cell.TryGetText(destination, out charsWritten);
+            case ExcelCellType.Formula when document?.GetNumberFormat(cell.NumberFormat) is not { SectionCount: 4 }
+                && cell.TryGetRawFormulaText(out var text):
+                charsWritten = text.Length <= destination.Length ? MacRoman.GetChars(text, destination) : 0;
+                return charsWritten == text.Length;
+            default:
+                return TryFormatValue(cell.Value, cell.NumberFormat, document, destination, out charsWritten);
+        }
+    }
+
+    /// <summary>
+    /// Formats a cell's value for display as <see cref="FormatCell(ExcelCell, ExcelDocument?)"/> does, into
+    /// <paramref name="destination"/>.
+    /// </summary>
+    /// <returns>False if the text does not fit in <paramref name="destination"/>.</returns>
+    public static bool TryFormatCell(ExcelCell cell, ExcelDocument? document, Span<char> destination, out int charsWritten)
+    {
+        ArgumentNullException.ThrowIfNull(cell);
+        return TryFormatValue(cell.Value, cell.NumberFormat, document, destination, out charsWritten);
+    }
+
+    private static bool TryFormatValue(ExcelValue value, int numberFormat, ExcelDocument? document, Span<char> destination, out int charsWritten)
+    {
+        switch (value.Kind)
+        {
+            case ExcelValueKind.Number:
+                return TryFormat(value.Number, numberFormat, document, destination, out charsWritten);
+            case ExcelValueKind.Text when document?.GetNumberFormat(numberFormat) is { SectionCount: 4 } format:
+                string text = format.Format(value.Text);
+                charsWritten = text.TryCopyTo(destination) ? text.Length : 0;
+                return charsWritten == text.Length;
+            default:
+                return value.TryFormat(destination, out charsWritten);
+        }
+    }
+
+    private static ExcelNumberFormat? FindFormat(int formatIndex, ExcelDocument? document)
+        => formatIndex < 0 ? null
             : document is not null ? document.GetNumberFormat(formatIndex)
             : formatIndex < ExcelNumberFormat.BuiltInCount ? ExcelNumberFormat.BuiltIn[formatIndex] : null;
-        return format?.Format(value) ?? FormatGeneral(value);
-    }
 
     /// <summary>
     /// Formats a number the way the General format does when Excel turns a number into text (as <c>""&amp;A1</c>
@@ -83,20 +147,33 @@ public static class ExcelValueFormatter
     /// </summary>
     internal static int FormatGeneral(double value, int width, Span<char> destination)
     {
-        if (double.IsNaN(value) || double.IsInfinity(value))
-        {
-            value.TryFormat(destination, out int special, default, System.Globalization.CultureInfo.InvariantCulture);
-            return special;
-        }
-
         int n = 0;
-        if (value < 0)
-        {
-            destination[n++] = '-';
-        }
-
         Span<char> buffer = stackalloc char[15];
-        int length = Num2Str(Math.Abs(value), buffer, out int exponent);
+        int length;
+        int exponent;
+        if (double.IsFinite(value))
+        {
+            if (value < 0)
+            {
+                destination[n++] = '-';
+            }
+
+            length = Num2Str(Math.Abs(value), buffer, out exponent);
+        }
+        else
+        {
+            // Excel never makes an infinity or a NaN, but shows one it finds in a file as the number its decimal
+            // conversion makes of the exponent field 0x7FF: ±1.7976931348623E+308 for ±infinity and
+            // -2.6965397022935E+308 for a NaN of either sign (Excel 1.00, `NaN Cells`).
+            if (double.IsNaN(value) || value < 0)
+            {
+                destination[n++] = '-';
+            }
+
+            (double.IsNaN(value) ? "26965397022935" : "17976931348623").CopyTo(buffer);
+            length = 14;
+            exponent = 309;
+        }
         Span<char> digits = buffer[..length];
 
         // exponent counts the digits before the point: the value is 0.digits × 10^exponent.

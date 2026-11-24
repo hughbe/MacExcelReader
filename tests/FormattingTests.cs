@@ -287,4 +287,38 @@ public class FormattingTests
         document.Cells["A1"].NumberFormat = 3;                             // #,##0
         Assert.Equal("####", ExcelValueFormatter.FormatCell(document.Cells["A1"], document, 0)); // (40 - 4) / 9
     }
+
+    [Theory]
+    [InlineData(20, 1.5)]
+    [InlineData(30, 0.125)]
+    [InlineData(100, 2)]
+    public void Format_MoreThan15Decimals_Formats(int decimals, double value)
+    {
+        var format = ExcelNumberFormat.Parse("0." + new string('0', decimals));
+        string text = format.Format(value);
+        Assert.Equal(decimals, text.Length - text.IndexOf('.') - 1);
+        Assert.Equal(value, double.Parse(text, System.Globalization.CultureInfo.InvariantCulture));
+        _ = ExcelNumberFormat.Parse("0." + new string('0', decimals) + "E+00").Format(value);
+    }
+
+    [Fact]
+    public void Format_TruncatedToken_IsAFormatError()
+    {
+        // A number header (03) needs three operand bytes; this section ends after one.
+        var format = new ExcelNumberFormat([0, 0, 0, 2, 2, 2, 1], [0x03, 0x01]);
+        Assert.Throws<ExcelFormatException>(() => format.Format(1));
+    }
+
+    [Fact]
+    public void Format_SameFormatTwice_GivesTheSameText()
+    {
+        // The tokens are cached after the first call.
+        var format = ExcelNumberFormat.Parse("#,##0.00;(#,##0.00);\"zero\"");
+        Assert.Equal("1,234.50", format.Format(1234.5));
+        Assert.Equal("1,234.50", format.Format(1234.5));
+        Assert.Equal("(2.00)", format.Format(-2));
+        Assert.Equal("zero", format.Format(0));
+        var other = format with { Body = ExcelNumberFormat.Parse("0").Body, Descriptor = ExcelNumberFormat.Parse("0").Descriptor };
+        Assert.Equal("1235", other.Format(1234.5));
+    }
 }

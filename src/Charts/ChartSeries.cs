@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using MacExcelReader.Internal;
 
 namespace MacExcelReader.Charts;
 
@@ -106,25 +107,67 @@ public sealed class ChartSeries
     public List<MicrosoftDecimal> Values { get; } = [];
 
     /// <summary>Gets or sets the series name.</summary>
-    public string Name { get; set; } = string.Empty;
+    public string Name
+    {
+        get => _name;
+        set => _name = PascalText.Check(value, nameof(value));
+    }
+
+    private string _name = string.Empty;
 
     /// <summary>Gets or sets the first label string.</summary>
-    public string FirstLabel { get; set; } = string.Empty;
+    public string FirstLabel
+    {
+        get => _firstLabel;
+        set => _firstLabel = PascalText.Check(value, nameof(value));
+    }
+
+    private string _firstLabel = string.Empty;
 
     /// <summary>Gets or sets the second label string.</summary>
-    public string SecondLabel { get; set; } = string.Empty;
+    public string SecondLabel
+    {
+        get => _secondLabel;
+        set => _secondLabel = PascalText.Check(value, nameof(value));
+    }
+
+    private string _secondLabel = string.Empty;
 
     /// <summary>Gets or sets the source-document marker string (empty, or the two bytes 0x1B 0x06).</summary>
-    public string SourceMarker { get; set; } = string.Empty;
+    public string SourceMarker
+    {
+        get => _sourceMarker;
+        set => _sourceMarker = PascalText.Check(value, nameof(value));
+    }
+
+    private string _sourceMarker = string.Empty;
 
     /// <summary>Gets or sets the name of the source document.</summary>
-    public string SourceDocument { get; set; } = string.Empty;
+    public string SourceDocument
+    {
+        get => _sourceDocument;
+        set => _sourceDocument = PascalText.Check(value, nameof(value));
+    }
+
+    private string _sourceDocument = string.Empty;
 
     /// <summary>Gets or sets the reference to the values, as R1C1 formula text without <c>=</c> or the document.</summary>
-    public string ValuesReference { get; set; } = string.Empty;
+    public string ValuesReference
+    {
+        get => _valuesReference;
+        set => _valuesReference = PascalText.Check(value, nameof(value));
+    }
+
+    private string _valuesReference = string.Empty;
 
     /// <summary>Gets or sets the reference to the categories, as R1C1 formula text without <c>=</c> or the document.</summary>
-    public string CategoriesReference { get; set; } = string.Empty;
+    public string CategoriesReference
+    {
+        get => _categoriesReference;
+        set => _categoriesReference = PascalText.Check(value, nameof(value));
+    }
+
+    private string _categoriesReference = string.Empty;
 
     /// <summary>Gets the four trailing strings (empty in files written by Excel).</summary>
     public string[] TrailingStrings { get; } = [string.Empty, string.Empty, string.Empty, string.Empty];

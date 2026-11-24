@@ -54,6 +54,26 @@ public static class MacRoman
     }
 
     /// <summary>
+    /// Decodes Mac OS Roman bytes into <paramref name="chars"/>, one character per byte, without allocating.
+    /// </summary>
+    /// <returns>The number of characters written: the number of bytes.</returns>
+    /// <exception cref="ArgumentException"><paramref name="chars"/> is shorter than <paramref name="bytes"/>.</exception>
+    public static int GetChars(ReadOnlySpan<byte> bytes, Span<char> chars)
+    {
+        if (chars.Length < bytes.Length)
+        {
+            throw new ArgumentException("The destination is too short: Mac OS Roman has one character per byte.", nameof(chars));
+        }
+
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            chars[i] = GetChar(bytes[i]);
+        }
+
+        return bytes.Length;
+    }
+
+    /// <summary>
     /// Encodes a string as Mac OS Roman. Characters with no Mac OS Roman equivalent become '?'.
     /// </summary>
     public static byte[] GetBytes(string value)

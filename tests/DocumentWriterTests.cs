@@ -249,12 +249,11 @@ public class DocumentWriterTests
         var name = new ExcelDefinedName("ShortName");
         Assert.Equal("ShortName", name.ToString());
 
-        var document = ExcelDocument.CreateWorksheet();
-        document.Names.Add(new ExcelDefinedName(new string('x', 256)));
-        Assert.Throws<InvalidOperationException>(() => document.ToArray());
-        document.Names.Clear();
-        document.Names.Add(new ExcelDefinedName("LongDefinition", new byte[256]));
-        Assert.Throws<InvalidOperationException>(() => document.ToArray());
+        Assert.Throws<ArgumentException>(() => new ExcelDefinedName(new string('x', 256)));
+        Assert.Throws<ArgumentException>(() => new ExcelDefinedName("LongDefinition", new byte[256]));
+        Assert.Throws<ArgumentException>(() => name.Name = new string('x', 256));
+        Assert.Throws<ArgumentException>(() => name.Name = string.Empty);
+        Assert.Throws<ArgumentException>(() => name.Definition = new byte[256]);
     }
 
     [Fact]
@@ -416,5 +415,82 @@ public class DocumentWriterTests
         Assert.Equal("new corner", reread.Cells[300, 7].TextValue);
         Assert.Equal("Date", reread.Cells["A10"].TextValue);
         Assert.Equal(29220, reread.Cells["A11"].IntegerValue);
+    }
+
+    [Fact]
+    public void ExternalDocument_EmptyName_IsRejectedOnSave()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        var external = new ExcelExternalDocument("Budget");
+        external.Names.Add("Rate");
+        external.Names.Add(string.Empty);
+        document.ExternalDocuments.Add(external);
+
+        // A zero-length name would end the list (spec §10) and leave a file that cannot be read.
+        Assert.Throws<InvalidOperationException>(() => document.ToArray());
+        external.Names.RemoveAt(1);
+        Assert.Equal(["Rate"], ExcelDocument.Read(document.ToArray()).ExternalDocuments[0].Names);
+    }
+
+    [Fact]
+    public void Text_LongerThan255_IsRejectedWhenSet()
+    {
+        Assert.Throws<ArgumentException>(() => new ExcelExternalDocument(new string('x', 256)));
+        Assert.Throws<ArgumentException>(() => new ExcelPrintSetup(new byte[ExcelPrintSetup.RecordSize]) { Header = new string('x', 256) });
+        Assert.Throws<ArgumentException>(() => Charts.ChartSeries.Create("S", [1], "D", "R1C1").Name = new string('x', 256));
+        Assert.Throws<ArgumentException>(() => new ExcelWorkspaceWindow { DocumentName = new string('x', 256) });
+    }
+
+    [Fact]
+    public async Task Read_StreamPositionedPastItsEnd_IsAFormatError()
+    {
+        var stream = new MemoryStream(new byte[10]) { Position = 20 };
+        Assert.Throws<ExcelFormatException>(() => ExcelDocument.Read(stream));
+        stream.Position = 20;
+        await Assert.ThrowsAsync<ExcelFormatException>(() => ExcelDocument.ReadAsync(stream));
+    }
+
+    public static TheoryData<string> Version18Sheets
+        => new(AllSamples().Where(name => File.ReadAllBytes(SampleFile(name)) is [0x53, 0x27, 0, 18, ..]));
+
+    [Theory]
+    [MemberData(nameof(Version18Sheets))]
+    public void Version_Change_ConvertsNumberFormats(string name)
+    {
+        var document = ExcelDocument.Read(File.ReadAllBytes(SampleFile(name)));
+        var formats = document.NumberFormats.ToList();
+        if (formats.Exists(f => f.RequiresVersion18))
+        {
+            Assert.Throws<InvalidOperationException>(() => document.Version = ExcelFormatVersion.Version17);
+            Assert.Equal(formats, document.NumberFormats);
+            return;
+        }
+
+        // Down to three slots, as Excel 1.5's Save keeps them for a version-17 file, then back with General as
+        // the text section (spec §7).
+        document.Version = ExcelFormatVersion.Version17;
+        for (int i = 0; i < formats.Count; i++)
+        {
+            Assert.Equal(ExcelNumberFormat.Parse(formats[i].ToText(ExcelVersion.Excel150), ExcelVersion.Excel150, textSection: false), document.NumberFormats[i]);
+        }
+
+        // Frozen panes or gridline colours in a window still need version 18, so save the formats on their own.
+        var copy = ExcelDocument.CreateWorksheet();
+        copy.NumberFormats.AddRange(document.NumberFormats);
+        Assert.Equal(copy.NumberFormats, ExcelDocument.Read(copy.ToArray()).NumberFormats);
+        document.Version = ExcelFormatVersion.Version18;
+        Assert.Equal(formats, document.NumberFormats);
+    }
+
+    [Fact]
+    public void Version_Change_AddsTheTextSlot()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.AddNumberFormat("0.00;(0.00)");
+        document.AddNumberFormat("General");
+        document.Version = ExcelFormatVersion.Version18;
+        Assert.Equal(ExcelNumberFormat.Parse("0.00;(0.00)", ExcelVersion.Excel150), document.NumberFormats[0]);
+        Assert.Equal(ExcelNumberFormat.Parse("General", ExcelVersion.Excel150), document.NumberFormats[1]);
+        _ = ExcelDocument.Read(document.ToArray());
     }
 }

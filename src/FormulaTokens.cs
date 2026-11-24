@@ -399,6 +399,75 @@ public static class FormulaTokens
         return true;
     }
 
+    /// <summary>
+    /// Renumbers the name tokens of an expression after the names are reordered: <paramref name="map"/>[old] is the
+    /// new 1-based index. In a cell formula the index is a fix-up word (spec §12.5), in a name definition the token's
+    /// first operand word (spec §11). A name token inside an external reference indexes that document's names
+    /// (spec §10) and is left alone.
+    /// </summary>
+    internal static void RemapNames(ReadOnlySpan<byte> expression, Span<byte> fixups, ReadOnlySpan<ushort> map, bool definition)
+    {
+        if (IsSharedReference(expression))
+        {
+            // An array formula's anchor holds the shared expression and its fix-ups after a 10-byte header.
+            if (!definition && Normalize(expression[0]) == 0x01 && fixups.Length >= 13
+                && BinaryPrimitives.ReadUInt16BigEndian(fixups) == SharedAnchorMarker && fixups.Length >= 13 + fixups[12])
+            {
+                var shared = fixups.Slice(13, fixups[12]);
+                RemapNames(shared, fixups.Slice(13 + shared.Length), map, definition: false);
+            }
+
+            return;
+        }
+
+        int position = 0;
+        bool external = false;
+        foreach (var token in Enumerate(expression))
+        {
+            switch (token.Code)
+            {
+                case ExternalSheet:
+                    external = true;
+                    if (!definition)
+                    {
+                        Skip(fixups, ref position, 2);
+                    }
+
+                    break;
+                case 0x1B:
+                    external = false;
+                    break;
+                case Name when definition:
+                    if (!external)
+                    {
+                        // The definition is the span `fixups` here: its tokens hold the indices.
+                        var operand = fixups.Slice(token.Offset + 1, 2);
+                        BinaryPrimitives.WriteUInt16BigEndian(operand, Remap(BinaryPrimitives.ReadUInt16BigEndian(operand), map));
+                    }
+
+                    break;
+                case Name:
+                    Require(fixups, position, 2);
+                    if (!external)
+                    {
+                        var word = fixups.Slice(position, 2);
+                        BinaryPrimitives.WriteUInt16BigEndian(word, Remap(BinaryPrimitives.ReadUInt16BigEndian(word), map));
+                    }
+
+                    position += 2;
+                    break;
+                case Array when !definition:
+                    SkipArrayBlock(fixups, ref position);
+                    break;
+                case MemoryArea when !definition:
+                    Skip(fixups, ref position, ReadWord(fixups, ref position) * 6);
+                    break;
+            }
+        }
+
+        static ushort Remap(ushort index, ReadOnlySpan<ushort> map) => index >= 1 && index < map.Length ? map[index] : index;
+    }
+
     internal static void SkipArrayBlock(ReadOnlySpan<byte> data, ref int position)
     {
         Require(data, position, 1);
@@ -447,11 +516,6 @@ public static class FormulaTokens
         return value;
     }
 
-    /// <summary>
-    /// Reads the fix-up words of a cell formula in token order: for each name token its 1-based name
-    /// index, and for each external-sheet token its external-document index. Array and memory-area
-    /// blocks are skipped.
-    /// </summary>
     /// <summary>
     /// Returns the array-constant blocks (spec §12.5) for the <c>0x20</c> tokens of an expression, in token order,
     /// from fix-up data laid out as in a cell formula.
@@ -525,32 +589,101 @@ public static class FormulaTokens
         return false;
     }
 
-    internal static List<ushort> ReadFixupWords(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups)
+    /// <summary>
+    /// Reads the fix-up words of a cell formula in token order: for each name token its 1-based name
+    /// index, and for each external-sheet token its external-document index. Array and memory-area
+    /// blocks are skipped.
+    /// </summary>
+    /// <summary>
+    /// The fix-up words of a cell formula (spec §12.5), in token order: for each name token its 1-based name index,
+    /// and for each external-sheet token its external-document index. A <c>foreach</c> over it allocates nothing.
+    /// </summary>
+    public readonly ref struct FixupWordCollection
     {
-        var words = new List<ushort>();
-        if (IsSharedReference(expression) || fixups.IsEmpty)
+        private readonly ReadOnlySpan<byte> _expression;
+        private readonly ReadOnlySpan<byte> _fixups;
+
+        internal FixupWordCollection(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups)
         {
-            return words;
+            // An array formula's or table's cell holds a reference to the shared record, not fix-up words.
+            bool none = IsSharedReference(expression) || fixups.IsEmpty;
+            _expression = none ? default : expression;
+            _fixups = none ? default : fixups;
         }
 
-        int position = 0;
-        foreach (var token in Enumerate(expression))
+        /// <summary>Gets an enumerator over the words.</summary>
+        public FixupWordEnumerator GetEnumerator() => new(_expression, _fixups);
+
+        /// <summary>Gets the number of words.</summary>
+        public int Count
         {
-            switch (token.Code)
+            get
             {
-                case Name:
-                case ExternalSheet:
-                    words.Add(ReadWord(fixups, ref position));
-                    break;
-                case Array:
-                    SkipArrayBlock(fixups, ref position);
-                    break;
-                case MemoryArea:
-                    Skip(fixups, ref position, ReadWord(fixups, ref position) * 6);
-                    break;
+                int count = 0;
+                foreach (var _ in this)
+                {
+                    count++;
+                }
+
+                return count;
             }
         }
 
-        return words;
+        /// <summary>Copies the words into a new array.</summary>
+        public ushort[] ToArray()
+        {
+            var words = new ushort[Count];
+            int i = 0;
+            foreach (ushort word in this)
+            {
+                words[i++] = word;
+            }
+
+            return words;
+        }
+    }
+
+    /// <summary>
+    /// An allocation-free enumerator over a cell formula's fix-up words; array and memory-area blocks are skipped.
+    /// </summary>
+    public ref struct FixupWordEnumerator
+    {
+        private TokenEnumerator _tokens;
+        private readonly ReadOnlySpan<byte> _fixups;
+        private int _position;
+
+        internal FixupWordEnumerator(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups)
+        {
+            _tokens = Enumerate(expression);
+            _fixups = fixups;
+            _position = 0;
+            Current = 0;
+        }
+
+        /// <summary>Gets the current word.</summary>
+        public ushort Current { get; private set; }
+
+        /// <summary>Advances to the next word.</summary>
+        public bool MoveNext()
+        {
+            while (_tokens.MoveNext())
+            {
+                switch (_tokens.Current.Code)
+                {
+                    case Name:
+                    case ExternalSheet:
+                        Current = ReadWord(_fixups, ref _position);
+                        return true;
+                    case Array:
+                        SkipArrayBlock(_fixups, ref _position);
+                        break;
+                    case MemoryArea:
+                        Skip(_fixups, ref _position, ReadWord(_fixups, ref _position) * 6);
+                        break;
+                }
+            }
+
+            return false;
+        }
     }
 }

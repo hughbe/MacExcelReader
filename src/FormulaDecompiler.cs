@@ -48,6 +48,18 @@ internal static class FormulaDecompiler
         return Decompile(expression, ref fixups, document, default, prefix, suffix);
     }
 
+    /// <summary>
+    /// Writes a cell formula's expression into <paramref name="text"/> between <paramref name="prefix"/> and
+    /// <paramref name="suffix"/>, as <see cref="Decompile(ReadOnlySpan{byte}, ReadOnlySpan{byte}, ExcelDocument?, string, string)"/> does.
+    /// </summary>
+    internal static void Append(ref TextBuffer text, ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixupBytes, ExcelDocument? document, scoped ReadOnlySpan<char> prefix, scoped ReadOnlySpan<char> suffix)
+    {
+        var fixups = new FixupSource(fixupBytes);
+        text.Append(prefix);
+        Write(ref text, expression, fixups, document, new References(default, r1c1: false));
+        text.Append(suffix);
+    }
+
     private static string Decompile(ReadOnlySpan<byte> expression, ref FixupSource fixups, ExcelDocument? document, ExcelCellAddress relativeTo, ReadOnlySpan<char> prefix, ReadOnlySpan<char> suffix)
     {
         var text = new TextBuffer(stackalloc char[256]);

@@ -40,7 +40,8 @@ public sealed class ChartDocument
     public List<Chart> Charts { get; } = [];
 
     /// <summary>Gets the main chart (the last in file order).</summary>
-    public Chart MainChart => Charts[^1];
+    /// <exception cref="InvalidOperationException"><see cref="Charts"/> is empty.</exception>
+    public Chart MainChart => Charts.Count > 0 ? Charts[^1] : throw new InvalidOperationException("The document has no charts.");
 
     /// <summary>Gets the overlay chart, or null.</summary>
     public Chart? OverlayChart => Charts.Count > 1 ? Charts[0] : null;
@@ -123,6 +124,12 @@ public sealed class ChartDocument
         if (segmentCount > 0)
         {
             document.CodeSegment = new BigEndianReader(data, segmentOffset).ReadBytes(segmentLength);
+        }
+
+        // A chart file holds the main chart and, if there is one, the overlay (spec §16.1).
+        if (chartCount is 0 or > 2)
+        {
+            throw new ExcelFormatException($"A chart file has one or two charts, not {chartCount}.");
         }
 
         reader.Position = dataOffset;
@@ -233,6 +240,31 @@ public sealed class ChartDocument
     /// </summary>
     public Task SaveAsync(string path, CancellationToken cancellationToken = default)
         => File.WriteAllBytesAsync(path, ToArray(), cancellationToken);
+
+
+    /// <summary>Reads a chart document from its bytes. The bytes are copied.</summary>
+    public static ChartDocument Read(ReadOnlySpan<byte> data) => Read(data.ToArray());
+
+    /// <summary>Reads a chart document from a stream, from its current position to its end.</summary>
+    public static ChartDocument Read(Stream stream) => Read(StreamBytes.ReadToEnd(stream));
+
+    /// <summary>Reads a chart document from a stream asynchronously, from its current position to its end.</summary>
+    public static async Task<ChartDocument> ReadAsync(Stream stream, CancellationToken cancellationToken = default)
+        => Read(await StreamBytes.ReadToEndAsync(stream, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>Writes a chart document to a stream.</summary>
+    public void Write(Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        stream.Write(ToArray());
+    }
+
+    /// <summary>Writes a chart document to a stream asynchronously.</summary>
+    public async Task WriteAsync(Stream stream, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        await stream.WriteAsync(ToArray(), cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Serialises the chart document.

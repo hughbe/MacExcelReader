@@ -1,3 +1,5 @@
+using MacExcelReader.Internal;
+
 namespace MacExcelReader;
 
 /// <summary>
@@ -18,7 +20,13 @@ public sealed class ExcelExternalDocument
     /// <summary>
     /// Gets or sets the document name. An empty name means "this document".
     /// </summary>
-    public string Name { get; set; }
+    public string Name
+    {
+        get => _name;
+        set => _name = PascalText.Check(value, nameof(value));
+    }
+
+    private string _name = string.Empty;
 
     /// <summary>
     /// Gets the six bytes that precede the name: the start of Excel's in-memory entry, which Excel never uses and keeps
