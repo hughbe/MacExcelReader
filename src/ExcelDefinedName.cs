@@ -57,11 +57,11 @@ public sealed class ExcelDefinedName
     /// <param name="name">The name, 1–255 characters.</param>
     /// <param name="definition">The definition as a parsed expression; empty for an undefined name.</param>
     /// <param name="flags">The flags.</param>
-    public ExcelDefinedName(string name, byte[]? definition = null, ExcelNameFlags flags = ExcelNameFlags.None)
+    public ExcelDefinedName(string name, ReadOnlySpan<byte> definition = default, ExcelNameFlags flags = ExcelNameFlags.None)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
         Name = name;
-        Definition = definition ?? [];
+        Definition = definition.IsEmpty ? default : definition.ToArray();
         Flags = flags;
     }
 
@@ -69,39 +69,38 @@ public sealed class ExcelDefinedName
     public string Name
     {
         get => _name;
-        set => _name = string.IsNullOrEmpty(value) ? throw new ArgumentException("A name cannot be empty.", nameof(value)) : PascalText.Check(value, nameof(value));
+        set
+        {
+            _name = string.IsNullOrEmpty(value) ? throw new ArgumentException("A name cannot be empty.", nameof(value)) : PascalText.Check(value, nameof(value));
+            _unchanged = false;
+        }
     }
 
     private string _name = string.Empty;
 
     // Whether the name and definition are still those read from the file (ExcelDocument sorts changed names on save).
-    private string? _nameAsRead;
-    private byte[]? _definitionAsRead;
+    private bool _unchanged;
 
-    internal void MarkUnchanged()
-    {
-        _nameAsRead = _name;
-        _definitionAsRead = _definition;
-    }
+    internal void MarkUnchanged() => _unchanged = true;
 
-    internal bool IsUnchanged => ReferenceEquals(_nameAsRead, _name) && ReferenceEquals(_definitionAsRead, _definition);
+    internal bool IsUnchanged => _unchanged;
 
     /// <summary>
     /// Gets or sets the definition, a parsed expression whose name and external-document indices are
-    /// stored inside the tokens.
+    /// stored inside the tokens. A name read from a file refers to the file's bytes rather than copying them.
     /// </summary>
     /// <exception cref="ArgumentException">The definition is longer than 255 bytes.</exception>
-    public byte[] Definition
+    public ReadOnlyMemory<byte> Definition
     {
         get => _definition;
         set
         {
-            ArgumentNullException.ThrowIfNull(value);
             _definition = value.Length <= 255 ? value : throw new ArgumentException("A definition cannot be longer than 255 bytes.", nameof(value));
+            _unchanged = false;
         }
     }
 
-    private byte[] _definition = [];
+    private ReadOnlyMemory<byte> _definition;
 
     /// <summary>Gets or sets the flags.</summary>
     public ExcelNameFlags Flags { get; set; }
@@ -161,7 +160,26 @@ public sealed class ExcelDefinedName
     /// one row up and one column left of each cell that uses it.
     /// </summary>
     public string GetDefinitionText(ExcelDocument? document, ExcelCellAddress relativeTo)
-        => FormulaDecompiler.Decompile(Definition, [], document, fixupsInPlace: true, _arrayConstants, relativeTo);
+        => FormulaDecompiler.Decompile(Definition.Span, [], document, fixupsInPlace: true, _arrayConstants, relativeTo);
+
+    /// <summary>
+    /// Writes the definition as <see cref="GetDefinitionText(ExcelDocument?, ExcelCellAddress)"/> gives it into
+    /// <paramref name="destination"/> without allocating.
+    /// </summary>
+    /// <returns>False if the text does not fit in <paramref name="destination"/>.</returns>
+    public bool TryFormatDefinitionText(Span<char> destination, out int charsWritten, ExcelDocument? document = null, ExcelCellAddress relativeTo = default)
+    {
+        var text = new TextBuffer(stackalloc char[256]);
+        try
+        {
+            FormulaDecompiler.AppendDefinition(ref text, this, document, relativeTo);
+            return text.TryCopyTo(destination, out charsWritten);
+        }
+        finally
+        {
+            text.Dispose();
+        }
+    }
 
     /// <summary>
     /// Gets the data of the array constants (<c>0x20</c> tokens) in the definition, one block per token in order
@@ -260,14 +278,14 @@ public sealed class ExcelDefinedName
             extra = reader.ReadByte();
         }
 
-        var definition = reader.ReadBytes(definitionLength);
+        var definition = reader.ReadMemory(definitionLength);
         if (reader.ReadByte() != definitionLength)
         {
             throw new ExcelFormatException("A defined name's two definition lengths disagree.");
         }
 
         var name = MacRoman.GetString(reader.ReadSpan(nameLength));
-        return new ExcelDefinedName(name, definition, (ExcelNameFlags)flags) { RawShortcutKey = key, RawMacroKind = extra };
+        return new ExcelDefinedName(name, default, (ExcelNameFlags)flags) { Definition = definition, RawShortcutKey = key, RawMacroKind = extra };
     }
 
     internal void Write(BigEndianWriter writer)
@@ -287,7 +305,7 @@ public sealed class ExcelDefinedName
             writer.WriteByte(RawMacroKind);
         }
 
-        writer.WriteBytes(Definition);
+        writer.WriteBytes(Definition.Span);
         writer.WriteByte((byte)Definition.Length);
         writer.WriteMacRoman(Name);
     }

@@ -315,7 +315,7 @@ public class ReaderTests
     {
         // Excel 1.00 clears the first six bytes of an external-document entry and never uses them (spec §8).
         var document = ExcelDocument.Read(File.ReadAllBytes(SampleFile(sample)));
-        Assert.All(document.ExternalDocuments, external => Assert.All(external.Reserved, b => Assert.Equal(0, b)));
+        Assert.All(document.ExternalDocuments, external => Assert.All(external.Reserved.ToArray(), b => Assert.Equal(0, b)));
     }
 
     [Theory]

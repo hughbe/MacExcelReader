@@ -163,7 +163,8 @@ internal static class ExcelFormulaParser
         public bool SpaceBefore { get; init; }
     }
 
-    private sealed class Lexer
+    // A struct held by the parser, so lexing allocates nothing but identifiers' text.
+    private struct Lexer
     {
         private readonly string _text;
         private int _position;
@@ -417,7 +418,7 @@ internal static class ExcelFormulaParser
 
     private sealed class Parser
     {
-        private readonly Lexer _lexer;
+        private Lexer _lexer;
         private readonly ExcelDocument? _document;
         private readonly ExcelVersion _version;
         private Token _current;
@@ -429,9 +430,9 @@ internal static class ExcelFormulaParser
             _lexer = lexer;
             _document = document;
             _version = version;
-            _current = lexer.Next();
-            _next = lexer.Next();
-            _third = lexer.Next();
+            _current = _lexer.Next();
+            _next = _lexer.Next();
+            _third = _lexer.Next();
         }
 
         private void Advance()
@@ -1006,17 +1007,19 @@ internal static class ExcelFormulaParser
         }
 
         // The arguments of the calls being parsed, innermost last; each call takes its own off the end.
-        private readonly List<Node> _arguments = [];
+        private List<Node>? _argumentStack;
+
+        private List<Node> PendingArguments => _argumentStack ??= [];
 
         private Node[] ParseArguments()
         {
             Expect(TokenKind.OpenParen, "(");
-            int first = _arguments.Count;
+            int first = PendingArguments.Count;
             if (_current.Kind != TokenKind.CloseParen)
             {
                 while (true)
                 {
-                    _arguments.Add(_current.Kind is TokenKind.Comma or TokenKind.CloseParen
+                    PendingArguments.Add(_current.Kind is TokenKind.Comma or TokenKind.CloseParen
                         ? new MissingNode(_current.Position)
                         : ParseComparison());
                     if (_current.Kind == TokenKind.Comma)
@@ -1030,8 +1033,8 @@ internal static class ExcelFormulaParser
             }
 
             Expect(TokenKind.CloseParen, ")");
-            var arguments = _arguments.Count == first ? [] : System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_arguments)[first..].ToArray();
-            _arguments.RemoveRange(first, _arguments.Count - first);
+            var arguments = PendingArguments.Count == first ? [] : System.Runtime.InteropServices.CollectionsMarshal.AsSpan(PendingArguments)[first..].ToArray();
+            PendingArguments.RemoveRange(first, PendingArguments.Count - first);
             return arguments;
         }
 

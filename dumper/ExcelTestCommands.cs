@@ -577,7 +577,7 @@ sealed class CheckCommand : Command<CheckSettings>
 
         for (int i = 0; i < Math.Min(ours.ExternalDocuments.Count, excel.ExternalDocuments.Count); i++)
         {
-            Report($"External document {i + 1} entry bytes", ours.ExternalDocuments[i].Reserved, excel.ExternalDocuments[i].Reserved);
+            Report($"External document {i + 1} entry bytes", ours.ExternalDocuments[i].Reserved.Span, excel.ExternalDocuments[i].Reserved.Span);
         }
     }
 

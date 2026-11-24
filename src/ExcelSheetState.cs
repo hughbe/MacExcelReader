@@ -14,11 +14,6 @@ public sealed class ExcelSheetState
     /// </summary>
     public const int Size = 630;
 
-    /// <summary>
-    /// The number of columns whose widths are stored.
-    /// </summary>
-    public const int ColumnCount = 256;
-
     private const int MaxIterationsOffset = 0x000;
     private const int CalculationModeOffset = 0x002;
     private const int PrecisionOffset = 0x004;
@@ -233,7 +228,7 @@ public sealed class ExcelSheetState
     public ushort GetColumnWidth(int column)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(column);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(column, ColumnCount);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(column, ExcelCellGrid.MaxColumns);
         return GetWord(ColumnWidthsOffset + 2 * column);
     }
 
@@ -243,7 +238,7 @@ public sealed class ExcelSheetState
     public void SetColumnWidth(int column, ushort width)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(column);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(column, ColumnCount);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(column, ExcelCellGrid.MaxColumns);
         SetWord(ColumnWidthsOffset + 2 * column, width);
     }
 
@@ -330,7 +325,7 @@ public sealed class ExcelSheetState
         }
 
         state.SetWord(0x40, 1);
-        for (int i = 0; i < ColumnCount; i++)
+        for (int i = 0; i < ExcelCellGrid.MaxColumns; i++)
         {
             state.SetColumnWidth(i, 75);
         }

@@ -271,7 +271,7 @@ sealed class ParseCommand : Command<ParseSettings>
             {
                 var name = new ExcelDefinedName("Parsed");
                 name.SetDefinition(settings.Formula, document, version);
-                expression = name.Definition;
+                expression = name.Definition.ToArray();
                 table.AddRow("Decompiled", Program.Escape("=" + name.GetDefinitionText(document)));
                 table.AddRow("Array data", Program.Escape(string.Join(" ", name.ArrayConstants.Select(a => Convert.ToHexString(a)))));
             }
@@ -534,7 +534,7 @@ sealed class DumpCommand : Command<FileSettings>
         var header = new Table().Title("[bold]Header[/]").AddColumn("Field").AddColumn("Value");
         header.AddRow("Kind", $"{document.Kind} (Finder type {document.FinderType})");
         header.AddRow("Code signature", $"0x{document.Signature:X4}");
-        header.AddRow("Code segments", string.Join(", ", document.CodeSegments.Select(s => $"{s.Length} bytes")));
+        header.AddRow("Code segments", $"{document.CodeSegment1.Length} bytes, {document.CodeSegment2.Length} bytes");
         header.AddRow("Function count", document.FunctionCount.ToString(CultureInfo.InvariantCulture));
         header.AddRow("Extra header", Program.Hex(document.ExtraHeader));
         if (document.ExtraFunctionNames.Count > 0)
@@ -563,7 +563,7 @@ sealed class DumpCommand : Command<FileSettings>
         settingsTable.AddRow("Protected", $"{Program.YesNo(state.IsProtected)}, password hash 0x{state.PasswordHash:X4}");
         settingsTable.AddRow("Standard font", $"font {state.StandardFont}, {state.StandardFontSize} pt");
         settingsTable.AddRow("Last non-hidden column", state.LastVisibleColumn.ToString(CultureInfo.InvariantCulture));
-        var widths = Enumerable.Range(0, ExcelSheetState.ColumnCount)
+        var widths = Enumerable.Range(0, ExcelCellGrid.MaxColumns)
             .Where(c => state.GetColumnWidth(c) != 75)
             .Select(c => $"{ExcelCellAddress.ColumnName(c)}={state.GetColumnWidth(c)}");
         settingsTable.AddRow("Column widths", "75 except " + (string.Join(", ", widths) is { Length: > 0 } w ? w : "(none)"));
@@ -946,7 +946,7 @@ sealed class JsonCommand : Command<JsonSettings>
                 passwordHash = state.PasswordHash,
                 standardFont = state.StandardFont,
                 standardFontSize = state.StandardFontSize,
-                columnWidths = Enumerable.Range(0, ExcelSheetState.ColumnCount).Where(i => state.GetColumnWidth(i) != 75)
+                columnWidths = Enumerable.Range(0, ExcelCellGrid.MaxColumns).Where(i => state.GetColumnWidth(i) != 75)
                     .ToDictionary(i => ExcelCellAddress.ColumnName(i), i => (int)state.GetColumnWidth(i)),
             },
             numberFormats = document.NumberFormats.Select(f => new { text = f.ToText(), bytes = Convert.ToHexString(f.Descriptor) + " " + Convert.ToHexString(f.Body) }),

@@ -7,7 +7,7 @@ namespace MacExcelReader;
 /// </summary>
 /// <param name="First">The top-left cell.</param>
 /// <param name="Last">The bottom-right cell.</param>
-public readonly record struct ExcelRange(ExcelCellAddress First, ExcelCellAddress Last)
+public readonly record struct ExcelRange(ExcelCellAddress First, ExcelCellAddress Last) : ISpanFormattable
 {
     /// <summary>
     /// Creates a range from its first and last row and column, zero-based.
@@ -80,7 +80,42 @@ public readonly record struct ExcelRange(ExcelCellAddress First, ExcelCellAddres
     }
 
     /// <summary>Gets the range in A1 notation: <c>B2:C5</c>, or <c>B2</c> for one cell.</summary>
-    public override string ToString() => First == Last ? First.ToString() : $"{First}:{Last}";
+    public override string ToString()
+    {
+        Span<char> buffer = stackalloc char[48];
+        return TryFormat(buffer, out int written) ? new string(buffer[..written]) : string.Empty;
+    }
+
+    /// <summary>Formats the range in A1 notation; the format and provider are not used.</summary>
+    public string ToString(string? format, IFormatProvider? formatProvider) => ToString();
+
+    /// <summary>
+    /// Writes the range in A1 notation into <paramref name="destination"/> without allocating; the format and
+    /// provider are not used.
+    /// </summary>
+    public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider? provider = null)
+    {
+        charsWritten = 0;
+        if (!First.TryFormat(destination, out int first))
+        {
+            return false;
+        }
+
+        if (First == Last)
+        {
+            charsWritten = first;
+            return true;
+        }
+
+        if (first >= destination.Length || !Last.TryFormat(destination[(first + 1)..], out int last))
+        {
+            return false;
+        }
+
+        destination[first] = ':';
+        charsWritten = first + 1 + last;
+        return true;
+    }
 
     // Checks that the range fits what a file stores for a range: a row word and a column byte each.
     internal void ValidateStorable(string parameterName)

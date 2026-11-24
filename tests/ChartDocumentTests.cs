@@ -134,7 +134,7 @@ public class ChartDocumentTests
     public void ChartDocument_PreservesOptionalCollectionsAndStreams()
     {
         var document = ChartDocument.Create(ChartType.ColumnOrBar);
-        document.CodeSegment = [1, 2, 3];
+        document.CodeSegment = new byte[] { 1, 2, 3 };
         document.PageSetup = Enumerable.Range(0, 664).Select(i => (byte)i).ToArray();
         document.Charts.Insert(0, Chart.Create(ChartType.Line));
         document.MainChart.SeriesWords.AddRange([10, 20]);
@@ -152,7 +152,7 @@ public class ChartDocumentTests
             document.Save(path);
             var reread = ChartDocument.Load(path);
             Assert.NotNull(reread.OverlayChart);
-            Assert.Equal([1, 2, 3], reread.CodeSegment);
+            Assert.Equal([1, 2, 3], reread.CodeSegment.ToArray());
             Assert.Equal(document.PageSetup, reread.PageSetup);
             Assert.Equal([10, 20], reread.MainChart.SeriesWords);
             Assert.Single(reread.MainChart.PointFormats);

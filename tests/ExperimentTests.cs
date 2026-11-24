@@ -881,7 +881,7 @@ public class ExperimentTests
         var document = Load(name);
         var d5 = new ExcelCellAddress(4, 3);
         var names = document.Names.ToDictionary(n => n.Name);
-        Assert.Equal([0x2C, 0xFF, 0xFD, 0xFE], names["Up3"].Definition);
+        Assert.Equal([0x2C, 0xFF, 0xFD, 0xFE], names["Up3"].Definition.ToArray());
         Assert.Equal("B2", names["Up3"].GetDefinitionText(document, d5));
         Assert.Equal("IU16382", names["Up3"].GetDefinitionText(document));
         Assert.Equal("B2:B3", names["UpArea"].GetDefinitionText(document, d5));

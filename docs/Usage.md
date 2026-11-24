@@ -149,8 +149,9 @@ double serial = ExcelValueFormatter.ToSerial(DateTime.Today);
 ```
 
 Each has a `Try` form that writes into a span instead of returning a string, and allocates nothing:
-`ExcelValueFormatter.TryFormatCell` and `TryFormat`, `ExcelNumberFormat.TryFormat`, `ExcelValue.TryFormat`
-(`ExcelValue` is `ISpanFormattable`) and `ExcelFormula.TryFormatText`.
+`ExcelValueFormatter.TryFormatCell` and `TryFormat`, `ExcelNumberFormat.TryFormat`, `ExcelValue.TryFormat`,
+`ExcelFormula.TryFormatText` and `ExcelDefinedName.TryFormatDefinitionText`. `ExcelValue`, `ExcelCellAddress` and
+`ExcelRange` are `ISpanFormattable`, so interpolating them into a span allocates nothing either.
 
 ```csharp
 Span<char> buffer = stackalloc char[512];
@@ -429,6 +430,10 @@ Reading is lazy:
   read its value. Numbers are read straight from the buffer each time.
 - **`NonEmptyCells`** scans the cell table without creating anything.
 - **Saving** copies untouched cells byte-for-byte instead of re-encoding them.
+- **Saving to a file or stream** (`Save`, `Write`, `ExportSylk`) builds the bytes in a buffer rented from the shared
+  pool, so only `ToArray` allocates the file's size.
+- The **embedded code segments** (`CodeSegment1`, `CodeSegment2`) and **name definitions**
+  (`ExcelDefinedName.Definition`) are `ReadOnlyMemory<byte>` over the file's bytes rather than copies.
 
 To get the most out of it: walk `NonEmptyCells` and read `Value` or `TryGetNumber` from the `ExcelCellRef` rather
 than calling `GetCell()`, and use `Read(bytes, copyData: false)` when you own the buffer. See [the README](../README.md#performance) for

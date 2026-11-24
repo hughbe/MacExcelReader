@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Buffers.Binary;
 using MacExcelReader.Internal;
 
@@ -61,7 +62,7 @@ public sealed class ExcelCellGrid
             ArgumentOutOfRangeException.ThrowIfNegative(column);
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(row, MaxRows);
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(column, MaxColumns);
-            EnsureSize(row + 1, column + 1);
+            Grow(row + 1, column + 1);
             return GetCell(row, column);
         }
     }
@@ -300,14 +301,21 @@ public sealed class ExcelCellGrid
     /// <summary>
     /// Grows the grid to at least the given size. The grid never shrinks.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The size is negative or larger than the sheet.</exception>
     public void EnsureSize(int rows, int columns)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(rows);
         ArgumentOutOfRangeException.ThrowIfNegative(columns);
-        // The table can hold one row and column past the sheet's last: the blank margin Excel keeps after the last
-        // row and column in use, even after row 16384 (spec §6.1).
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(rows, MaxRows + 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(columns, MaxColumns + 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(rows, MaxRows);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(columns, MaxColumns);
+        Grow(rows, columns);
+    }
+
+    // Grows the table, which can hold one row and column past the sheet's last: the blank margin Excel keeps after
+    // the last row and column in use, even after row 16384 (spec §6.1).
+    internal void Grow(int rows, int columns)
+    {
+        Debug.Assert(rows <= MaxRows + 1 && columns <= MaxColumns + 1);
         if (columns > ColumnCount)
         {
             for (int r = 0; r < _rowCount; r++)
