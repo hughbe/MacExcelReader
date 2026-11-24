@@ -131,4 +131,24 @@ public class SpanFormattingTests
         Assert.Contains(document.Names, n => n.Definition.Length > 0);
         Assert.Equal(bytes, document.ToArray());
     }
+
+    [Fact]
+    public void CopyOnWrite_NeverChangesTheCallersBytes()
+    {
+        // With copyData: false the document reads from the caller's array, so changes must go to copies.
+        var bytes = Sample("DB.FORM");
+        var original = (byte[])bytes.Clone();
+        var document = ExcelDocument.Read(bytes, copyData: false);
+        document.State.MaxIterations = 7;
+        document.State.MaxChange = 0.5;
+        var formula = document.Cells.NonEmptyCells.First(c => c.Type is ExcelCellType.NumericFormula).GetCell().Formula!;
+        formula.SetResult(12345);
+        document.Names[0].Definition = ExcelFormula.Parse("=1").Expression.ToArray();
+        _ = document.ToArray();
+        Assert.Equal(original, bytes);
+
+        var reread = ExcelDocument.Read(document.ToArray());
+        Assert.Equal(7, reread.State.MaxIterations);
+        Assert.Equal(0.5, reread.State.MaxChange);
+    }
 }

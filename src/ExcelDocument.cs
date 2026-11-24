@@ -313,7 +313,7 @@ public sealed class ExcelDocument
         int dataOffset = reader.ReadUInt16();
         reader.Position = dataOffset;
         ushort functionCount = reader.ReadUInt16();
-        var document = new ExcelDocument(new ExcelSheetState(reader.ReadBytes(ExcelSheetState.Size)))
+        var document = new ExcelDocument(ExcelSheetState.Over(reader.ReadMemory(ExcelSheetState.Size)))
         {
             Signature = signature,
             Version = (ExcelFormatVersion)version,

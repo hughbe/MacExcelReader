@@ -15,10 +15,17 @@ public sealed class ExcelFormula
 {
     private const int ExpressionOffset = 15;
 
-    private readonly byte[] _record;
+    // The record: a slice of the file for a formula read from one, until SetResult or renumbering its names needs a
+    // copy of its own.
+    private readonly ReadOnlyMemory<byte> _source;
+    private byte[]? _owned;
+
+    private ReadOnlySpan<byte> Record => _owned ?? _source.Span;
+
+    private Span<byte> Writable => _owned ??= _source.ToArray();
     private readonly int _fixupsOffset;
 
-    // Offset of a text result still undecoded in _record, or -1.
+    // Offset of a text result still undecoded in the record, or -1.
     private int _rawTextOffset = -1;
     private string? _text;
 
@@ -38,46 +45,47 @@ public sealed class ExcelFormula
         }
 
         _ = FormulaTokens.CountTokens(expression);
-        _record = new byte[ExpressionOffset + expression.Length + fixups.Length];
-        _record[14] = (byte)expression.Length;
-        expression.CopyTo(_record.AsSpan(ExpressionOffset));
+        var record = new byte[ExpressionOffset + expression.Length + fixups.Length];
+        record[14] = (byte)expression.Length;
+        expression.CopyTo(record.AsSpan(ExpressionOffset));
         _fixupsOffset = ExpressionOffset + expression.Length;
-        fixups.CopyTo(_record.AsSpan(_fixupsOffset));
+        fixups.CopyTo(record.AsSpan(_fixupsOffset));
+        _owned = record;
     }
 
-    private ExcelFormula(byte[] record, int fixupsOffset, int rawTextOffset)
+    private ExcelFormula(ReadOnlyMemory<byte> record, int fixupsOffset, int rawTextOffset)
     {
-        _record = record;
+        _source = record;
         _fixupsOffset = fixupsOffset;
         _rawTextOffset = rawTextOffset;
     }
 
     /// <summary>Gets the parsed expression.</summary>
-    public ReadOnlySpan<byte> Expression => _record.AsSpan(ExpressionOffset, _record[14]);
+    public ReadOnlySpan<byte> Expression => Record.Slice(ExpressionOffset, Record[14]);
 
     /// <summary>Gets the raw fix-up bytes that follow the expression (and the text result, if any).</summary>
-    public ReadOnlySpan<byte> Fixups => _record.AsSpan(_fixupsOffset);
+    public ReadOnlySpan<byte> Fixups => Record.Slice(_fixupsOffset);
 
     /// <summary>
     /// Gets bytes 8–10 of the record: the formula's link in Excel's list of formulas waiting to be recalculated
     /// (spec §12.3). Open puts a formula whose first two bytes here are neither <c>00 00</c> nor <c>FF FE</c> back on
     /// the list, so Excel recalculates it as soon as the file is open; formulas the library creates have zeros.
     /// </summary>
-    public ReadOnlySpan<byte> Reserved => _record.AsSpan(8, 3);
+    public ReadOnlySpan<byte> Reserved => Record.Slice(8, 3);
 
     /// <summary>Gets the column stored in the record (the writer replaces it with the cell's column).</summary>
-    public byte StoredColumn => _record[11];
+    public byte StoredColumn => Record[11];
 
     /// <summary>Gets the row word stored in the record: the row in bits 13–0 and two flags in bits 15–14.</summary>
-    public ushort StoredRowWord => BinaryPrimitives.ReadUInt16BigEndian(_record.AsSpan(12));
+    public ushort StoredRowWord => BinaryPrimitives.ReadUInt16BigEndian(Record.Slice(12));
 
     /// <summary>Gets the raw 8 value bytes.</summary>
-    public ReadOnlySpan<byte> RawValue => _record.AsSpan(0, 8);
+    public ReadOnlySpan<byte> RawValue => Record.Slice(0, 8);
 
     // Whether the current value is a number: the first two value bytes are not FF FF (spec §12.4).
-    internal bool HasNumericResult => _record[0] != 0xFF || _record[1] != 0xFF;
+    internal bool HasNumericResult => Record[0] != 0xFF || Record[1] != 0xFF;
 
-    private bool IsTextResult => _record[0] == 0xFF && _record[1] == 0xFF && _record[2] == 0;
+    private bool IsTextResult => Record[0] == 0xFF && Record[1] == 0xFF && Record[2] == 0;
 
     private string? TextResult
     {
@@ -85,7 +93,7 @@ public sealed class ExcelFormula
         {
             if (_rawTextOffset >= 0)
             {
-                _text = MacRoman.GetString(_record.AsSpan(_rawTextOffset + 1, _record[_rawTextOffset]));
+                _text = MacRoman.GetString(Record.Slice(_rawTextOffset + 1, Record[_rawTextOffset]));
                 _rawTextOffset = -1;
             }
 
@@ -113,7 +121,7 @@ public sealed class ExcelFormula
             throw new ArgumentOutOfRangeException(nameof(value), value.Number, "Excel numbers are finite: it gives #NUM! for an overflow.");
         }
 
-        value.WriteFormulaBytes(_record.AsSpan(0, 8));
+        value.WriteFormulaBytes(Writable[..8]);
         _rawTextOffset = -1;
         _text = value.Kind == ExcelValueKind.Text ? value.Text : null;
     }
@@ -429,18 +437,18 @@ public sealed class ExcelFormula
     }
 
     /// <summary>
-    /// Parses a formula record at <paramref name="offset"/>, copying it into a single array.
+    /// Parses a formula record at <paramref name="offset"/>, referring to the bytes rather than copying them.
     /// </summary>
-    internal static ExcelFormula Read(ReadOnlySpan<byte> data, int offset)
+    internal static ExcelFormula Read(byte[] data, int offset)
     {
         if ((uint)offset >= (uint)data.Length)
         {
             throw new ExcelFormatException($"A formula record at file offset {offset} lies outside the file.");
         }
 
-        var tail = data.Slice(offset);
+        var tail = data.AsSpan(offset);
         int length = MeasureRecord(tail, out int fixupsOffset, out int rawTextOffset);
-        return new ExcelFormula(tail.Slice(0, length).ToArray(), fixupsOffset, rawTextOffset);
+        return new ExcelFormula(data.AsMemory(offset, length), fixupsOffset, rawTextOffset);
     }
 
     // The text of an array formula or table whose shared record cannot be read.
@@ -449,19 +457,19 @@ public sealed class ExcelFormula
 
     // Renumbers the name tokens after the document's names are reordered (map[old] = new, 1-based).
     internal void RemapNames(ReadOnlySpan<ushort> map)
-        => FormulaTokens.RemapNames(Expression, _record.AsSpan(_fixupsOffset), map, definition: false);
+        => FormulaTokens.RemapNames(Expression, Writable[_fixupsOffset..], map, definition: false);
 
     internal void Write(BigEndianWriter writer, int row, int column)
     {
-        writer.WriteBytes(_record.AsSpan(0, 11));
+        writer.WriteBytes(Record.Slice(0, 11));
         writer.WriteByte((byte)column);
         writer.WriteUInt16((ushort)((StoredRowWord & RowWord.Flags) | RowWord.Row((ushort)row)));
-        writer.WriteBytes(_record.AsSpan(14, 1 + _record[14]));
+        writer.WriteBytes(Record.Slice(14, 1 + Record[14]));
         if (IsTextResult)
         {
             if (_rawTextOffset >= 0)
             {
-                writer.WriteBytes(_record.AsSpan(_rawTextOffset, 1 + _record[_rawTextOffset]));
+                writer.WriteBytes(Record.Slice(_rawTextOffset, 1 + Record[_rawTextOffset]));
             }
             else
             {

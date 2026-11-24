@@ -31,30 +31,47 @@ public sealed class ExcelSheetState
     private const int StandardFontSizeOffset = 0x246;
     private const int LastColumnOffset = 0x274;
 
-    private readonly byte[] _data;
+    // The block as read, a slice of the file, until a setter needs a copy of its own.
+    private ReadOnlyMemory<byte> _source;
+    private byte[]? _data;
 
     /// <summary>
-    /// Initializes a state block from raw bytes.
+    /// Initializes a state block from a copy of raw bytes.
     /// </summary>
-    public ExcelSheetState(byte[] data)
+    /// <exception cref="ArgumentException">The bytes are not <see cref="Size"/> long.</exception>
+    public ExcelSheetState(ReadOnlySpan<byte> data)
     {
-        ArgumentNullException.ThrowIfNull(data);
-        if (data.Length != Size)
-        {
-            throw new ArgumentException($"The state block must be {Size} bytes.", nameof(data));
-        }
-
-        _data = data;
+        _data = CheckSize(data).ToArray();
     }
 
+    private ExcelSheetState(ReadOnlyMemory<byte> data)
+    {
+        _source = data;
+    }
+
+    // A block that refers to the bytes, without copying them, until something changes.
+    internal static ExcelSheetState Over(ReadOnlyMemory<byte> data) => new(data);
+
+    private static ReadOnlySpan<byte> CheckSize(ReadOnlySpan<byte> data)
+        => data.Length == Size ? data : throw new ArgumentException($"The state block must be {Size} bytes.", nameof(data));
+
     /// <summary>
-    /// Gets the raw bytes of the block. Changes to the array are reflected in the document.
+    /// Gets the raw bytes of the block. The properties change them.
     /// </summary>
-    public byte[] RawData => _data;
+    public ReadOnlySpan<byte> RawData => _data ?? _source.Span;
 
-    private ushort GetWord(int offset) => BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(offset));
+    private Span<byte> Writable => _data ??= _source.ToArray();
 
-    private void SetWord(int offset, ushort value) => BinaryPrimitives.WriteUInt16BigEndian(_data.AsSpan(offset), value);
+    private ushort GetWord(int offset) => BinaryPrimitives.ReadUInt16BigEndian(RawData[offset..]);
+
+    // Setting a word to the value it has keeps the block shared with the file, as saving an unchanged sheet does.
+    private void SetWord(int offset, ushort value)
+    {
+        if (GetWord(offset) != value)
+        {
+            BinaryPrimitives.WriteUInt16BigEndian(Writable[offset..], value);
+        }
+    }
 
     /// <summary>
     /// Gets or sets the maximum number of iterations.
@@ -93,8 +110,8 @@ public sealed class ExcelSheetState
     /// </summary>
     public double MaxChange
     {
-        get => BinaryPrimitives.ReadDoubleBigEndian(_data.AsSpan(MaxChangeOffset));
-        set => BinaryPrimitives.WriteDoubleBigEndian(_data.AsSpan(MaxChangeOffset), value);
+        get => BinaryPrimitives.ReadDoubleBigEndian(RawData[MaxChangeOffset..]);
+        set => BinaryPrimitives.WriteDoubleBigEndian(Writable[MaxChangeOffset..], value);
     }
 
     /// <summary>
@@ -309,8 +326,7 @@ public sealed class ExcelSheetState
     /// </summary>
     public static ExcelSheetState CreateDefault()
     {
-        var data = new byte[Size];
-        var state = new ExcelSheetState(data);
+        var state = new ExcelSheetState(ReadOnlyMemory<byte>.Empty) { _data = new byte[Size] };
         state.MaxIterations = 100;
         state.CalculationMode = ExcelCalculationMode.Automatic;
         state.FullPrecision = true;
