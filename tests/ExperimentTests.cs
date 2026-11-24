@@ -1053,4 +1053,88 @@ public class ExperimentTests
         Assert.Equal("", saved.Series[0].Name);
         Assert.Equal("", saved.Series[0].ValuesReference);
     }
+
+    [Fact]
+    public void EdgeLastRow_KeepsAMarginRowPastTheSheet()
+    {
+        // A value in A16384 (and A1): Excel 1.00 saved a 16385-row table, its blank margin past the sheet's last row
+        // (spec §6.1). IV1, IV16384 and an array at the corner ran it out of memory and were not kept.
+        var document = Load("Edge Last Row");
+        Assert.Equal(16385, document.Cells.RowCount);
+        Assert.Equal(1, document.Cells["A16384"].Value.Number);
+        Assert.Equal(ExcelCellType.Empty, document.Cells.GetCellType(16384, 0));
+        Assert.Equal(document.ToArray(), Sample("Edge Last Row"));
+    }
+
+    [Fact]
+    public void ThreeWindows_AreSavedFrontToBack()
+    {
+        // NEW.WINDOW twice, each with its own SELECT, MOVE and SIZE: the newest window is first.
+        var document = Load("Three Windows");
+        Assert.Equal(["B10:D12", "C5", "A1"], document.Windows.Select(w => w.Selection[0].ToString()));
+        Assert.Equal([(107, 259, 269, 479), (77, 39, 209, 239), (61, 9, 335, 502)],
+            document.Windows.Select(w => ((int)w.Top, (int)w.Left, (int)w.Bottom, (int)w.Right)));
+    }
+
+    [Fact]
+    public void ChartPageSetup_HoldsMarginsHeaderAndFooter()
+    {
+        // PAGE.SETUP("Top","Bottom",0.5,0.6,0.7,0.8) on a chart (left, right, top, bottom): the record stores the
+        // margins top, bottom, left, right as decimal numbers, then the header and footer (spec §16.6).
+        var chart = ChartDocument.Read(Sample("Chart Page Setup"));
+        byte[] setup = chart.PageSetup!;
+        double[] margins = [.. Enumerable.Range(0, 4).Select(i => MicrosoftDecimal.FromBytes(setup.AsSpan(120 + 8 * i, 8)).ToDouble())];
+        Assert.Equal([0.7, 0.8, 0.5, 0.6], margins);
+        Assert.Equal("Top", MacRoman.GetString(setup.AsSpan(153, setup[152])));
+        Assert.Equal("Bottom", MacRoman.GetString(setup.AsSpan(409, setup[408])));
+    }
+
+    [Fact]
+    public void Workspace_ListsEveryWindowOfEachDocument()
+    {
+        // Excel 1.00 quit with Driver, a chart, a sheet with three windows and another sheet open.
+        var workspace = ExcelWorkspace.Read(Sample("Resume Excel 3"));
+        Assert.Equal(6, workspace.Windows.Count);
+        Assert.Equal(3, workspace.Windows.Count(w => w.DocumentName.EndsWith("Windows saved", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void EdgeColumn_KeepsAMarginColumnPastTheSheet()
+    {
+        // Values in IV1 and IV2 and an array in IU3:IV4: Excel 1.00 saved a 257-column table (spec §6.1).
+        var document = Load("Edge Column");
+        Assert.Equal(257, document.Cells.ColumnCount);
+        Assert.Equal(2, document.Cells["IV2"].Value.Number);
+        Assert.True(document.Cells["IV4"].Formula!.IsArrayFormula);
+    }
+
+    [Fact]
+    public void ValueInTheLastRowOrColumn_GetsTheMarginExcelWrites()
+    {
+        // Built by the library, a sheet with values in A16384 and IV1 gets the same margin row and column.
+        var document = ExcelDocument.CreateWorksheet();
+        document.Cells["A16384"].SetNumber(1);
+        document.Cells["IV1"].SetNumber(2);
+        var reread = ExcelDocument.Read(document.ToArray());
+        Assert.Equal((16385, 257), (reread.Cells.RowCount, reread.Cells.ColumnCount));
+    }
+
+    [Fact]
+    public void ThreeWindows_Excel103SavesThemAs100Does()
+    {
+        var document = Load("Three Windows 1.03");
+        Assert.Equal(["B10:D12", "C5", "A1"], document.Windows.Select(w => w.Selection[0].ToString()));
+    }
+
+    [Fact]
+    public void ThreeWindows_Excel15KeepsEachWindowsVersion18Settings()
+    {
+        // One window frozen after SPLIT(2,1), another with DISPLAY(..., 3) (red): version 18, three 129-byte states,
+        // each with its own panes and colour (spec §13).
+        var document = Load("Three Windows 1.5");
+        Assert.Equal(ExcelFormatVersion.Version18, document.Version);
+        Assert.All(document.Windows, w => Assert.Equal(129, w.State.Length));
+        Assert.Equal([(0, 0, 2), (1, 1, 0), (0, 1, 0)], document.Windows.Select(w => ((int)w.State[121], (int)w.State[127], (int)w.State[128])));
+        Assert.Equal((1, 2), (document.Windows[1].State[123] << 8 | document.Windows[1].State[124], document.Windows[1].State[125] << 8 | document.Windows[1].State[126]));
+    }
 }
