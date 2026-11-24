@@ -15,10 +15,22 @@ public sealed class ExcelWorkspaceWindow
     public ExcelDocumentKind Kind { get; set; }
 
     /// <summary>Gets or sets the document's file name.</summary>
-    public string DocumentName { get; set; } = string.Empty;
+    public string DocumentName
+    {
+        get => _documentName;
+        set => _documentName = PascalText.Check(value, nameof(value));
+    }
+
+    private string _documentName = string.Empty;
 
     /// <summary>Gets or sets the folder holding it: a volume name, or a path of folder names, each ending in ':'.</summary>
-    public string Folder { get; set; } = string.Empty;
+    public string Folder
+    {
+        get => _folder;
+        set => _folder = PascalText.Check(value, nameof(value));
+    }
+
+    private string _folder = string.Empty;
 
     /// <summary>
     /// Gets or sets the low word of the directory ID of the document's folder, which Excel writes only on a system
@@ -126,6 +138,7 @@ public sealed class ExcelWorkspace
     /// </summary>
     public IReadOnlyList<Charts.ChartType> PreferredChartTypes =>
         PreferredChartOffsets
+            .Where(offset => offset + 4 <= PreferredChartFormat.Length)
             .Select(offset => (Charts.ChartType)BinaryPrimitives.ReadUInt16BigEndian(PreferredChartFormat.AsSpan(offset + 2)))
             .ToList();
 
@@ -197,6 +210,37 @@ public sealed class ExcelWorkspace
     /// </summary>
     public static async Task<ExcelWorkspace> LoadAsync(string path, CancellationToken cancellationToken = default)
         => Read(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>Writes the workspace to a file (Finder type XLIN, creator XCEL).</summary>
+    public void Save(string path) => File.WriteAllBytes(path, ToArray());
+
+    /// <summary>Writes the workspace to a file asynchronously.</summary>
+    public Task SaveAsync(string path, CancellationToken cancellationToken = default)
+        => File.WriteAllBytesAsync(path, ToArray(), cancellationToken);
+
+    /// <summary>Reads a workspace from its bytes. The bytes are copied.</summary>
+    public static ExcelWorkspace Read(ReadOnlySpan<byte> data) => Read(data.ToArray());
+
+    /// <summary>Reads a workspace from a stream, from its current position to its end.</summary>
+    public static ExcelWorkspace Read(Stream stream) => Read(StreamBytes.ReadToEnd(stream));
+
+    /// <summary>Reads a workspace from a stream asynchronously, from its current position to its end.</summary>
+    public static async Task<ExcelWorkspace> ReadAsync(Stream stream, CancellationToken cancellationToken = default)
+        => Read(await StreamBytes.ReadToEndAsync(stream, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>Writes a workspace to a stream.</summary>
+    public void Write(Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        stream.Write(ToArray());
+    }
+
+    /// <summary>Writes a workspace to a stream asynchronously.</summary>
+    public async Task WriteAsync(Stream stream, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        await stream.WriteAsync(ToArray(), cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>Serialises the workspace.</summary>
     public byte[] ToArray()

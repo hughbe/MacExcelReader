@@ -52,10 +52,15 @@ public sealed class ExcelCellGrid
     /// </summary>
     /// <param name="row">The zero-based row (0–16383).</param>
     /// <param name="column">The zero-based column (0–255).</param>
+    /// <exception cref="ArgumentOutOfRangeException">The row or column is outside the sheet.</exception>
     public ExcelCell this[int row, int column]
     {
         get
         {
+            ArgumentOutOfRangeException.ThrowIfNegative(row);
+            ArgumentOutOfRangeException.ThrowIfNegative(column);
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(row, MaxRows);
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(column, MaxColumns);
             EnsureSize(row + 1, column + 1);
             return GetCell(row, column);
         }
@@ -231,7 +236,7 @@ public sealed class ExcelCellGrid
         if (cell is not null)
         {
             word0 = cell.Word0;
-            word1 = cell.Word1;
+            word1 = cell.TableWord1;
             word2 = cell.Word2;
         }
         else if (IsSourcePosition(row, column))

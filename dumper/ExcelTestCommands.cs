@@ -475,7 +475,7 @@ sealed class CheckCommand : Command<CheckSettings>
     // to change: formula results (it recalculates), windows, the code signature and the table's size.
     private static int CompareJson(object ours, object excel, bool all)
     {
-        var options = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        var options = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
         var a = JsonSerializer.SerializeToNode(ours, options)!;
         var b = JsonSerializer.SerializeToNode(excel, options)!;
         var differences = new List<string>();

@@ -138,6 +138,41 @@ public readonly struct ExcelCellRef
     }
 
     /// <summary>
+    /// Copies the text of a text cell into <paramref name="destination"/> without allocating a string. Text is at
+    /// most 255 characters, so a 255-character buffer always has room.
+    /// </summary>
+    /// <returns>False if the cell is not a text cell or the text does not fit.</returns>
+    public bool TryGetText(Span<char> destination, out int charsWritten)
+    {
+        charsWritten = 0;
+        if (Type != ExcelCellType.Text)
+        {
+            return false;
+        }
+
+        if (_grid.TryGetRawData(Row, Column, out var data) && data.Length >= 1 + data[0])
+        {
+            var bytes = data.Slice(1, data[0]);
+            if (bytes.Length > destination.Length)
+            {
+                return false;
+            }
+
+            charsWritten = MacRoman.GetChars(bytes, destination);
+            return true;
+        }
+
+        string text = GetCell().TextValue;
+        if (!text.AsSpan().TryCopyTo(destination))
+        {
+            return false;
+        }
+
+        charsWritten = text.Length;
+        return true;
+    }
+
+    /// <summary>
     /// Gets the full <see cref="ExcelCell"/>, creating it if needed.
     /// </summary>
     public ExcelCell GetCell() => _grid.Find(Row, Column)!;

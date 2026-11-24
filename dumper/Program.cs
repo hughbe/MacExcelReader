@@ -659,6 +659,10 @@ sealed class DumpCommand : Command<FileSettings>
         }
 
         AnsiConsole.Write(names);
+        if (!document.NamesAreSorted)
+        {
+            AnsiConsole.MarkupLine("[yellow]The names are not in Excel's order (spec §11): Excel gives #NAME? for some of them typed in a formula.[/]");
+        }
     }
 }
 
@@ -871,7 +875,7 @@ sealed class JsonCommand : Command<JsonSettings>
 
     public override int Execute(CommandContext context, JsonSettings settings, CancellationToken cancellationToken)
     {
-        var options = new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        var options = new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
         object model = Program.IsChart(settings.Input) ? ChartModel(ChartDocument.Load(settings.Input)) : SheetModel(ExcelDocument.Load(settings.Input), settings.Empty);
         string json = JsonSerializer.Serialize(model, options);
         if (settings.Output is null)

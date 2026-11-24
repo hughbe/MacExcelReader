@@ -144,3 +144,27 @@ Not a bug, but it looks like one. It was read from Excel 1.5's Save code, and th
 Save still writes a call with only the old minimum number of arguments in the fixed-count form (`0x21`), so
 older releases can read it. A pre-release 1.5 build in the samples lacks this and writes `FORMULA(A1)` as `42
 01 39`. See §2.3 and §15.4 of the specification.
+
+## Names out of order break typed formulas (Excel 1.00)
+
+Seen in Excel 1.00 under Mini vMac, November 2026 (`Names Unsorted`).
+
+Excel looks a typed name up by searching its alphabetical name table (§11) and does not check that a file's names
+are in order. With `Zeta` and `Alpha` written after the built-in names, `=Alpha*10` gave `#NAME?` and added a
+second, undefined `Alpha` to the table, while formulas already holding `Alpha`'s index kept working. The library
+sorts the names, and renumbers the formulas, whenever it saves names that changed.
+
+## Large and small constants become text (Excel 1.00)
+
+Seen in Excel 1.00 under Mini vMac, November 2026 (`Constant Range`, `Constant Edges`).
+
+Excel takes a number constant only from 1E-307 to below 1E+306 (§15.4), well inside a double's range. A formula
+with a constant outside it is refused without a message when entered with FORMULA, and the constant typed on its
+own (`1E306`, `1E-308`) becomes text.
+
+## NaN shows as a large negative number (Excel 1.00)
+
+Seen in Excel 1.00 under Mini vMac, November 2026 (`NaN Cells`, `NaN Wide`).
+
+Excel never makes a NaN, but a file can hold one. Its decimal conversion reads the exponent as a number, so a
+NaN shows as `-2.6965397022935E+308` whatever its sign, and infinity as `1.7976931348623E+308` (§12.1).

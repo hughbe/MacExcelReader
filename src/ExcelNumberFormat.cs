@@ -112,9 +112,9 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
 
             for (int s = 0; s < SectionCount; s++)
             {
-                foreach (var token in Tokenize(GetSection((ExcelNumberFormatSection)s)))
+                foreach (var token in Tokens((ExcelNumberFormatSection)s))
                 {
-                    if (token.Code is 0x23 or 0x24 || (token.Code is 0x03 or 0x1C && token.Operands.Length == 3 && (sbyte)token.Operands[2] < token.Operands[1]))
+                    if (token.Code is 0x23 or 0x24 || (token.Code is 0x03 or 0x1C && token.Operands.Length == 3 && HeaderExtra(token.Operands) < 0))
                     {
                         return true;
                     }
@@ -128,6 +128,38 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     /// <summary>Gets the number of sections: 3, or 4 with Excel 1.5's text section.</summary>
     public int SectionCount => Descriptor.Length == 9 ? 4 : 3;
 
+    /// <summary>
+    /// Gets the format in the form a file of the other format version stores (spec §7): with Excel 1.5's text slot
+    /// for version 18, where a format without a text section gets General (<c>01</c>) there, or the first three slots
+    /// for version 17, as Excel 1.5's Save keeps them.
+    /// </summary>
+    internal ExcelNumberFormat ForSlotCount(int slots)
+    {
+        if (slots == SectionCount)
+        {
+            return this;
+        }
+
+        if (slots == 3)
+        {
+            byte[] three = [Descriptor[0], Descriptor[1], Descriptor[2], Descriptor[4], Descriptor[5], Descriptor[6], Descriptor[8]];
+            int length = 0;
+            for (int i = 0; i < 3; i++)
+            {
+                length = Math.Max(length, three[i] + three[3 + i]);
+            }
+
+            return new ExcelNumberFormat(three, Body.AsSpan(0, length).ToArray());
+        }
+
+        // A positive section that is only General doubles as the text section; otherwise General is appended.
+        var positive = GetSection(ExcelNumberFormatSection.Positive);
+        bool shared = positive.Length == 1 && positive[0] == 0x01;
+        byte textOffset = shared ? Descriptor[2] : checked((byte)Body.Length);
+        byte[] four = [Descriptor[0], Descriptor[1], Descriptor[2], textOffset, Descriptor[3], Descriptor[4], Descriptor[5], 1, Descriptor[6]];
+        return new ExcelNumberFormat(four, shared ? Body : [.. Body, 0x01]);
+    }
+
     /// <summary>Gets whether the format has a single section: every slot is the same bytes at offset 0.</summary>
     public bool IsSingleSection => Descriptor[^1] != 0;
 
@@ -139,7 +171,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     {
         get
         {
-            foreach (var token in Tokenize(GetSection(ExcelNumberFormatSection.Positive)))
+            foreach (var token in Tokens(ExcelNumberFormatSection.Positive))
             {
                 if (token.Code is (>= 0x0B and <= 0x12) or 0x19 or 0x1A)
                 {
@@ -254,9 +286,17 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             return string.Empty;
         }
 
-        if (double.IsNaN(value) || double.IsInfinity(value))
+        // Excel never makes an infinity or a NaN, but one in a file shows in General as the number its decimal
+        // conversion makes of it (spec §12.1), and as a row of # in any other format (`NaN Wide`, Excel 1.00).
+        if (!double.IsFinite(value))
         {
-            return ExcelValueFormatter.FormatGeneral(value);
+            var positive = GetSection(ExcelNumberFormatSection.Positive);
+            if (positive.Length == 1 && positive[0] == 0x01)
+            {
+                return Resolve(GeneralMark.ToString(), value, width, measure);
+            }
+
+            return width is { } room ? Hashes(room, measure) : ExcelValueFormatter.FormatGeneral(value);
         }
 
         // Excel picks the section by sign, and uses the zero section for a value that rounds to zero in the
@@ -266,13 +306,13 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             : value < 0 ? ExcelNumberFormatSection.Positive
             : ExcelNumberFormatSection.Zero;
         double magnitude = Math.Abs(value);
-        if (section != ExcelNumberFormatSection.Zero && RoundsToZero(GetSection(section), magnitude))
+        if (section != ExcelNumberFormatSection.Zero && RoundsToZero(Tokens(section), magnitude))
         {
             section = ExcelNumberFormatSection.Zero;
             magnitude = 0;
         }
 
-        string? shown = FormatSection(GetSection(section), magnitude);
+        string? shown = FormatSection(Tokens(section), magnitude);
         if (shown is null)
         {
             // A date Excel cannot show: TEXT gives #VALUE!, and a cell a row of #.
@@ -342,9 +382,8 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     internal static string Hashes(int room, MacExcelReader.Internal.TextMeasure measure)
         => new('#', Math.Max(0, room / measure.HashWidth));
 
-    private static bool RoundsToZero(ReadOnlySpan<byte> section, double magnitude)
+    private static bool RoundsToZero(List<Token> tokens, double magnitude)
     {
-        var tokens = Tokenize(section);
         int header = tokens.FindIndex(t => t.Code == 0x03);
         if (header < 0 || tokens.Exists(IsDateToken))
         {
@@ -352,10 +391,15 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         }
 
         byte[] h = tokens[header].Operands;
-        int extra = (sbyte)h[2] - h[1];
+        int extra = HeaderExtra(h);
         double scaled = magnitude * Math.Pow(100, extra > 0 ? extra / 2 : 0) / Math.Pow(1000, extra < 0 ? -extra / 3 : 0);
-        return Math.Round(scaled, h[1], MidpointRounding.AwayFromZero) == 0;
+        return RoundToDecimals(scaled, h[1]) == 0;
     }
+
+    // A number header's c − b: two per % sign, or (Excel 1.5) minus three per trailing comma. Both are bytes and
+    // Excel works the difference out in 8 bits, so a format with 128 decimal places or more (b = c = 0x80) has
+    // none of either: Excel 1.00 compiles and shows it as plain decimals (`Many Decimals`).
+    private static int HeaderExtra(ReadOnlySpan<byte> header) => (sbyte)(byte)(header[2] - header[1]);
 
     private static bool IsDateToken(Token token) => token.Code is (>= 0x0B and <= 0x1A) or 0x1F or 0x20 or 0x21;
 
@@ -372,7 +416,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         }
 
         var text = new StringBuilder();
-        foreach (var token in Tokenize(GetSection(ExcelNumberFormatSection.Text)))
+        foreach (var token in Tokens(ExcelNumberFormatSection.Text))
         {
             if (token.Code == 0x23)
             {
@@ -407,6 +451,22 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
 
     private readonly record struct Token(byte Code, byte[] Operands);
 
+    // The tokens of each section, worked out on first use: formatting a value would otherwise tokenise its format
+    // every time. A format's bytes are treated as fixed once it is made (a `with` gets a cache of its own).
+    private List<Token>?[]? _tokens;
+
+    private ExcelNumberFormat(ExcelNumberFormat original)
+    {
+        Descriptor = original.Descriptor;
+        Body = original.Body;
+    }
+
+    private List<Token> Tokens(ExcelNumberFormatSection section)
+    {
+        var cache = _tokens ??= new List<Token>?[4];
+        return cache[(int)section] ??= Tokenize(GetSection(section));
+    }
+
     private static List<Token> Tokenize(ReadOnlySpan<byte> section)
     {
         // A section has at most one token per byte, so one array of that size never grows.
@@ -423,7 +483,11 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
                 0x21 => i + 1 < section.Length ? 2 + section[i] + section[i + 1] : 0,
                 _ => 0,
             };
-            length = Math.Min(length, section.Length - i);
+            if (length > section.Length - i)
+            {
+                throw new ExcelFormatException($"Number-format token 0x{code:X2} runs past the end of its section.");
+            }
+
             tokens.Add(new Token(code, section.Slice(i, length).ToArray()));
             i += length;
         }
@@ -470,7 +534,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
                 case 0x03 or 0x1C when op.Length == 3:
                     integerLeft = op[0];
                     digitsLeft = op[0] + op[1];
-                    int extra = (sbyte)op[2] - op[1];
+                    int extra = HeaderExtra(op);
                     percents = extra > 0 ? extra / 2 : 0;
                     scale = extra < 0 ? -extra / 3 : 0;
                     thousands = false;
@@ -570,9 +634,8 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     }
 
     // Formats a non-negative magnitude with one section, or returns null for a date Excel cannot show.
-    private static string? FormatSection(ReadOnlySpan<byte> section, double magnitude)
+    private static string? FormatSection(List<Token> tokens, double magnitude)
     {
-        var tokens = Tokenize(section);
         if (tokens.Count == 0)
         {
             return string.Empty;
@@ -610,7 +673,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         byte[] h = tokens[header].Operands;
         bool scientific = tokens[header].Code == 0x1C;
         int decimals = h[1];
-        int extra = (sbyte)h[2] - h[1];
+        int extra = HeaderExtra(h);
         double value = magnitude * Math.Pow(100, extra > 0 ? extra / 2 : 0) / Math.Pow(1000, extra < 0 ? -extra / 3 : 0);
         bool thousands = tokens.Exists(t => t.Code == 0x07);
 
@@ -632,7 +695,11 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             else if (token.Code is 0x04 or 0x06 && token.Operands.Length == 1)
             {
                 var list = part == 0 ? integerPlaces : part == 1 ? fractionPlaces : exponentPlaces;
-                list.AddRange(Enumerable.Repeat(token.Code == 0x04 ? '#' : '0', token.Operands[0]));
+                char place = token.Code == 0x04 ? '#' : '0';
+                for (int n = 0; n < token.Operands[0]; n++)
+                {
+                    list.Add(place);
+                }
             }
         }
 
@@ -641,7 +708,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         {
             int mantissaDigits = Math.Max(1, integerPlaces.Count);
             exponent = (int)Math.Floor(Math.Log10(value)) - (mantissaDigits - 1);
-            double mantissa = Math.Round(value / Math.Pow(10, exponent), decimals, MidpointRounding.AwayFromZero);
+            double mantissa = RoundToDecimals(value / Math.Pow(10, exponent), decimals);
             if (mantissa >= Math.Pow(10, mantissaDigits))
             {
                 exponent++;
@@ -650,7 +717,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             value /= Math.Pow(10, exponent);
         }
 
-        string fixedText = Math.Round(value, decimals, MidpointRounding.AwayFromZero).ToString("F" + decimals.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+        string fixedText = RoundToDecimals(value, decimals).ToString("F" + decimals.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
         int point = fixedText.IndexOf('.');
         string integerDigits = (point < 0 ? fixedText : fixedText[..point]).TrimStart('0');
         string fractionDigits = point < 0 ? string.Empty : fixedText[(point + 1)..];
@@ -699,6 +766,24 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         }
 
         return text.ToString();
+    }
+
+    // Rounds half away from zero to a number of decimal places. Math.Round takes at most 15; a format can have up to
+    // 255, so beyond 15 the value is rounded as a decimal (28 places), and past that it already has fewer significant
+    // digits than the places shown.
+    private static double RoundToDecimals(double value, int decimals)
+    {
+        if (decimals <= 15)
+        {
+            return Math.Round(value, decimals, MidpointRounding.AwayFromZero);
+        }
+
+        if (Math.Abs(value) < 1e15)
+        {
+            return (double)Math.Round((decimal)value, Math.Min(decimals, 28), MidpointRounding.AwayFromZero);
+        }
+
+        return value;
     }
 
     // What each integer placeholder shows, left to right: a 0 shows a digit or 0, a # a digit or nothing, digits

@@ -58,7 +58,11 @@ public sealed class ExcelFormula
     /// <summary>Gets the raw fix-up bytes that follow the expression (and the text result, if any).</summary>
     public ReadOnlySpan<byte> Fixups => _record.AsSpan(_fixupsOffset);
 
-    /// <summary>Gets bytes 8–10 of the record: two bytes left over from memory and a recalculation scratch byte.</summary>
+    /// <summary>
+    /// Gets bytes 8–10 of the record: the formula's link in Excel's list of formulas waiting to be recalculated
+    /// (spec §12.3). Open puts a formula whose first two bytes here are neither <c>00 00</c> nor <c>FF FE</c> back on
+    /// the list, so Excel recalculates it as soon as the file is open; formulas the library creates have zeros.
+    /// </summary>
     public ReadOnlySpan<byte> Reserved => _record.AsSpan(8, 3);
 
     /// <summary>Gets the column stored in the record (the writer replaces it with the cell's column).</summary>
@@ -69,6 +73,9 @@ public sealed class ExcelFormula
 
     /// <summary>Gets the raw 8 value bytes.</summary>
     public ReadOnlySpan<byte> RawValue => _record.AsSpan(0, 8);
+
+    // Whether the current value is a number: the first two value bytes are not FF FF (spec §12.4).
+    internal bool HasNumericResult => _record[0] != 0xFF || _record[1] != 0xFF;
 
     private bool IsTextResult => _record[0] == 0xFF && _record[1] == 0xFF && _record[2] == 0;
 
@@ -93,9 +100,19 @@ public sealed class ExcelFormula
     /// Sets the current value: a number, text, TRUE or FALSE, or an error (<see cref="ExcelValue.FromError"/>).
     /// The library does not calculate, so this is the value Excel shows until it recalculates.
     /// </summary>
-    /// <exception cref="ArgumentException">The value is empty, which a formula cannot have.</exception>
+    /// <exception cref="ArgumentException">The value is empty, which a formula cannot have, text longer than 255
+    /// characters, or a number that is infinite or not a number.</exception>
     public void SetResult(ExcelValue value)
     {
+        if (value.Kind == ExcelValueKind.Text)
+        {
+            PascalText.Check(value.Text, nameof(value));
+        }
+        else if (value.Kind == ExcelValueKind.Number && !double.IsFinite(value.Number))
+        {
+            throw new ArgumentOutOfRangeException(nameof(value), value.Number, "Excel numbers are finite: it gives #NUM! for an overflow.");
+        }
+
         value.WriteFormulaBytes(_record.AsSpan(0, 8));
         _rawTextOffset = -1;
         _text = value.Kind == ExcelValueKind.Text ? value.Text : null;
@@ -285,7 +302,7 @@ public sealed class ExcelFormula
         }
 
         string text = address.ToString()!;
-        int digits = text.IndexOfAny("0123456789".ToCharArray());
+        int digits = text.AsSpan().IndexOfAnyInRange('0', '9');
         return "$" + text[..digits] + "$" + text[digits..];
     }
 
@@ -401,6 +418,10 @@ public sealed class ExcelFormula
     // The text of an array formula or table whose shared record cannot be read.
     internal const string ArrayFormulaPlaceholder = "{array formula}";
     internal const string TablePlaceholder = "{=TABLE()}";
+
+    // Renumbers the name tokens after the document's names are reordered (map[old] = new, 1-based).
+    internal void RemapNames(ReadOnlySpan<ushort> map)
+        => FormulaTokens.RemapNames(Expression, _record.AsSpan(_fixupsOffset), map, definition: false);
 
     internal void Write(BigEndianWriter writer, int row, int column)
     {

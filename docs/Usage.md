@@ -50,7 +50,8 @@ var later = await ExcelDocument.LoadAsync("Expenses");   // ReadAsync, SaveAsync
 `Read(byte[])` copies the bytes so you can reuse the array. Pass `copyData: false` to skip the copy; the
 document reads cells from the array lazily, so you must not change it afterwards.
 
-`document.Kind` is `Worksheet` or `MacroSheet`.
+`document.Kind` is `Worksheet` or `MacroSheet`. `ChartDocument` and `ExcelWorkspace` have the same `Load`, `Read`
+(bytes, span or stream), `ReadAsync`, `Save`, `Write` and `WriteAsync` methods.
 
 ## Reading cells
 
@@ -121,7 +122,16 @@ foreach (var c in document.Cells.NonEmptyCells)
 
 int count = document.Cells.CountNonEmpty();
 ExcelCellType type = document.Cells.GetCellType(5, 2);   // without creating the cell
+
+Span<char> buffer = stackalloc char[255];                // text is at most 255 characters
+foreach (var c in document.Cells.NonEmptyCells)
+{
+    if (c.TryGetText(buffer, out int length)) Use(buffer[..length]);   // text without a string
+}
 ```
+
+The indexer `document.Cells[row, column]` takes rows 0–16383 and columns 0–255 and creates the cell; `Find`
+returns null outside the grid instead.
 
 ## Displaying values
 
@@ -289,12 +299,14 @@ foreach (var name in document.Names)
 ```
 
 Name definitions are parsed expressions too; name tokens inside them refer to other names by 1-based index
-into `document.Names`. `document.ExternalDocuments` lists the other documents
+into `document.Names`. Excel keeps the names in alphabetical order, ignoring case and accents, and finds a name
+typed in a formula by searching that order, so saving sorts names that changed and renumbers the formulas and
+definitions that use them. `document.SortNames()` does it on demand. `document.ExternalDocuments` lists the other documents
 the sheet links to; each entry's `Names` are the names the sheet uses from that document.
 
 Excel 1.5 can save **version-18** files (`document.Version` is 18) when a document uses something older
 releases cannot read; the library reads and writes them, including their longer number-format and window
-records.
+records. Setting `document.Version` converts the number formats to that version's form.
 
 ## Sheet settings, protection and printing
 
@@ -415,8 +427,9 @@ benchmark numbers.
 Every problem with a file's contents is reported as `ExcelFormatException`: a wrong magic number or
 version, sections or records that run past the end of the file, unknown formula tokens, and so on. Because
 cells are decoded lazily, a damaged cell surfaces when you read it (or when you save), not from `Read`.
-Programming errors such as an out-of-range column or a text value over 255 characters throw the usual
-`ArgumentException` family. The test suite corrupts the sample files at random and checks that nothing
+Programming errors such as an out-of-range column, a text value over 255 characters or a number that is
+infinite or not a number throw the usual `ArgumentException` family, when the value is set rather than when the
+document is saved. The test suite corrupts the sample files at random and checks that nothing
 else is ever thrown.
 
 ## Inspecting files

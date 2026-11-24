@@ -66,13 +66,42 @@ public sealed class ExcelDefinedName
     }
 
     /// <summary>Gets or sets the name.</summary>
-    public string Name { get; set; }
+    public string Name
+    {
+        get => _name;
+        set => _name = string.IsNullOrEmpty(value) ? throw new ArgumentException("A name cannot be empty.", nameof(value)) : PascalText.Check(value, nameof(value));
+    }
+
+    private string _name = string.Empty;
+
+    // Whether the name and definition are still those read from the file (ExcelDocument sorts changed names on save).
+    private string? _nameAsRead;
+    private byte[]? _definitionAsRead;
+
+    internal void MarkUnchanged()
+    {
+        _nameAsRead = _name;
+        _definitionAsRead = _definition;
+    }
+
+    internal bool IsUnchanged => ReferenceEquals(_nameAsRead, _name) && ReferenceEquals(_definitionAsRead, _definition);
 
     /// <summary>
     /// Gets or sets the definition, a parsed expression whose name and external-document indices are
     /// stored inside the tokens.
     /// </summary>
-    public byte[] Definition { get; set; }
+    /// <exception cref="ArgumentException">The definition is longer than 255 bytes.</exception>
+    public byte[] Definition
+    {
+        get => _definition;
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            _definition = value.Length <= 255 ? value : throw new ArgumentException("A definition cannot be longer than 255 bytes.", nameof(value));
+        }
+    }
+
+    private byte[] _definition = [];
 
     /// <summary>Gets or sets the flags.</summary>
     public ExcelNameFlags Flags { get; set; }

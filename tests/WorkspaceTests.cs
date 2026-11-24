@@ -92,4 +92,38 @@ public class WorkspaceTests
     [Fact]
     public void NonZeroFirstWord_IsRejected()
         => Assert.Throws<ExcelFormatException>(() => ExcelWorkspace.Read([0, 1, 0, 0]));
+
+    [Fact]
+    public void PreferredChartTypes_SkipOffsetsOutsideTheData()
+    {
+        var workspace = ExcelWorkspace.Read(Sample("Resume Excel"));
+        var format = new byte[700];
+        format[657] = 2;          // two charts
+        format[652] = 0xFF;       // the first at 0xFF00, past the end
+        format[655] = 100;        // the second at 100
+        format[103] = (byte)ChartType.Line;
+        workspace.PreferredChartFormat = format;
+        Assert.Equal([ChartType.Line], workspace.PreferredChartTypes);
+    }
+
+    [Fact]
+    public void StreamsAndFiles_RoundTrip()
+    {
+        var bytes = Sample("Resume Excel");
+        var stream = new MemoryStream();
+        ExcelWorkspace.Read(bytes.AsSpan()).Write(stream);
+        Assert.Equal(bytes, stream.ToArray());
+        stream.Position = 0;
+        Assert.Equal(bytes, ExcelWorkspace.Read(stream).ToArray());
+        string path = Path.GetTempFileName();
+        try
+        {
+            ExcelWorkspace.Read(bytes).Save(path);
+            Assert.Equal(bytes, File.ReadAllBytes(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

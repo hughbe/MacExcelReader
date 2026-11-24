@@ -83,20 +83,33 @@ public static class ExcelValueFormatter
     /// </summary>
     internal static int FormatGeneral(double value, int width, Span<char> destination)
     {
-        if (double.IsNaN(value) || double.IsInfinity(value))
-        {
-            value.TryFormat(destination, out int special, default, System.Globalization.CultureInfo.InvariantCulture);
-            return special;
-        }
-
         int n = 0;
-        if (value < 0)
-        {
-            destination[n++] = '-';
-        }
-
         Span<char> buffer = stackalloc char[15];
-        int length = Num2Str(Math.Abs(value), buffer, out int exponent);
+        int length;
+        int exponent;
+        if (double.IsFinite(value))
+        {
+            if (value < 0)
+            {
+                destination[n++] = '-';
+            }
+
+            length = Num2Str(Math.Abs(value), buffer, out exponent);
+        }
+        else
+        {
+            // Excel never makes an infinity or a NaN, but shows one it finds in a file as the number its decimal
+            // conversion makes of the exponent field 0x7FF: ±1.7976931348623E+308 for ±infinity and
+            // -2.6965397022935E+308 for a NaN of either sign (Excel 1.00, `NaN Cells`).
+            if (double.IsNaN(value) || value < 0)
+            {
+                destination[n++] = '-';
+            }
+
+            (double.IsNaN(value) ? "26965397022935" : "17976931348623").CopyTo(buffer);
+            length = 14;
+            exponent = 309;
+        }
         Span<char> digits = buffer[..length];
 
         // exponent counts the digits before the point: the value is 0.digits × 10^exponent.

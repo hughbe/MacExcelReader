@@ -212,4 +212,27 @@ public class ExcelDocumentTests
         Assert.True(ExcelFunctions.TryFindNumber("sum", out int sum));
         Assert.Equal(4, sum);
     }
+
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public void EverySample_HasItsNamesInExcelsOrder(string name)
+    {
+        // Excel keeps the names sorted, ignoring case and accents (spec §11); only the experiment that wrote them out
+        // of order has names elsewhere.
+        var document = ExcelDocument.Read(File.ReadAllBytes(TestData.SampleFile(name)));
+        var before = document.Names.ToList();
+        bool unsorted = name.EndsWith("Names Unsorted", StringComparison.Ordinal);
+        Assert.Equal(!unsorted, document.NamesAreSorted);
+        document.SortNames();
+        Assert.True(document.NamesAreSorted);
+        if (unsorted)
+        {
+            Assert.NotEqual(before, document.Names);
+        }
+        else
+        {
+            Assert.Equal(before, document.Names);
+        }
+    }
+
 }

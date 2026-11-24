@@ -1151,4 +1151,160 @@ public class ExperimentTests
         Assert.Equal([(0, 0, 2), (1, 1, 0), (0, 1, 0)], document.Windows.Select(w => ((int)w.State[121], (int)w.State[127], (int)w.State[128])));
         Assert.Equal((1, 2), (document.Windows[1].State[123] << 8 | document.Windows[1].State[124], document.Windows[1].State[125] << 8 | document.Windows[1].State[126]));
     }
+
+    [Fact]
+    public void NaNCells_ExcelKeepsThemAndShowsTheExponentField()
+    {
+        // A1–A4 were written by the library as NaN, +infinity, -infinity and -NaN, with formulas on each and the
+        // sheet marked for recalculation. Excel kept the values, calculated with them as IEEE doubles, and turned
+        // them into text as its decimal conversion reads the exponent field 0x7FF (spec §12.1).
+        var document = Load("NaN Cells");
+        Assert.True(double.IsNaN(document.Cells["A1"].NumberValue));
+        Assert.Equal(double.PositiveInfinity, document.Cells["A2"].NumberValue);
+        Assert.Equal(double.NegativeInfinity, document.Cells["A3"].NumberValue);
+        Assert.Equal(
+            ["-2.6965397022935E+308", "1.7976931348623E+308", "-1.7976931348623E+308", "-2.6965397022935E+308"],
+            Enumerable.Range(1, 4).Select(r => document.Cells[$"B{r}"].Value.Text));
+        Assert.All(Enumerable.Range(1, 4), r => Assert.Equal(document.Cells[$"B{r}"].Value.Text, ExcelValueFormatter.FormatGeneral(document.Cells[$"A{r}"].NumberValue)));
+        Assert.All(Enumerable.Range(1, 4), r => Assert.True(document.Cells[$"C{r}"].Value.Boolean));       // =A1=A1
+        Assert.All(Enumerable.Range(1, 4), r => Assert.False(document.Cells[$"E{r}"].Value.Boolean));      // ISERROR
+        Assert.True(double.IsNaN(document.Cells["F1"].Value.Number));                                     // =A1+1
+        Assert.Equal(double.PositiveInfinity, document.Cells["F2"].Value.Number);
+        Assert.Equal([false, true, false, false], Enumerable.Range(1, 4).Select(r => document.Cells[$"G{r}"].Value.Boolean)); // >0
+
+        // Excel never makes such a value itself, so the library will not write one.
+        var cell = ExcelDocument.CreateWorksheet().Cells["A1"];
+        Assert.Throws<ArgumentOutOfRangeException>(() => cell.SetNumber(double.NaN));
+        Assert.Throws<ArgumentOutOfRangeException>(() => cell.SetValue(double.PositiveInfinity));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ExcelFormula.Parse("=1").SetResult(double.NegativeInfinity));
+    }
+
+    [Fact]
+    public void HugeConstants_OverflowIsNumErrorAndTooLargeConstantsAreRefused()
+    {
+        // Entered with FORMULA: =1E300*1E300 gives #NUM!, the constant 1E400 is taken as text, and =1E400 (A5) is
+        // refused. =1E308*10 (A2) was refused too.
+        var document = Load("Huge Constants");
+        Assert.Equal(ExcelError.Number, document.Cells["A3"].Value.Error);
+        Assert.Equal("=1E+300*1E+300", document.Cells["A3"].Formula!.ToText(document));
+        Assert.Equal("1E400", document.Cells["A4"].TextValue);
+        Assert.Equal(ExcelCellType.Empty, document.Cells.GetCellType(1, 0));
+        Assert.Equal(ExcelCellType.Empty, document.Cells.GetCellType(4, 0));
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=1E400"));
+    }
+
+    [Fact]
+    public void NamesUnsorted_ExcelSearchesTheNamesInOrder()
+    {
+        // The library wrote Zeta and Alpha after the built-in names, out of order. Formulas holding their indices
+        // worked, but typing =Alpha*10 or =Beta+Alpha+Zeta gave #NAME? while =Zeta*10 and =Aardvark+Zeta worked: Excel
+        // finds a typed name by searching the order (spec §11). DEFINE.NAME put Aardvark and Beta in their places, and
+        // the failed lookup added an undefined Alpha in its place; Excel left Zeta and Alpha where they were.
+        var document = Load("Names Unsorted");
+        Assert.Equal(
+            ["Aardvark", "Alpha", "Beta", "Criteria", "Database", "Print_Area", "Print_Titles", "Recorder", "Zeta", "Alpha"],
+            document.Names.Select(n => n.Name));
+        Assert.Equal((1.0, 2.0), (document.Cells["B1"].Value.Number, document.Cells["B2"].Value.Number));
+        Assert.Equal(ExcelError.Name, document.Cells["B3"].Value.Error);
+        Assert.Equal(10, document.Cells["B4"].Value.Number);
+        Assert.Equal(ExcelError.Name, document.Cells["B5"].Value.Error);
+        Assert.Equal(8, document.Cells["B6"].Value.Number);
+
+        // Saved unchanged, the names keep Excel's order; once they change, the library sorts them and renumbers the
+        // formulas that use them.
+        Assert.Equal(Sample("Names Unsorted"), document.ToArray());
+        document.Names.RemoveAt(1);   // the undefined Alpha; B3 and B5 point at it
+        document.Cells["B3"].Clear();
+        document.Cells["B5"].Clear();
+        foreach (var cell in new[] { "B1", "B2", "B4", "B6" })
+        {
+            var formula = document.Cells[cell].Formula!;
+            var words = formula.GetFixupWords().Select(w => w > 1 ? w - 1 : w).Select(w => (byte[])[(byte)(w >> 8), (byte)w]).SelectMany(b => b).ToArray();
+            document.Cells[cell].SetFormula(new ExcelFormula(formula.Expression, words));
+        }
+
+        var sorted = ExcelDocument.Read(document.ToArray());
+        Assert.Equal(["Aardvark", "Alpha", "Beta", "Criteria", "Database", "Print_Area", "Print_Titles", "Recorder", "Zeta"], sorted.Names.Select(n => n.Name));
+        Assert.Equal(["=Zeta", "=Alpha", "=Zeta*10", "=Aardvark+Zeta"], new[] { "B1", "B2", "B4", "B6" }.Select(c => sorted.Cells[c].Formula!.ToText(sorted)));
+    }
+
+    [Fact]
+    public void ManyDecimals_FormatsCompileAsTheLibraryDoesAndShowPlainDecimals()
+    {
+        // FORMAT.NUMBER gave column C formats of 15 to 200 decimal places. From 128 on, the header's b and c are 0x80
+        // or more; Excel 1.00 still shows plain decimals, and TEXT agrees (spec §7).
+        var document = Load("Many Decimals");
+        for (int row = 0; row < 10; row++)
+        {
+            int decimals = document.Cells[row, 3].IntegerValue;
+            string text = "0." + new string('0', decimals);
+            var excel = document.GetNumberFormat(document.Cells[row, 2].NumberFormat)!;
+            Assert.Equal(ExcelNumberFormat.Parse(text), excel);
+            Assert.False(excel.RequiresVersion18);
+            Assert.Equal(text, excel.ToText());
+            Assert.Equal("1." + "5".PadRight(decimals, '0'), document.Cells[row, 1].Value.Text);
+            Assert.Equal(document.Cells[row, 1].Value.Text, ExcelNumberFormat.Parse(text).Format(1.5));
+        }
+
+        Assert.Equal(ExcelFormatVersion.Version17, document.Version);
+    }
+
+    [Theory]
+    [InlineData("Constant Limits")]
+    [InlineData("Constant Range")]
+    [InlineData("Constant Edges")]
+    public void ConstantRange_ExcelTakesConstantsFrom1EMinus307ToBelow1E306(string name)
+    {
+        // Column B holds what FORMULA entered in column A. Excel 1.00 refused every formula with a constant outside
+        // 1E-307 to below 1E+306, however it was written, and took such a constant on its own as text (spec §15.4).
+        var document = Load(name);
+        int checkedRows = 0;
+        for (int row = 1; row < document.Cells.RowCount; row++)
+        {
+            if (document.Cells.Find(row, 1) is not { Type: ExcelCellType.Text } entry)
+            {
+                continue;
+            }
+
+            string text = entry.TextValue;
+            var cell = document.Cells.Find(row, 0);
+            if (text.StartsWith('='))
+            {
+                bool excelTookIt = cell?.Formula is not null;
+                bool libraryTakesIt = true;
+                try
+                {
+                    _ = ExcelFormula.Parse(text);
+                }
+                catch (ExcelFormulaSyntaxException)
+                {
+                    libraryTakesIt = false;
+                }
+
+                Assert.True(excelTookIt == libraryTakesIt, $"{text}: Excel {excelTookIt}, library {libraryTakesIt}");
+            }
+            else
+            {
+                double value = double.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+                bool inRange = value >= 1E-307 && value < 1E306;
+                Assert.Equal(inRange ? ExcelCellType.Number : ExcelCellType.Text, cell!.Type);
+            }
+
+            checkedRows++;
+        }
+
+        Assert.True(checkedRows >= 10);
+    }
+
+    [Fact]
+    public void NaNWide_GeneralShowsTheNumberAndOtherFormatsHashes()
+    {
+        // A NaN and an infinity in General, then in 0.00 and a date, in a column three times the standard width:
+        // Excel 1.00 drew -2.6965397022935E+308 and 1.7976931348623E+308, then two rows of # (read off the screen).
+        var document = Load("NaN Wide");
+        Assert.Equal("-2.6965397022935E+308", ExcelValueFormatter.FormatCell(document.Cells["A1"], document, 0));
+        Assert.Equal("1.7976931348623E+308", ExcelValueFormatter.FormatCell(document.Cells["A2"], document, 0));
+        Assert.Matches("^#+$", ExcelValueFormatter.FormatCell(document.Cells["A3"], document, 0));
+        Assert.Matches("^#+$", ExcelValueFormatter.FormatCell(document.Cells["A4"], document, 0));
+    }
 }

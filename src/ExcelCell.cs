@@ -13,16 +13,27 @@ public sealed class ExcelCell
     internal ushort Word1;
     internal ushort Word2 = 0x4000;
 
-    // The value: a boxed double, a string or an ExcelFormula; or, until first access, the file buffer
+    // The second word as written: for a formula, with the type its current value gives.
+    internal ushort TableWord1
+    {
+        get
+        {
+            _ = Type;
+            return Word1;
+        }
+    }
+
+    // The value: a string or an ExcelFormula; or, until first access, the file buffer
     // the number, text or formula record is read from at _dataOffset. Numbers are never cached, so
     // reading them does not allocate.
     private object? _payload;
     private int _dataOffset;
 
-    /// <summary>
-    /// Creates an empty, locked cell.
-    /// </summary>
-    public ExcelCell()
+    // The value of a number cell set with SetNumber, kept out of _payload so that setting it does not box.
+    private double _number;
+
+    // An empty, locked cell. Cells belong to a grid, which creates them (ExcelCellGrid's indexer).
+    internal ExcelCell()
     {
     }
 
@@ -38,7 +49,24 @@ public sealed class ExcelCell
     /// </summary>
     public ExcelCellType Type
     {
-        get => CellWords.Type(Word1);
+        get
+        {
+            // A formula's type follows its current value, which ExcelFormula.SetResult can change after the formula
+            // is set: type 5 for a number, 6 for anything else (spec §9, §12.4).
+            if (_payload is ExcelFormula formula)
+            {
+                var type = formula.HasNumericResult ? ExcelCellType.NumericFormula : ExcelCellType.Formula;
+                if (CellWords.Type(Word1) != type)
+                {
+                    Word1 = CellWords.WithType(Word1, type);
+                }
+
+                return type;
+            }
+
+            return CellWords.Type(Word1);
+        }
+
         private set => Word1 = CellWords.WithType(Word1, value);
     }
 
@@ -80,12 +108,7 @@ public sealed class ExcelCell
         ? ReadNumber()
         : throw new InvalidOperationException("The cell is not a number cell.");
 
-    private double ReadNumber() => _payload switch
-    {
-        byte[] source => ReadLazyDouble(source),
-        double value => value,
-        _ => 0,
-    };
+    private double ReadNumber() => _payload is byte[] source ? ReadLazyDouble(source) : _number;
 
     private double ReadLazyDouble(byte[] source)
     {
@@ -219,11 +242,18 @@ public sealed class ExcelCell
     /// <summary>
     /// Makes the cell a number cell.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is infinite or not a number, which Excel never
+    /// stores: a formula that overflows gives <c>#NUM!</c> (spec §12.1).</exception>
     public void SetNumber(double value)
     {
+        if (!double.IsFinite(value))
+        {
+            throw new ArgumentOutOfRangeException(nameof(value), value, "Excel numbers are finite: it gives #NUM! for an overflow.");
+        }
+
         ClearValue();
         Type = ExcelCellType.Number;
-        _payload = value;
+        _number = value;
     }
 
     /// <summary>
@@ -231,6 +261,7 @@ public sealed class ExcelCell
     /// integer form, any other number (negative ones included) as a number, and text, TRUE, FALSE or an error as
     /// themselves. The empty value clears the cell, keeping its formatting.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is an infinite or not-a-number number.</exception>
     public void SetValue(ExcelValue value)
     {
         switch (value.Kind)
@@ -286,7 +317,7 @@ public sealed class ExcelCell
         ArgumentNullException.ThrowIfNull(formula);
         ClearValue();
         _payload = formula;
-        Type = formula.Result.Kind == ExcelValueKind.Number ? ExcelCellType.NumericFormula : ExcelCellType.Formula;
+        Type = formula.HasNumericResult ? ExcelCellType.NumericFormula : ExcelCellType.Formula;
     }
 
     /// <summary>
@@ -302,6 +333,7 @@ public sealed class ExcelCell
     private void ClearValue()
     {
         _payload = null;
+        _number = 0;
         Type = ExcelCellType.Empty;
         Word0 = 0;
         Word1 &= 0x0FFF;

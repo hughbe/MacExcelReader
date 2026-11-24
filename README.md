@@ -24,7 +24,7 @@ The library targets .NET 9 and has no dependencies.
 
 ## Features
 
-- **Exact round-trips.** Every sample, the 37 documents from Microsoft's Excel 1.00, 1.03 and 1.5 disks and 80
+- **Exact round-trips.** Every sample, the 37 documents from Microsoft's Excel 1.00, 1.03 and 1.5 disks and 117
   files Excel saved in experiments, reads and writes back byte for byte: sheets and charts, version-17 and
   Excel 1.5's version-18 files. Fields the library does not model are kept as they are.
 - **Cells.** Integers, numbers, text and formulas with their current values, number formats, alignment, bold
@@ -42,7 +42,8 @@ The library targets .NET 9 and has no dependencies.
   hash, defined names and macro shortcuts, external documents, windows and selections (frozen panes and
   gridline colours in Excel 1.5), page breaks and Page Setup.
 - **Writing.** Create worksheets and macro sheets with Excel's defaults, or edit existing ones; only the cells
-  you change are re-encoded.
+  you change are re-encoded. Values are checked as they are set against what a file can hold and what Excel
+  itself would store, and defined names are kept in the order Excel searches them.
 - **Charts.** Type and options, axes and scales, legend, titles, data labels, free text and arrows, point
   formats, overlay charts and the series data, in Microsoft Chart's 8-byte decimal numbers.
 - **Workspaces.** Read and write "Resume Excel" files: the settings and the windows Excel reopens.
@@ -213,6 +214,8 @@ dotnet run --project dumper -- parse '=IF(A1>0,SUM(A1:A3),-1)'
   pixels of the sheet's font at any size, for the font families in Excel 1.00's System (every sample uses Geneva
   10). For other families they count every character as one digit width, so a value at the edge of its column
   may differ. Colours are not applied, and format text uses the US letters and separators.
+- **Not thread-safe.** Reading a value can decode and cache it, and the grid creates cells on first access, so
+  share a document between threads only behind a lock, even for reading.
 - **Empty embedded code.** New documents carry empty copies of the code segments every Excel document embeds.
   No released Excel reads them ([spec §4.1](https://github.com/hughbe/MacExcelReader/blob/main/docs/Spec.md)), so this only matters to a build with a
   different code signature reading the file through a link.

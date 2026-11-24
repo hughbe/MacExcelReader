@@ -324,7 +324,10 @@ internal static class ExcelFormulaParser
             }
 
             var span = _text.AsSpan(start, _position - start);
-            if (!double.TryParse(span, NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
+            // Excel 1.00 takes a constant other than 0 only from 1E-307 up to below 1E+306, however it is written:
+            // =9.99999E305 and =100E-309 compile, =0.1E307 and =9.9E-308 are not formulas (`Constant Edges`).
+            if (!double.TryParse(span, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+                || (value == 0 ? !IsZero(span) : value < MinConstant || value >= MaxConstant))
             {
                 throw new ExcelFormulaSyntaxException($"Invalid number '{span}'", start);
             }
@@ -332,6 +335,16 @@ internal static class ExcelFormulaParser
             // The parser uses the value; the text is only for error messages, and would cost a string.
             return new Token(TokenKind.Number, string.Empty, start, value) { IsDigits = !span.ContainsAnyExcept("0123456789") };
         }
+
+        // Whether number text is zero, as opposed to a number too small for a double (1E-400 reads as 0).
+        private static bool IsZero(ReadOnlySpan<char> number)
+        {
+            int exponent = number.IndexOfAny('E', 'e');
+            return !(exponent < 0 ? number : number[..exponent]).ContainsAnyExcept('0', '.');
+        }
+
+        private const double MinConstant = 1E-307;
+        private const double MaxConstant = 1E306;
 
         private Token ReadString(int start)
         {
@@ -461,7 +474,28 @@ internal static class ExcelFormulaParser
             return node;
         }
 
+        // Every level of nesting compiles to at least one byte, so a formula nested deeper than an expression can be
+        // long cannot compile; stopping there also keeps the recursion off the end of the stack.
+        private const int MaxDepth = 256;
+        private int _depth;
+
+        private void Enter()
+        {
+            if (++_depth > MaxDepth)
+            {
+                throw new ExcelFormulaSyntaxException($"The formula is nested more than {MaxDepth} levels deep", _current.Position);
+            }
+        }
+
         private Node ParseComparison()
+        {
+            Enter();
+            var node = ParseComparisonCore();
+            _depth--;
+            return node;
+        }
+
+        private Node ParseComparisonCore()
         {
             var left = ParseConcatenation();
             while (_current.Kind == TokenKind.Operator && _current.Text is "=" or "<>" or "<" or ">" or "<=" or ">=")
@@ -544,7 +578,9 @@ internal static class ExcelFormulaParser
             {
                 var op = _current;
                 Advance();
+                Enter();
                 var operand = ParseUnary();
+                _depth--;
 
                 // Excel folds a minus sign on a number constant into the constant, and drops a plus sign on one
                 // (Excel compiles =+1 to 1E 00 01).

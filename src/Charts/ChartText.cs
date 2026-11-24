@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using MacExcelReader.Internal;
 
 namespace MacExcelReader.Charts;
 
@@ -63,7 +64,13 @@ public sealed class ChartText
     public byte[] Record { get; }
 
     /// <summary>Gets or sets the text; null when <see cref="IsAutomaticText"/> is set.</summary>
-    public string? Text { get; set; }
+    public string? Text
+    {
+        get => _text;
+        set => _text = PascalText.CheckOptional(value, nameof(value));
+    }
+
+    private string? _text;
 
     private ushort Flags
     {
