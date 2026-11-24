@@ -474,7 +474,22 @@ public static class ExcelFunctions
         return false;
     }
 
+    // Finds a function's number by name as it appears in formula text, without making a string of it.
+    internal static bool TryFindNumber(ReadOnlySpan<char> name, out int number, ExcelVersion version)
+    {
+        if (s_byNameSpan.TryGetValue(name, out number) && Get(number)!.IntroducedIn <= version)
+        {
+            return true;
+        }
+
+        number = -1;
+        return false;
+    }
+
     private static readonly Dictionary<string, int> s_byName = BuildNameIndex();
+
+    private static readonly Dictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> s_byNameSpan
+        = s_byName.GetAlternateLookup<ReadOnlySpan<char>>();
 
     private static Dictionary<string, int> BuildNameIndex()
     {

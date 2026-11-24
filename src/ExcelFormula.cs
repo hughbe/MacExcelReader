@@ -38,6 +38,11 @@ public sealed class ExcelFormula
     /// index in the name list) and per external-sheet token, in token order. Empty if none are needed.
     /// </param>
     public ExcelFormula(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups = default)
+        : this(Validate(expression), fixups, compiled: true)
+    {
+    }
+
+    private static ReadOnlySpan<byte> Validate(ReadOnlySpan<byte> expression)
     {
         if (expression.Length > 255)
         {
@@ -45,6 +50,15 @@ public sealed class ExcelFormula
         }
 
         _ = FormulaTokens.CountTokens(expression);
+        return expression;
+    }
+
+    // A formula from the compiler, whose tokens need no checking.
+    internal static ExcelFormula FromCompiled(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups)
+        => new(expression, fixups, compiled: true);
+
+    private ExcelFormula(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups, bool compiled)
+    {
         var record = new byte[ExpressionOffset + expression.Length + fixups.Length];
         record[14] = (byte)expression.Length;
         expression.CopyTo(record.AsSpan(ExpressionOffset));
