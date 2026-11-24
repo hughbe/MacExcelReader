@@ -199,9 +199,10 @@ number-format check (`47.10` in 1.5) flags a user-defined format. The check turn
 
 A format using only what earlier releases read saves as 17 (`Format Two Sections`). `SIMUL EQUATIONS`, the one
 version-18 file among Microsoft's samples, has none of these: the released 1.5 opens it and saves it as version
-17 without the warning (`SIMUL EQUATIONS Saved`). Its embedded code is the released build's (§2.3), so it was
-saved by a build with the same segment 1 but a different version rule, or in a state its file does not keep
-**(inferred)**.
+17 without the warning (`SIMUL EQUATIONS Saved`). The rule depends only on what the file keeps: Save checks
+the state of each window on the document, the same bytes it writes for that window, and every entry of the
+format list, all of which it writes. So the file was saved by a build with the same embedded code (§2.3) but a
+different version rule **(inferred)**.
 
 A version-17 document can also need a later release without changing its version, because it uses a function
 the reader lacks. The function count at the start of the data area (§5) records that, and Excel 1.5 warns
@@ -2302,7 +2303,7 @@ recalculate the sheet when it opens it (§6; five 1.00 samples and seven 1.5 sam
 
 None of these affects reading the samples or writing valid files.
 
-* Which build saved Microsoft's version-18 `SIMUL EQUATIONS`, and why it chose version 18 (§2.1).
+* Which build saved Microsoft's version-18 `SIMUL EQUATIONS`, whose version rule differs from the released 1.5's (§2.1).
 
 ---
 
@@ -2631,9 +2632,11 @@ Excel had open, so that opening it reopens the same documents in the same window
 settings. It holds no cell data. Written by `64.00` and read by `64.01` in Excel 1.00 (`63.00`, `63.01` in
 1.03, which build the folder string differently but write the same fields).
 
-Excel 1.00 writes the workspace whenever it quits without a document refusing to close (`Resume Excel 3`).
-In the same test Excel 1.03 and 1.5 quit without writing or changing any workspace file, on their own disks or
-the startup disk; why is not known.
+Excel 1.00 writes the workspace whenever it quits without a document refusing to close (`Resume Excel 3`),
+in the folder Excel started from. Excel 1.03's Quit (`0a.01`) is the same code and calls its writer the same
+way, and its program disk holds a 35-byte `Resume Excel` with no windows that 1.03 wrote on quitting. The
+writer does not flush the disk, so the file can stay in the system's disk cache until the disk is ejected or
+the Mac shuts down: a copy of the disk taken right after Quit may not show it yet.
 
 | Size | Meaning |
 |-----:|---------|
@@ -2878,9 +2881,11 @@ next larger bitmap of the family, or from the largest if none is larger, scaling
 bitmap's size and keeping positions in fractions of a pixel: Geneva 11 from Geneva 12 (a `0`, 8 pixels there, is
 7⅓), Geneva 16 from Geneva 18, Monaco 12 from Monaco 9. `TextWidth` adds up the fractions and rounds the total
 down, so `1E+04` in Geneva 11 is 34 pixels. The ascent and descent scale to the nearest pixel (Geneva 11: 11 and
-3). Excel then adds a pixel to the widths it divides by: the cached digit widths (`09.1c`, which keeps the flag
-at `0x0976` of its globals) and the width of `#` (`19.0e`). So a Geneva 11 digit counts as 8 pixels and a `#` as 9,
-while text is checked against the room at its plain width: `TRUE` (27½ pixels) fits a 29-pixel room.
+3). Excel 1.00's `09.1c` adds a pixel to both cached digit widths when `RealFont` is false, and on screen a `#`
+counts as 9 pixels too. So a Geneva 11 digit counts as 8 pixels and a `#` as 9, while text is checked against
+the room at its plain width: `TRUE` (27½ pixels) fits a 29-pixel room. Excel 1.03 instead keeps a flag for a
+scaled size, and uses it both to widen those divisors and to add a pixel per character to the width it checks
+(below).
 
 **Releases.** In a size the System has a bitmap for, Excel 1.03 and 1.5 draw cells exactly as 1.00 does:
 every test sheet in Geneva 10 came out the same, pixel for pixel. In a size with no bitmap, Excel 1.5 still

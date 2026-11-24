@@ -70,7 +70,7 @@ Measured with sheets whose formulas were all marked waiting (`Order`, `Circ`), o
 
 * **Order.** One recalculation follows the dependencies, whatever the layout: the chain `A1 = A2+1` … `A9 = A10+1`
   with `A10` = 1, written top to bottom, comes out 10, 9, … 1 at once, as do chains across columns and a `SUM` of
-  formulas. The calculate loop (in segment `27`) runs a pass (native code) over each open document with formulas
+  formulas. The calculate loop (`27.10`) runs a pass (`28.03`, native code) over each open document with formulas
   waiting, and repeats while a pass reports more to do. A pass checks for keystrokes and mouse clicks, so a long
   recalculation can be interrupted.
 * **Circular references, iteration off.** Excel says "Can't resolve circular references" (no alert when a macro
