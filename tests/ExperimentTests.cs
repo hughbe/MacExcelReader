@@ -1097,4 +1097,25 @@ public class ExperimentTests
         Assert.Equal(6, workspace.Windows.Count);
         Assert.Equal(3, workspace.Windows.Count(w => w.DocumentName.EndsWith("Windows saved", StringComparison.Ordinal)));
     }
+
+    [Fact]
+    public void EdgeColumn_KeepsAMarginColumnPastTheSheet()
+    {
+        // Values in IV1 and IV2 and an array in IU3:IV4: Excel 1.00 saved a 257-column table (spec §6.1).
+        var document = Load("Edge Column");
+        Assert.Equal(257, document.Cells.ColumnCount);
+        Assert.Equal(2, document.Cells["IV2"].Value.Number);
+        Assert.True(document.Cells["IV4"].Formula!.IsArrayFormula);
+    }
+
+    [Fact]
+    public void ValueInTheLastRowOrColumn_GetsTheMarginExcelWrites()
+    {
+        // Built by the library, a sheet with values in A16384 and IV1 gets the same margin row and column.
+        var document = ExcelDocument.CreateWorksheet();
+        document.Cells["A16384"].SetNumber(1);
+        document.Cells["IV1"].SetNumber(2);
+        var reread = ExcelDocument.Read(document.ToArray());
+        Assert.Equal((16385, 257), (reread.Cells.RowCount, reread.Cells.ColumnCount));
+    }
 }

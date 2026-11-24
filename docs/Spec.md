@@ -483,6 +483,12 @@ routine (`22.08`) converts them: it sets 0x020 to 1 and subtracts 1 from both, s
 column index from then on. Most samples are in the second form; `CLOCK.WS`, `CLOCK.MS` (1.00) and `LOAN1`
 (1.5) are in the first. An empty sheet has `nRows = nCols = 0`.
 
+The margin is kept even at the edge of the sheet. A value in row 16384 makes the table 16385 rows long and a
+value in column IV makes it 257 columns wide, so the margin is a row or column past the last one a sheet can
+use: Excel 1.00 saves a value in A16384 with 0x014 = 16384, and values in IV1 and IV2 with 0x274 = 256, and
+reads both back. The table is a full rectangle in memory too, so a sheet using both the last row and the last
+column needs about 25 MB: Excel 1.00 reports "Out of memory" instead.
+
 ### 6.2 Password hash
 
 A protected document stores a 16-bit hash of its password, not the password, in state word `0x242`. The
@@ -1128,7 +1134,10 @@ None of the samples is split, so their second values are leftovers (for example 
 show a right column of 2.
 
 Check against `Worksheet1`: offset 0 is 3 and offset 35 is 4, and its single selection is row 4, column 3.
-Every sample has exactly one window.
+Microsoft's samples all have one window. A document can have more: after NEW.WINDOW twice, Excel 1.00 saves
+three records, the newest window first, each with its own rectangle, selection and display options (`Three
+Windows`). The rectangle is the window's content area: MOVE(40,60) and SIZE(200,150) give left 39, top 77,
+right 239 and bottom 209.
 
 **Version 18.** Excel 1.5's window record is longer, and version-18 files save 88 more bytes of it after the
 41, giving a 129-byte state. By state offset (window-record offset − 183):
@@ -1948,7 +1957,10 @@ After the last chart:
 | 256 bytes | Header: a Pascal string in a fixed 256-byte field |
 | 256 bytes | Footer, likewise |
 
-Without a page setup the word is 0 and 664 zero bytes follow, so the page setup is always 666 bytes.
+Without a page setup the word is 0 and 664 zero bytes follow, so the page setup is always 666 bytes. No
+chart among Microsoft's samples has one; `PAGE.SETUP("Top","Bottom",0.5,0.6,0.7,0.8)` on a chart in Excel 1.00
+saves the word 1, a `TPrint` record, 58 zero bytes, the margins 0.7, 0.8, 0.5 and 0.6 (top, bottom, left,
+right, as the arguments left, right, top, bottom became), then `Top` and `Bottom` (`Chart Page Setup`).
 
 ### 16.7 Text objects
 
@@ -2621,7 +2633,7 @@ settings. It holds no cell data. Written by `64.00` and read by `64.01` in Excel
 | word | 0. Open refuses anything else (alert `0x2038`). |
 | 20 bytes | Calculation settings, laid out as offsets 0x000–0x013 of the sheet state block (§6): maximum iterations, calculation mode, precision, reference style, unused word, maximum change (double), iteration. In 1.00 they are global, not per document. |
 | word | 1 if a window was **zoomed** to fill the screen (the FULL command or the zoom box; global `g0c5a`), else 0. Open zooms the front window again (`17.0c`). The rectangles below are always the windows' normal size: Excel un-zooms a window before recording it. |
-| … | The document windows, front to back, each as below, then a `0x00` byte |
+| … | The document windows, front to back, each as below, then a `0x00` byte. A document with several windows has one entry per window (`Resume Excel 3`: six windows, three of them on one sheet). |
 | word | `n`, then `n` bytes: the **preferred chart format** (Chart > Set Preferred Format, applied by Gallery > Preferred). Set Preferred Format copies the active chart's formatting into a data block of its own (below; `5a.13` in 1.00). `n` = 0 when none has been set (1,640 bytes for `CLOCK.CH`'s format). |
 | byte | 0 |
 | 3 words | **Printer Setup** (dialog 288, PRINTER.SETUP): printer type, baud rate and port (values below). The sample's `0, 5, 0` is a Macintosh printer; `PRINTER.SETUP(2,2,3)` gives `1, 2, 1`. |
