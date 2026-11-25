@@ -74,6 +74,31 @@ public class FormattingTests
         Assert.Equal(expected, ExcelValueFormatter.Format(value, format));
     }
 
+    // A format shows the number Excel's decimal conversion makes, at most 14 significant digits (spec §7), not the
+    // double's binary expansion; percent signs move its point rather than multiplying, so they cannot overflow.
+    [Theory]
+    [InlineData(0.30000000000000004, "0.000000000000000000", "0.300000000000000000")]
+    [InlineData(1.0 / 3, "0.000000000000000000", "0.333333333333330000")]
+    [InlineData(123456789012345678, "0", "123456789012350000")]
+    [InlineData(123456789012345678, "0%", "12345678901235000000%")]
+    [InlineData(12345678901234.5, "0.00", "12345678901234.00")]
+    [InlineData(0.999, "0.00", "1.00")]
+    [InlineData(9.996, "0.00E+00", "1.00E+01")]
+    [InlineData(0.004, "0.00", "0.00")]
+    [InlineData(0.005, "0.00", "0.01")]
+    public void Format_ShowsFourteenSignificantDigits(double value, string format, string expected)
+    {
+        Assert.Equal(expected, ExcelNumberFormat.Parse(format).Format(value));
+    }
+
+    [Fact]
+    public void Format_PercentOfTheLargestNumberIsDigits()
+    {
+        string text = ExcelNumberFormat.Parse("0%").Format(double.MaxValue);
+        Assert.StartsWith("17976931348623000", text);
+        Assert.Equal(312, text.Length);
+    }
+
     [Fact]
     public void FormatCell_HandlesAllBasicKinds()
     {

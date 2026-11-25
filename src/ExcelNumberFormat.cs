@@ -488,8 +488,11 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
 
         byte[] h = tokens[header].Operands;
         int extra = HeaderExtra(h);
-        double scaled = magnitude * Math.Pow(100, extra > 0 ? extra / 2 : 0) / Math.Pow(1000, extra < 0 ? -extra / 3 : 0);
-        return RoundToDecimals(scaled, h[1]) == 0;
+        Span<char> converted = stackalloc char[15];
+        int length = ExcelValueFormatter.Num2Str(magnitude, converted, out int point);
+        point += extra;
+        Span<char> rounded = stackalloc char[15];
+        return RoundDigits(converted[..length], point + h[1], rounded, ref point) == 0;
     }
 
     // A number header's c − b: two per % sign, or (Excel 1.5) minus three per trailing comma. Both are bytes and
@@ -777,7 +780,6 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         bool scientific = tokens[header].Code == 0x1C;
         int decimals = h[1];
         int extra = HeaderExtra(h);
-        double value = magnitude * Math.Pow(100, extra > 0 ? extra / 2 : 0) / Math.Pow(1000, extra < 0 ? -extra / 3 : 0);
         bool thousands = tokens.Exists(static t => t.Code == 0x07);
 
         // The digit placeholders in order, '#' or '0': the mantissa's integer places, then its decimal places, then
@@ -825,30 +827,41 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             ReadOnlySpan<char> fractionPlaces = places.Slice(integerCount, fractionCount);
             ReadOnlySpan<char> exponentPlaces = places[(integerCount + fractionCount)..count];
 
+            // Excel's decimal conversion: at most 14 significant digits, the value being 0.digits × 10^point. The
+            // percent signs and scaling commas move the point (spec §7), so they cannot overflow the double.
+            Span<char> converted = stackalloc char[15];
+            int convertedLength = ExcelValueFormatter.Num2Str(magnitude, converted, out int point);
+            point += extra;
             int exponent = 0;
-            if (scientific && value != 0)
+            int mantissaDigits = Math.Max(1, integerPlaces.Length);
+            if (scientific && convertedLength > 0)
             {
-                int mantissaDigits = Math.Max(1, integerPlaces.Length);
-                exponent = (int)Math.Floor(Math.Log10(value)) - (mantissaDigits - 1);
-                double mantissa = RoundToDecimals(value / Math.Pow(10, exponent), decimals);
-                if (mantissa >= Math.Pow(10, mantissaDigits))
-                {
-                    exponent++;
-                }
-
-                value /= Math.Pow(10, exponent);
+                exponent = point - mantissaDigits;
+                point = mantissaDigits;
             }
 
-            // The digits written out: at most 309 before the point and 255 after it.
-            Span<char> fixedFormat = stackalloc char[4];
-            fixedFormat[0] = 'F';
-            decimals.TryFormat(fixedFormat[1..], out int formatLength, default, CultureInfo.InvariantCulture);
-            Span<char> fixedText = stackalloc char[640];
-            RoundToDecimals(value, decimals).TryFormat(fixedText, out int fixedLength, fixedFormat[..(1 + formatLength)], CultureInfo.InvariantCulture);
-            ReadOnlySpan<char> written = fixedText[..fixedLength];
-            int point = written.IndexOf('.');
-            var integerDigits = (point < 0 ? written : written[..point]).TrimStart('0');
-            var fractionDigits = point < 0 ? [] : written[(point + 1)..];
+            // The digits rounded half up to the positions there are.
+            Span<char> significant = stackalloc char[15];
+            int significantLength = RoundDigits(converted[..convertedLength], point + decimals, significant, ref point);
+            if (scientific && significantLength > 0 && point > mantissaDigits)
+            {
+                // Rounding carried into a new digit (9.99 to 10.0): one more for the exponent instead.
+                point--;
+                exponent++;
+            }
+
+            significant = significant[..significantLength];
+            int integerLength = significantLength == 0 ? 0 : Math.Max(0, point);
+            // At most 309 + 128 integer digits (the scaling is a signed byte) and 255 decimals.
+            Span<char> digitText = stackalloc char[1024];
+            for (int i = 0; i < integerLength + decimals; i++)
+            {
+                int at = i < integerLength ? i : point + (i - integerLength);
+                digitText[i] = at >= 0 && at < significant.Length ? significant[at] : '0';
+            }
+
+            ReadOnlySpan<char> integerDigits = digitText[..integerLength];
+            ReadOnlySpan<char> fractionDigits = digitText.Slice(integerLength, decimals);
             Span<char> exponentText = stackalloc char[11];
             Math.Abs(exponent).TryFormat(exponentText, out int exponentLength, default, CultureInfo.InvariantCulture);
             var exponentDigits = exponentText[..exponentLength].TrimStart('0');
@@ -921,22 +934,39 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         }
     }
 
-    // Rounds half away from zero to a number of decimal places. Math.Round takes at most 15; a format can have up to
-    // 255, so beyond 15 the value is rounded as a decimal (28 places), and past that it already has fewer significant
-    // digits than the places shown.
-    private static double RoundToDecimals(double value, int decimals)
+    // Rounds the digits of 0.digits × 10^point half up to the first `keep` of them, moving the point when a carry
+    // adds a digit (0.999 to 0.1 × 10^(point + 1)). Returns how many digits are left: 0 when the value rounds to 0.
+    private static int RoundDigits(ReadOnlySpan<char> digits, int keep, Span<char> result, ref int point)
     {
-        if (decimals <= 15)
+        if (keep >= digits.Length)
         {
-            return Math.Round(value, decimals, MidpointRounding.AwayFromZero);
+            digits.CopyTo(result);
+            return digits.Length;
         }
 
-        if (Math.Abs(value) < 1e15)
+        if (keep < 0 || (keep == 0 && digits[0] < '5'))
         {
-            return (double)Math.Round((decimal)value, Math.Min(decimals, 28), MidpointRounding.AwayFromZero);
+            return 0;
         }
 
-        return value;
+        digits[..keep].CopyTo(result);
+        if (digits[keep] < '5')
+        {
+            return keep;
+        }
+
+        for (int i = keep - 1; i >= 0; i--)
+        {
+            if (result[i] != '9')
+            {
+                result[i]++;
+                return i + 1;
+            }
+        }
+
+        result[0] = '1';
+        point++;
+        return 1;
     }
 
     // What one integer placeholder shows (`place` counts them from the left): a 0 shows a digit or 0, a # a digit or

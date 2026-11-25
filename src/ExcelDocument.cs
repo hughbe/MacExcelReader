@@ -644,8 +644,25 @@ public sealed class ExcelDocument
     public async Task ExportSylkAsync(Stream stream, ExcelVersion version = ExcelVersion.Excel100, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        var buffer = new ArrayBufferWriter<byte>();
-        ExportSylk(buffer, version);
+
+        // Written a row at a time into one small buffer, which goes to the stream whenever it fills, so the export is
+        // never held whole.
+        const int flushAt = 16384;
+        var buffer = new ArrayBufferWriter<byte>(flushAt + 4096);
+        using var writer = new SylkWriter(this, buffer, version);
+        int rows = writer.WriteStart();
+        for (int row = 0; row < rows; row++)
+        {
+            if (buffer.WrittenCount >= flushAt)
+            {
+                await stream.WriteAsync(buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
+                buffer.ResetWrittenCount();
+            }
+
+            writer.WriteRow(row);
+        }
+
+        writer.WriteEnd();
         await stream.WriteAsync(buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
 
@@ -864,8 +881,8 @@ public sealed class ExcelDocument
             ExternalDocuments.FindIndex(d => d.Name == "\0") + 1);
 
         // A document read from a file usually saves to the same size, so a buffer of that size is returned without
-        // a copy.
-        var writer = new BigEndianWriter(_sourceLength > 0 ? _sourceLength : 4096, pooled);
+        // a copy. Otherwise start with room for the row index and cell table, which a large sheet is mostly made of.
+        var writer = new BigEndianWriter(Math.Max(_sourceLength, 4096 + rows * (2 + columns * CellWords.EntrySize)), pooled);
         writer.WriteUInt16(Magic);
         writer.WriteUInt16((ushort)Version);
         writer.WriteUInt16(Signature);
@@ -959,7 +976,7 @@ public sealed class ExcelDocument
         // Section 2: cell table. It is reserved here and filled in as the cell data is written.
         sections[2] = writer.Position;
         int tableStart = writer.Position;
-        writer.WriteZeros(rows * columns * 6);
+        writer.WriteZeros(rows * columns * CellWords.EntrySize);
 
         // Section 3: for each external document, the names used from it and a zero byte. With no external
         // documents the section is empty.
@@ -1083,10 +1100,31 @@ public sealed class ExcelDocument
     private void WriteCells(BigEndianWriter writer, int tableStart, int rows, int columns)
     {
         int dataStart = writer.Position;
-        int entry = tableStart;
         for (int r = 0; r < rows; r++)
         {
-            for (int c = 0; c < columns; c++, entry += 6)
+            int entry = tableStart + r * columns * CellWords.EntrySize;
+            int c = 0;
+
+            // A row untouched since reading: its entries are copied in one piece, and only the cells with data get
+            // their data copied and its new offset written.
+            if (Cells.TryGetSourceRow(r, out var source))
+            {
+                writer.PatchBytes(entry, source);
+                for (; c < source.Length / CellWords.EntrySize; c++, entry += CellWords.EntrySize)
+                {
+                    var words = source.Slice(c * CellWords.EntrySize);
+                    ushort word1 = BinaryPrimitives.ReadUInt16BigEndian(words.Slice(2));
+                    var type = CellWords.Type(word1);
+                    if (ExcelCellGrid.HasCellData(type))
+                    {
+                        int offset = writer.Position - dataStart;
+                        writer.WriteBytes(Cells.GetSourceData(r, c, BinaryPrimitives.ReadUInt16BigEndian(words), word1, type));
+                        PatchDataOffset(writer, entry, offset, word1);
+                    }
+                }
+            }
+
+            for (; c < columns; c++, entry += CellWords.EntrySize)
             {
                 int offset = writer.Position - dataStart;
                 if (!Cells.TryGetRawCell(r, c, out ushort word0, out ushort word1, out ushort word2, out var raw))
@@ -1114,22 +1152,27 @@ public sealed class ExcelDocument
                     writer.WriteBytes(raw);
                 }
 
-                if (ExcelCellGrid.HasCellData(CellWords.Type(word1)))
-                {
-                    if (offset > 0xFFFFF)
-                    {
-                        throw new InvalidOperationException("The cell data is larger than the 1 MB the cell table can address.");
-                    }
-
-                    word0 = (ushort)(offset >> 4);
-                    word1 = (ushort)((word1 & 0x0FFF) | ((offset & 0xF) << 12));
-                }
-
                 writer.PatchUInt16(entry, word0);
                 writer.PatchUInt16(entry + 2, word1);
                 writer.PatchUInt16(entry + 4, word2);
+                if (ExcelCellGrid.HasCellData(CellWords.Type(word1)))
+                {
+                    PatchDataOffset(writer, entry, offset, word1);
+                }
             }
         }
+    }
+
+    // Points a table entry at its cell data: word 0 and the top nibble of word 1 (spec §9).
+    private static void PatchDataOffset(BigEndianWriter writer, int entry, int offset, ushort word1)
+    {
+        if (offset > 0xFFFFF)
+        {
+            throw new InvalidOperationException("The cell data is larger than the 1 MB the cell table can address.");
+        }
+
+        writer.PatchUInt16(entry, (ushort)(offset >> 4));
+        writer.PatchUInt16(entry + 2, (ushort)((word1 & 0x0FFF) | ((offset & 0xF) << 12)));
     }
 
     private static void WriteChunks<T>(BigEndianWriter writer, List<T> values, Action<BigEndianWriter, T> write)

@@ -286,7 +286,7 @@ public static class ExcelValueFormatter
     // Excel's decimal conversion: at most 14 significant digits, trailing zeros dropped, and the exponent that makes
     // the value 0.digits × 10^exponent. A tie at the 14th digit rounds down (99999999999999.5 gives 99999999999999).
     // Writes the digits to `result` and returns how many there are.
-    private static int Num2Str(double magnitude, Span<char> result, out int exponent)
+    internal static int Num2Str(double magnitude, Span<char> result, out int exponent)
     {
         exponent = 1;
         if (magnitude == 0)
@@ -469,17 +469,17 @@ public static class ExcelValueFormatter
     /// <summary>
     /// Works out how Excel draws a cell (spec Appendix D), as 1.00 and 1.5 do, or 1.03 with
     /// <see cref="ExcelVersion.Excel103"/>: the text it shows, where it starts and the stretch of the
-    /// row it is clipped to, in pixels from the left edge of column A. Returns null for a cell with no value or in a
-    /// hidden column.
+    /// row it is clipped to, in pixels from the left edge of column A. Returns null for a cell with no value, in a
+    /// hidden column or in the margin column past IV (column 256), which Excel never draws.
     /// </summary>
     public static ExcelCellDisplay? LayoutCell(ExcelDocument document, int row, int column, ExcelVersion version = ExcelVersion.Excel100)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentOutOfRangeException.ThrowIfNegative(column);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(column, ExcelCellGrid.MaxColumns);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(column, ExcelCellGrid.MaxColumns);
         var cell = document.Cells.Find(row, column);
         var state = document.State;
-        int width = state.GetColumnWidth(column);
+        int width = ColumnWidth(state, column);
         if (cell is null || cell.Type == ExcelCellType.Empty || width == 0)
         {
             return null;
@@ -584,6 +584,15 @@ public static class ExcelValueFormatter
             : (state.CachedRowHeight, state.CachedAscent);
     }
 
+    // A column's width in pixels. The table's margin column, one past IV (spec §6.1), is never drawn: it has no width,
+    // like a hidden column.
+    private static int ColumnWidth(ExcelSheetState state, int column)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(column);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(column, ExcelCellGrid.MaxColumns);
+        return column < ExcelCellGrid.MaxColumns ? state.GetColumnWidth(column) : 0;
+    }
+
     // A value as Excel 1.00 fits it into its column (19.0a, 19.0e): the text, how it was measured, the room italic
     // takes, and whether it became a row of #s.
     private static (string Text, TextMeasure Measure, int ItalicExtra, bool Hashes) Fit(
@@ -597,7 +606,7 @@ public static class ExcelValueFormatter
         int italicExtra = !italic ? 0 : font?.ItalicExtra ?? state.HalfAscent;
 
         // The room is the column less 2 pixels each side and the italic allowance.
-        int room = state.GetColumnWidth(column) - 4 - italicExtra;
+        int room = ColumnWidth(state, column) - 4 - italicExtra;
         switch (value.Kind)
         {
             case ExcelValueKind.Number:

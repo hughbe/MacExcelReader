@@ -688,7 +688,8 @@ gives the rest:
 
 * Number header `03`: the value goes through Excel's decimal conversion (at most 14 significant digits, a tie at
   the 14th rounding down), `c − b` is added to its decimal exponent (two per `%`, minus three per trailing
-  comma), and the digits are rounded to the positions there are.
+  comma), and those decimal digits are rounded half up to the positions there are: 1.005 in `0.00` is `1.01` and
+  12345678901234.5 in `0.0` is `12345678901234.0`, since the conversion has already rounded it (`TEXT Digits`).
 * Integer digit runs: digits that do not fit go before the first placeholder; a position with no digit shows
   `0` for `06` and nothing for `04`; with `07`, a comma follows every third position from the right that shows
   something.
@@ -707,7 +708,7 @@ Excel tests whether a format shows a date in two places. `07.18` looks for a day
 `19`, `1A`) in the positive section; times alone do not count. Its caller `34.04` counts the built-in formats
 10–18, the time-only ones included, and any other format `07.18` accepts.
 
-TEXT will not take `General` or a fill (`*-0`). General (`19.0c`) fits the number into the characters the column
+TEXT will not take `General` or a fill (`*-0`), and gives #VALUE! for text longer than 255 characters (1E+300 in `0`). General (`19.0c`) fits the number into the characters the column
 has room for, W, not counting a minus sign (Appendix D gives W in pixels, and what happens to a negative number
 that rounds to nothing):
 
