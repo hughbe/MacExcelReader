@@ -102,7 +102,7 @@ misbehaves, for example with a file that breaks a rule given here.
 * [Appendix A. Functions](#appendix-a-functions)
 * [Appendix B. Workspace files](#appendix-b-workspace-files)
 * [Appendix C. SYLK export](#appendix-c-sylk-export)
-* [Appendix D. Drawing cells](#appendix-d-drawing-cells)
+* [Appendix D. Drawing cells and windows](#appendix-d-drawing-cells-and-windows)
 
 ---
 
@@ -1118,7 +1118,7 @@ one that stores the cursor, and the DISPLAY command:
 | Offset | Size | New window | Meaning |
 |-------:|-----:|-----------|---------|
 | 0 | byte | 0 | **Active cell column** |
-| 1 | byte | | Width of the row-heading strip in pixels, capped at 255 (29 in every sample). Used as the left offset when headings are shown. |
+| 1 | byte | | Width of the row-heading strip in pixels, capped at 255. Used as the left offset when headings are shown. Excel sets it from the standard font and the widest row number showing: 29 in Geneva 10, 32 in Geneva 11 and 12, 26 in New York 10 and Monaco 9, 45 in Geneva 10 with row 16384 showing (Appendix D). |
 | 2 | byte | 0 | **Active pane** (0–3); it indexes the per-pane bytes at offset 19 |
 | 3 | word | 0 | Top row, upper panes |
 | 5 | word | 0 | Top row, lower panes |
@@ -1130,7 +1130,7 @@ one that stores the cursor, and the DISPLAY command:
 | 14 | byte | cols − 1 | Right column, right panes |
 | 15 | word | cols − 1 | Word companion of offset 13; compared against the last-non-hidden-column bound (§6, 0x016) when drawing |
 | 17 | word | cols − 1 | Word companion of offset 14 |
-| 19 | 4 bytes | 0 | One byte per pane: the pattern phase (0–7). Excel rotates its 8-byte QuickDraw pattern by this many bytes before drawing in the pane, so that patterned drawing stays aligned as the pane scrolls. |
+| 19 | 4 bytes | 0 | One byte per pane: the pattern phase (0–7). Excel rotates its 8-byte QuickDraw pattern by this many bytes before drawing in the pane, so that patterned drawing stays aligned as the pane scrolls: the gridlines' dots follow it (Appendix D). Excel 1.00 saves 0 in Geneva 10, 5 in Geneva 11 and 12, and 3 in New York 10 and Monaco 9. |
 | 23 | 3 bytes | | Pointer to the selection list, left over from memory |
 | 26 | byte | 1 on a macro sheet | **Display formulas** |
 | 27 | byte | 1 | **Display gridlines** |
@@ -2332,6 +2332,8 @@ None of these affects reading the samples or writing valid files.
 * Which build saved Microsoft's version-18 `SIMUL EQUATIONS`, whose version rule differs from the released 1.5's (§2.1).
 * Where Excel's name order puts letters with no plain-letter base, such as `æ`, `ø` and `ß` (§11); the library
   compares them by their own codes.
+* How Excel places the vertical scroll bar's thumb, which the library fits to 18 measured rows, and how QuickDraw
+  stretches a font size with no bitmap (Appendix D).
 
 ---
 
@@ -2884,7 +2886,7 @@ Cell type 7 (§9) has no case in the writer, as in every other cell switch.
 
 ---
 
-## Appendix D. Drawing cells
+## Appendix D. Drawing cells and windows
 
 Nothing in the file says how a cell looks on screen; Excel works it out from the value, the cell's format,
 alignment and style, the column widths and the sheet's standard font each time it draws a row. This appendix
@@ -2969,3 +2971,59 @@ a run: the cell itself and the blank Fill-aligned cells after it (hidden columns
 *L* + 2 and is repeated (run width − 3 − the italic allowance) ÷ *t* times, rounded down: `ab` (11 pixels) 20
 times over three 75-pixel columns, `1.50` (24 pixels) 3 times in one. Text longer than that is drawn once and
 cut off at the run's end. A fill never runs into a blank cell that is not Fill aligned.
+
+**Clearing under text.** Before drawing a cell's text Excel clears the stretch the text is clipped to, the row's
+height less its gridline, so text running into its neighbours covers the gridlines between them.
+
+**Italic and bold.** QuickDraw slants italic text by moving each row of a glyph right by half its distance from
+the bottom row of the font's rectangle (ascent + descent), rounded down: in Geneva 10 the row just above the
+baseline moves 1 pixel and the top of a capital 4; in Geneva 12, with a descent of 3, 2 and 5. Bold ORs each
+glyph with itself a pixel to the right.
+
+**A size with no bitmap** is drawn by QuickDraw from the next larger size, or the largest: drawn at that size and
+stretched (Inside Macintosh, the Font Manager). Taking for each pixel the bitmap pixel under its centre comes within one
+pixel in fifty of Excel 1.00's Geneva 11 **(inferred)**; the exact stretching is not established.
+
+### The window
+
+Excel draws the rest of a worksheet or macro sheet's window round the cells, all in window coordinates from the
+top-left of its content area (`Render Basics` and the other `Render` samples, captured from Excel 1.00's screen
+and matched pixel for pixel by `ExcelRenderer`; docs/Testing.md).
+
+**Headings.** With headings shown (§13, offset 28), a strip of the width at window offset 1 runs down the left and
+a row of one row height across the top. Excel sets the strip's width from the standard font and the widest row
+number showing, and saves it: 29 pixels in Geneva 10, 32 in Geneva 11 and 12, 26 in New York 10 and Monaco 9, and
+45 in Geneva 10 when row 16384 shows. Each column letter and row number is in the standard font, bold, centred in
+its heading less the line at its right or bottom edge. The headings' lines are solid: one along the strip's right
+edge, one under the heading row, and one at each column's right edge and each row's bottom edge.
+
+**Gridlines** (offset 27) are dotted in QuickDraw's `gray` pattern along each column's right edge and each row's
+bottom edge, from the headings to the scroll bars. The pattern lines up with the window's content area, rotated
+down by the pane's pattern phase (offset 19): in a window with phase 0 a dot is black where x + y is even. Excel
+saves phase 0 for Geneva 10 and 5 for Geneva 11 and 12, and 3 for New York 10 and Monaco 9, so their dots fall on
+odd x + y.
+
+**Borders** are solid lines on a cell's edges: the left border on the gridline before the cell, the top border on
+the gridline above it, the right and bottom borders on its own gridlines.
+
+**Formulas shown** (offset 26): columns are twice their width, and every cell shows what was typed into it, a
+formula's text or a constant (numbers in General), from *L* + 2, left aligned and clipped to its own cell.
+
+**The selection.** Each selected area is inverted from the pixel left of the gridline before its first column to
+the pixel right of the gridline after its last column, and from the pixel above the gridline over its first row to
+the pixel below the gridline under its last row, clipped to the cell area. The active cell is then inverted back
+inside a one-pixel frame, from *L* + 1 to *R* − 3 and from its top + 1 to its bottom − 3, so it shows as it is
+with an inverted outline.
+
+**The sheet's end.** Below row 16384 and right of column IV the window is grey (`gray`, the headings' strip
+included), and the last row's and column's gridlines are solid lines.
+
+**Scroll bars.** The System's scroll bars sit on the content area's right and bottom edges, 16 pixels wide, with
+the grow box in the corner. Excel draws a black split box, 4 pixels long, before each bar's first arrow; dragging it
+splits the window (§13, offsets 37 and 39). The thumb is a 14 × 16 white square inside the track, which is filled
+with `ltGray`. The horizontal thumb's position is the left column out of 255, as the Control Manager places a
+value: (column × travel + 127) ÷ 255 pixels from the left of its travel, where the travel is the track's length
+less the thumb's. The vertical thumb is not proportional to the top row **(inferred)**: in a window of the default
+height, whose thumb travels 208 pixels, it sits (row × travel) ÷ 416 pixels down for the first 20 rows, then
+(row + 848) × travel ÷ 18000, and at the end of its travel when row 16384 is at the top; this fits all 18 rows
+measured, from 1 to 16383.

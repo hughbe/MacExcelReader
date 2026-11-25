@@ -477,18 +477,32 @@ public static class ExcelValueFormatter
         ArgumentNullException.ThrowIfNull(document);
         ArgumentOutOfRangeException.ThrowIfNegative(column);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(column, ExcelCellGrid.MaxColumns);
-        var cell = document.Cells.Find(row, column);
+        int left = 0;
+        for (int c = 0; c < column; c++)
+        {
+            left += document.State.GetColumnWidth(c);
+        }
+
+        return Layout(document, row, column, left, version);
+    }
+
+    // LayoutCell for a cell whose column starts `left` pixels from column A's left edge. The cell is read through its
+    // table entry, so no ExcelCell is created.
+    internal static ExcelCellDisplay? Layout(ExcelDocument document, int row, int column, int left, ExcelVersion version)
+    {
+        var grid = document.Cells;
         var state = document.State;
         int width = ColumnWidth(state, column);
-        if (cell is null || cell.Type == ExcelCellType.Empty || width == 0)
+        if ((uint)row >= (uint)grid.RowCount || (uint)column >= (uint)grid.ColumnCount || width == 0)
         {
             return null;
         }
 
-        int left = 0;
-        for (int c = 0; c < column; c++)
+        grid.GetWords(row, column, out ushort word0, out ushort word1, out ushort word2);
+        var cell = new ExcelCellRef(grid, row, column, word0, word1, word2);
+        if (cell.Type == ExcelCellType.Empty)
         {
-            left += state.GetColumnWidth(c);
+            return null;
         }
 
         int right = left + width;

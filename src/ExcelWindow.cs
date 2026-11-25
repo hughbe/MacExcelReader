@@ -56,6 +56,21 @@ public sealed class ExcelWindow
     /// <summary>Gets or sets the active cell's column.</summary>
     public byte ActiveColumn { get => State[0]; set => State[0] = value; }
 
+    /// <summary>
+    /// Gets or sets the width of the row-heading strip in pixels (state offset 1, spec §13): 29 in every sample.
+    /// </summary>
+    public byte RowHeadingWidth { get => State[1]; set => State[1] = value; }
+
+    /// <summary>Gets or sets the first row shown, in the upper panes: where the window is scrolled to (offset 3).</summary>
+    public ushort TopRow
+    {
+        get => BinaryPrimitives.ReadUInt16BigEndian(State.AsSpan(3));
+        set => BinaryPrimitives.WriteUInt16BigEndian(State.AsSpan(3), value);
+    }
+
+    /// <summary>Gets or sets the first column shown, in the left panes (offset 11).</summary>
+    public byte LeftColumn { get => State[11]; set => State[11] = value; }
+
     /// <summary>Gets or sets the active cell's row.</summary>
     public ushort ActiveRow
     {

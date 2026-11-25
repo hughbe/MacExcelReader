@@ -1364,4 +1364,72 @@ public class ExperimentTests
         Assert.Equal(0x47, document.Cells["A2"].Formula!.Expression[0]);   // value class, at the top
         Assert.Equal(0x46, document.Cells["A6"].Formula!.Expression[0]);   // ($A$1 $A$1):$C$3 is one area: a memory area
     }
+
+    // Excel 1.00's windows captured from the screen (tests/Data/Screens, docs/Testing.md), each with the sample Excel
+    // saved it as. Only the mouse pointer, which the renderer does not draw, may differ; Geneva 11, a size with no
+    // bitmap that QuickDraw scales, is drawn close to Excel but not exactly.
+    public static TheoryData<string> Screens() => new(File.ReadLines(ScreenIndex).Where(l => !l.StartsWith('#')).Select(l => l.Split('\t')[0]));
+
+    private static string ScreenIndex => Path.Combine(AppContext.BaseDirectory, "Data", "Screens", "index.txt");
+
+    [Theory]
+    [MemberData(nameof(Screens))]
+    public void Rendering_MatchesExcelsScreen(string name)
+    {
+        // Needs Excel's fonts: MACEXCEL_SYSTEM names Excel 1.00's Data disk image or a System file's resource fork.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var fields = File.ReadLines(ScreenIndex).First(l => l.Split('\t')[0] == name).Split('\t');
+        var expected = RenderTests.ReadPng(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", "Screens", name + ".png")));
+        var actual = Rendering.ExcelRenderer.Render(Load(name), fonts, new Rendering.ExcelRenderOptions { Title = fields[1] });
+        int left = int.Parse(fields[2]), top = int.Parse(fields[3]), right = int.Parse(fields[4]), bottom = int.Parse(fields[5]);
+        int allowed = int.Parse(fields[6]);
+        int differ = 0;
+        for (int y = 0; y < expected.Height; y++)
+        {
+            for (int x = 0; x < expected.Width; x++)
+            {
+                bool pointer = x >= left && x < right && y >= top && y < bottom;
+                if (!pointer && expected[x, y] != actual[x, y])
+                {
+                    differ++;
+                }
+            }
+        }
+
+        Assert.True(differ <= allowed, $"{differ} pixels differ from Excel's screen");
+    }
+
+    private static readonly Lazy<Rendering.MacFontSet?> SystemFonts = new(() =>
+    {
+        string? path = Environment.GetEnvironmentVariable("MACEXCEL_SYSTEM");
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+        {
+            return null;
+        }
+
+        byte[] bytes = File.ReadAllBytes(path);
+        return bytes.Length > 1026 && bytes[1024] == 0xD2 && bytes[1025] == 0xD7
+            ? Rendering.MacFontSet.FromResourceFork(MfsImage.Read(bytes).Files.First(f => f.Name == "System").Resource)
+            : Rendering.MacFontSet.FromResourceFork(bytes);
+    });
+
+    [Theory]
+    [InlineData("Render Basics", 29, 0)]
+    [InlineData("Render Geneva 12", 32, 5)]
+    [InlineData("Render Geneva 11", 32, 5)]
+    [InlineData("Render New York 10", 26, 3)]
+    [InlineData("Render Monaco 9", 26, 3)]
+    [InlineData("Render Row 16383", 45, 0)]
+    public void RenderedWindows_SaveTheirHeadingWidthAndPatternPhase(string name, int headingWidth, int phase)
+    {
+        // Excel 1.00 sizes the row-heading strip for the standard font and the widest row number shown, and saves the
+        // pane's pattern phase, which the gridlines' dots follow (spec §13, Appendix D).
+        var window = Load(name).Windows[0];
+        Assert.Equal(headingWidth, window.RowHeadingWidth);
+        Assert.Equal(phase, window.State[19]);
+    }
 }

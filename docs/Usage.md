@@ -172,6 +172,24 @@ if (ExcelValueFormatter.LayoutCell(document, row: 0, column: 1) is { } display)
 }
 ```
 
+### Drawing a window
+
+`ExcelRenderer` draws one of a sheet's saved windows as Excel 1.00 shows it: headings, gridlines, every visible
+cell, borders, the selection and the scroll bars, with the window's frame if you want it. It needs the System's
+bitmap fonts, which the library does not carry: load them from the resource fork of the System file Excel ran
+under, such as the one on Excel 1.00's Data disk. The result is a one-bit `MonoBitmap`, which writes itself as a
+PNG.
+
+```csharp
+var fonts = MacFontSet.Load("System/..namedfork/rsrc");    // or MacFontSet.FromResourceFork(bytes)
+MonoBitmap picture = ExcelRenderer.Render(document, fonts, new ExcelRenderOptions { Title = "Expenses" });
+File.WriteAllBytes("Expenses.png", picture.ToPng());
+```
+
+Only the rows and columns that show are laid out, so a window takes the same time whatever the sheet's size:
+about 0.2 ms for `Expenses`, allocating little beyond the bitmap. Text in a size the System has no bitmap for
+(Geneva 11, say) is stretched from another size, which comes close to Excel but not pixel for pixel.
+
 Excel 1.x for Macintosh uses the **1904 date system**: serial 0 is 1 January 1904.
 
 ## Formulas

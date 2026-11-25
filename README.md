@@ -24,7 +24,7 @@ The library targets .NET 9 and has no dependencies.
 
 ## Features
 
-- **Exact round-trips.** Every sample, the 37 documents from Microsoft's Excel 1.00, 1.03 and 1.5 disks and 117
+- **Exact round-trips.** Every sample, the 37 documents from Microsoft's Excel 1.00, 1.03 and 1.5 disks and 147
   files Excel saved in experiments, reads and writes back byte for byte: sheets and charts, version-17 and
   Excel 1.5's version-18 files. Fields the library does not model are kept as they are.
 - **Cells.** Integers, numbers, text and formulas with their current values, number formats, alignment, bold
@@ -46,6 +46,10 @@ The library targets .NET 9 and has no dependencies.
   itself would store, and defined names are kept in the order Excel searches them.
 - **Charts.** Type and options, axes and scales, legend, titles, data labels, free text and arrows, point
   formats, overlay charts and the series data, in Microsoft Chart's 8-byte decimal numbers.
+- **Drawing.** `ExcelRenderer` draws a sheet's window as Excel 1.00 shows it, as a one-bit picture or PNG, with
+  the bitmap fonts of a System file you supply: headings, gridlines, cells laid out as Excel lays them out,
+  borders, the selection and the scroll bars. It matches 26 windows captured from Excel 1.00's screen pixel for
+  pixel, and draws a window in about 0.2 ms whatever the sheet's size.
 - **Workspaces.** Read and write "Resume Excel" files: the settings and the windows Excel reopens.
 - **SYLK export.** `ExportSylk` writes a sheet as SYLK, byte for byte as Excel 1.00's or 1.5's Save As does,
   checked against 178 files the two exported. It allocates nothing per cell.
@@ -192,6 +196,7 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |
 | `sylk <file> [-o out.slk] [--excel 1.5]` | The sheet as SYLK, as Excel 1.00 (or 1.5) exports it |
+| `render <file> --system <disk or rsrc> [-o out.png] [--no-frame] [--scale N]` | The sheet's window drawn as Excel 1.00 shows it, as a PNG, with the fonts of a System file (Excel 1.00's Data disk image works) |
 | `dump <file>` | Everything: header, settings, column widths, external references, names, windows, page breaks, print setup and cells |
 | `workspace <file>` | A workspace ("Resume Excel", type XLIN) file: settings and the windows it reopens |
 | `layout <file>` | Where each part of the file lies: header, code segments, state block and all eight sections |

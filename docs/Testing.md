@@ -149,6 +149,20 @@ Things to know:
 - **Memory:** Excel 1.03 runs out of memory on a macro sheet of about 500 formulas, and Driver grows with every
   probe. Pack sheets of about 100 formulas, two or three at a time.
 
+## Comparing drawing with Excel's screen
+
+To check `ExcelRenderer` against Excel, pack sheets with `--keep-open`, run Driver, bring each window to the front
+from the Window menu and capture Mini vMac's window at its exact pixels with macOS's `screencapture -o -l<window
+id>` (from a terminal allowed to record the screen). Every emulated pixel is a 2 × 2 block in the capture, below a
+28-pixel title bar. `tests/Data/Screens` holds the window part of each capture as a one-bit PNG, and
+`ExperimentTests.Rendering_MatchesExcelsScreen` draws Excel's save of each and compares it, masking the mouse
+pointer. It needs the System's fonts and passes without checking anything otherwise: set `MACEXCEL_SYSTEM` to
+Excel 1.00's Data disk image (or a System file's resource fork) to run it.
+
+```bash
+MACEXCEL_SYSTEM=~/Excel/Data.img dotnet test --filter Rendering_MatchesExcelsScreen
+```
+
 ## Results so far
 
 | Date | Excel | Files | Result |
@@ -214,6 +228,7 @@ Things to know:
 | Nov 2026 | 1.00 | QA of the library: number cells holding NaN and infinities with formulas on them; names written out of order, then typed formulas and DEFINE.NAME; FORMAT.NUMBER and TEXT with 15 to 200 decimal places; Mac Roman characters on screen; number constants entered with FORMULA, bisected | Excel keeps NaN and infinities and calculates with them but never makes one (overflow is `#NUM!`); General shows them as ±1.7976931348623E+308 and -2.6965397022935E+308, other formats as `#`. Out-of-order names break typed lookups (`#NAME?`), so the library sorts changed names on save. 128 or more decimals are plain decimals (the header difference is 8-bit). `0xDB`, `0xDE`, `0xDF` and `0xF0` have no glyph in 1.00's System. Constants are taken from 1E-307 to below 1E+306 by value; outside, a formula is refused and a constant becomes text (spec §1, §7, §11, §12.1, §15.4; `NaN Cells`, `NaN Wide`, `Names Unsorted`, `Many Decimals`, `Huge Constants`, `Constant Limits`, `Constant Range`, `Constant Edges`). Excel 1.00's master disk image fails its key-disk check under Mini vMac; use the archive.org copy |
 | Nov 2026 | 1.00 | Ranges with an intersection of cells that do not overlap on a side (`=(R1C1 R2C2):R3C3`, both sides, inside SUM, and inside a union), entered with FORMULA, to settle a case the old compiler crashed on | A side with no area makes the range stand for none, and no area is a #NULL! memory error (`27`) in every class, not only value class. The rewritten compiler follows both rules (spec §15.4; `Empty Intersection Ranges`) |
 | Nov 2026 | 1.00 | TEXT of 27 values in 11 formats (297 cases), chosen where the double's binary expansion, Excel's 14-digit conversion and rounding ties give different text | Every number format rounds Excel's 14-digit conversion half up to its places, not the double itself: 50 cases the library got wrong before, all now matching. TEXT gives #VALUE! past 255 characters (spec §7; `TEXT Digits 1`–`3`) |
+| Nov 2026 | 1.00 | Sheets built to show text, bold, italic, alignments, fills, borders, a selection, scrolling, no gridlines, no headings, formulas shown, odd and hidden column widths, `Expenses`, Geneva 11 and 12, New York 10 and Monaco 9 as the standard font, and 17 scroll positions to row 16383, opened with `--keep-open` and each window captured from the screen | `ExcelRenderer` draws all but Geneva 11 pixel for pixel, apart from the mouse pointer: headings, gridlines and their pattern phase, clearing under spilled text, QuickDraw's italic, the selection and active cell, Excel's split boxes, the thumbs, and the grey past row 16384. The vertical thumb fits the 17 positions but its rule is inferred; Geneva 11, stretched from 12, differs in about 1,000 pixels (spec §13, Appendix D; the `Render` samples, `tests/Data/Screens`) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every
