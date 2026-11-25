@@ -157,6 +157,24 @@ public class CellTests
     }
 
     [Fact]
+    public void Grid_FilledColumnByColumn_KeepsEveryCell()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        for (int column = 0; column < 40; column++)
+        {
+            for (int row = 0; row < 30; row++)
+            {
+                document.Cells[row, column].SetInteger((ushort)(row * 100 + column));
+            }
+        }
+
+        var read = ExcelDocument.Read(document.ToArray());
+        Assert.Equal(1200, read.Cells.CountNonEmpty());
+        Assert.Equal(2939, read.Cells[29, 39].IntegerValue);
+        Assert.Equal(1, read.Cells[0, 1].IntegerValue);
+    }
+
+    [Fact]
     public void Grid_EnumerationsAgree()
     {
         var grid = new ExcelCellGrid();

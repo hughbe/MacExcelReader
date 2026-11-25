@@ -61,6 +61,18 @@ internal sealed class SylkWriter : IDisposable
 
     public void Write()
     {
+        int rows = WriteStart();
+        for (int row = 0; row < rows; row++)
+        {
+            WriteRow(row);
+        }
+
+        WriteEnd();
+    }
+
+    // Writes everything before the cells and returns how many rows of cells follow, for WriteRow.
+    public int WriteStart()
+    {
         _document.UpdateExtent();
         var state = _document.State;
         Append("ID;PXL;N;E"u8);
@@ -100,14 +112,21 @@ internal sealed class SylkWriter : IDisposable
 
         WriteNames();
         _fullFormats = _excel15 && margin;
-        for (int row = 0; row < rows; row++)
-        {
-            for (int column = 0; column < columns; column++)
-            {
-                WriteCell(row, column);
-            }
-        }
+        return rows;
+    }
 
+    // Writes the cells of one row; rows go in order, after WriteStart.
+    public void WriteRow(int row)
+    {
+        int columns = _document.State.GridColumns;
+        for (int column = 0; column < columns; column++)
+        {
+            WriteCell(row, column);
+        }
+    }
+
+    public void WriteEnd()
+    {
         Append("E"u8);
         EndRecord(escape: false);
     }

@@ -786,6 +786,41 @@ public class ExperimentTests
     }
 
     [Theory]
+    [InlineData("TEXT Digits 1")]
+    [InlineData("TEXT Digits 2")]
+    [InlineData("TEXT Digits 3")]
+    public void NumberFormats_ShowExcelsFourteenDigits(string name)
+    {
+        // Each row: a format's text, a value and =TEXT(value,format), recalculated by Excel 1.00. The values are ones
+        // whose binary expansion, 14-digit conversion or rounding ties tell the rules apart: a format shows the 14
+        // significant digits of Excel's decimal conversion, a tie at the 14th rounding down, then rounds them half up
+        // to its places (spec §7). TEXT gives #VALUE! for text longer than 255 characters (1E+300 written out).
+        var document = Load(name);
+        int compared = 0;
+        for (int row = 0; row < document.Cells.RowCount; row++)
+        {
+            if (document.Cells.Find(row, 2)?.Formula?.Result is not { } result)
+            {
+                continue;
+            }
+
+            string text = ExcelNumberFormat.Parse(document.Cells[row, 0].TextValue).Format(document.Cells[row, 1].NumberValue);
+            if (result.Kind == ExcelValueKind.Error)
+            {
+                Assert.Equal(ExcelError.Value, result.Error);
+                Assert.True(text.Length > 255, text);
+            }
+            else
+            {
+                Assert.Equal(result.Text, text);
+                compared++;
+            }
+        }
+
+        Assert.True(compared > 70);
+    }
+
+    [Theory]
     [InlineData("General As Text")]
     [InlineData("General As Text 2")]
     [InlineData("General As Text 1.5")]

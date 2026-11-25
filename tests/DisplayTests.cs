@@ -351,4 +351,23 @@ public class DisplayTests
 
         Assert.Equal(expected, string.Join(' ', Enumerable.Range(0, 11).Select(c => ExcelValueFormatter.FormatCell(document.Cells[0, c], document, c, version))));
     }
+
+    [Fact]
+    public void MarginColumn_IsNeverDrawn()
+    {
+        // A damaged file can hold a value in the table's margin column, one past IV (spec §6.1). Excel draws nothing
+        // there, so it formats and lays out as a hidden column does rather than throwing.
+        var document = ExcelDocument.CreateWorksheet();
+        document.Cells.Grow(1, ExcelCellGrid.MaxColumns + 1);
+        var margin = document.Cells.Find(0, ExcelCellGrid.MaxColumns)!;
+        margin.SetNumber(12345);
+        document.Cells[0, 255].SetNumber(12345);
+        document.State.SetColumnWidth(255, 0);
+        Assert.Equal(
+            ExcelValueFormatter.FormatCell(document.Cells[0, 255], document, 255),
+            ExcelValueFormatter.FormatCell(margin, document, ExcelCellGrid.MaxColumns));
+        Assert.Null(ExcelValueFormatter.LayoutCell(document, 0, 255));
+        Assert.Null(ExcelValueFormatter.LayoutCell(document, 0, ExcelCellGrid.MaxColumns));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ExcelValueFormatter.LayoutCell(document, 0, ExcelCellGrid.MaxColumns + 1));
+    }
 }

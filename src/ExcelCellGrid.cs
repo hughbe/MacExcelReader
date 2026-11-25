@@ -318,11 +318,13 @@ public sealed class ExcelCellGrid
         Debug.Assert(rows <= MaxRows + 1 && columns <= MaxColumns + 1);
         if (columns > ColumnCount)
         {
+            // A row's array can be longer than the grid is wide. Doubling it keeps filling a sheet column by column
+            // from copying every row each time a column is added.
             for (int r = 0; r < _rowCount; r++)
             {
-                if (_rows?[r] is { } row)
+                if (_rows?[r] is { } row && row.Length < columns)
                 {
-                    var grown = new ExcelCell?[columns];
+                    var grown = new ExcelCell?[Math.Max(columns, Math.Min(MaxColumns + 1, row.Length * 2))];
                     row.CopyTo(grown, 0);
                     _rows![r] = grown;
                 }
@@ -407,6 +409,37 @@ public sealed class ExcelCellGrid
     }
 
     /// <summary>
+    /// Gets the file's table entries for a row none of whose cells has been created, so the writer can copy them in
+    /// one piece, or returns false. The entries cover the file's columns, which may be fewer than the grid's.
+    /// </summary>
+    internal bool TryGetSourceRow(int row, out ReadOnlySpan<byte> entries)
+    {
+        entries = default;
+        if (_source is null || row >= _sourceRows || _rows?[row] is not null)
+        {
+            return false;
+        }
+
+        entries = _source.AsSpan(EntryOffset(row, 0), _sourceColumns * EntrySize);
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the cell data of a cell read from the file, given its table words.
+    /// </summary>
+    internal ReadOnlySpan<byte> GetSourceData(int row, int column, ushort word0, ushort word1, ExcelCellType type)
+    {
+        int offset = DataOffset(word0, word1);
+        if (offset >= _source!.Length)
+        {
+            throw new ExcelFormatException($"The data of cell {new ExcelCellAddress(row, column)} lies outside the file.");
+        }
+
+        var tail = _source.AsSpan(offset);
+        return tail.Slice(0, ExcelFormula.MeasureCellData(type, tail));
+    }
+
+    /// <summary>
     /// Gets an untouched cell's raw table entry and cell data so the writer can copy them, or returns
     /// false if the cell has been created (and may have changed) or is not from the file.
     /// </summary>
@@ -426,14 +459,7 @@ public sealed class ExcelCellGrid
         var type = CellWords.Type(word1);
         if (HasCellData(type))
         {
-            int offset = DataOffset(word0, word1);
-            if (offset >= _source!.Length)
-            {
-                throw new ExcelFormatException($"The data of cell {new ExcelCellAddress(row, column)} lies outside the file.");
-            }
-
-            var tail = _source.AsSpan(offset);
-            data = tail.Slice(0, ExcelFormula.MeasureCellData(type, tail));
+            data = GetSourceData(row, column, word0, word1, type);
         }
 
         return true;

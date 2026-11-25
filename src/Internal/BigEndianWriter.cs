@@ -110,6 +110,8 @@ internal sealed class BigEndianWriter : IDisposable
     public void PatchUInt16(int position, ushort value)
         => BinaryPrimitives.WriteUInt16BigEndian(_buffer.AsSpan(position, 2), value);
 
+    public void PatchBytes(int position, ReadOnlySpan<byte> bytes) => bytes.CopyTo(_buffer.AsSpan(position, bytes.Length));
+
     public void PatchUInt32(int position, uint value)
         => BinaryPrimitives.WriteUInt32BigEndian(_buffer.AsSpan(position, 4), value);
 

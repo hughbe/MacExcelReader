@@ -25,6 +25,55 @@ public class SylkTests
     [MemberData(nameof(Exports15))]
     public void ExportMatchesExcel15(string sample) => AssertMatches(sample, "Sylk 1.5", ExcelVersion.Excel150);
 
+    [Theory]
+    [MemberData(nameof(Exports))]
+    public async Task ExportAsync_WritesTheSameBytes(string sample)
+    {
+        var document = ExcelDocument.Load(TestData.SamplePath(sample));
+        var expected = new MemoryStream();
+        document.ExportSylk(expected, ExcelVersion.Excel150);
+        var actual = new MemoryStream();
+        await document.ExportSylkAsync(actual, ExcelVersion.Excel150);
+        Assert.Equal(expected.ToArray(), actual.ToArray());
+    }
+
+    [Fact]
+    public async Task ExportAsync_WritesALargeSheetInPieces()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        for (int row = 0; row < 600; row++)
+        {
+            for (int column = 0; column < 10; column++)
+            {
+                document.Cells[row, column].SetText($"Row {row} column {column}");
+            }
+        }
+
+        var expected = new MemoryStream();
+        document.ExportSylk(expected);
+        var actual = new WriteCountingStream();
+        await document.ExportSylkAsync(actual);
+        Assert.Equal(expected.ToArray(), actual.ToArray());
+
+        // The export goes out in writes of roughly 16 KB, not one write of the whole of it.
+        Assert.True(actual.Writes >= expected.Length / 32768, $"{actual.Writes} writes of {expected.Length} bytes");
+        Assert.True(actual.LargestWrite < 32768, $"largest write {actual.LargestWrite}");
+    }
+
+    private sealed class WriteCountingStream : MemoryStream
+    {
+        public int Writes { get; private set; }
+
+        public int LargestWrite { get; private set; }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Writes++;
+            LargestWrite = Math.Max(LargestWrite, buffer.Length);
+            return base.WriteAsync(buffer, cancellationToken);
+        }
+    }
+
     private static void AssertMatches(string sample, string folder, ExcelVersion version)
     {
         var document = ExcelDocument.Load(TestData.SamplePath(sample));
