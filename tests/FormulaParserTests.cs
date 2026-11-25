@@ -191,9 +191,9 @@ public class FormulaParserTests
             string text = name.GetDefinitionText(document);
             var (parsed, arrays) = ExcelFormulaParser.ParseNameDefinition(text, document, SavedBy(bytes));
             Assert.True(
-                Normalize(name.Definition, true).AsSpan().SequenceEqual(Normalize(parsed, true))
-                    || DiffersOnlyInNumberPrecision(name.Definition, parsed, text, document),
-                $"{name.Name} = {text}: {Convert.ToHexString(name.Definition)} vs {Convert.ToHexString(parsed)}");
+                Normalize(name.Definition.Span, true).AsSpan().SequenceEqual(Normalize(parsed, true))
+                    || DiffersOnlyInNumberPrecision(name.Definition.ToArray(), parsed, text, document),
+                $"{name.Name} = {text}: {Convert.ToHexString(name.Definition.Span)} vs {Convert.ToHexString(parsed)}");
             Assert.Equal(name.ArrayConstants.Select(ClearLeftovers), arrays.Select(ClearLeftovers));
         }
     }

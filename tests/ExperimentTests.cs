@@ -881,7 +881,7 @@ public class ExperimentTests
         var document = Load(name);
         var d5 = new ExcelCellAddress(4, 3);
         var names = document.Names.ToDictionary(n => n.Name);
-        Assert.Equal([0x2C, 0xFF, 0xFD, 0xFE], names["Up3"].Definition);
+        Assert.Equal([0x2C, 0xFF, 0xFD, 0xFE], names["Up3"].Definition.ToArray());
         Assert.Equal("B2", names["Up3"].GetDefinitionText(document, d5));
         Assert.Equal("IU16382", names["Up3"].GetDefinitionText(document));
         Assert.Equal("B2:B3", names["UpArea"].GetDefinitionText(document, d5));
@@ -1306,5 +1306,27 @@ public class ExperimentTests
         Assert.Equal("1.7976931348623E+308", ExcelValueFormatter.FormatCell(document.Cells["A2"], document, 0));
         Assert.Matches("^#+$", ExcelValueFormatter.FormatCell(document.Cells["A3"], document, 0));
         Assert.Matches("^#+$", ExcelValueFormatter.FormatCell(document.Cells["A4"], document, 0));
+    }
+
+    [Fact]
+    public void EmptyIntersectionRanges_AreMemoryErrorsInEveryClass()
+    {
+        // Entered with FORMULA in Excel 1.00: a range with an intersection of cells that do not overlap on either side
+        // stands for no area, so Excel compiles a #NULL! memory error (27) in place of a memory area, inside SUM
+        // (reference class) as well as at the top (value class) (spec §15.4).
+        var document = Load("Empty Intersection Ranges");
+        foreach (string cell in new[] { "A2", "A3", "A4", "A5", "A7", "A8" })
+        {
+            var formula = document.Cells[cell].Formula!;
+            var first = FormulaTokens.Enumerate(formula.Expression);
+            Assert.True(first.MoveNext());
+            Assert.Equal(0x27, first.Current.Code);
+            Assert.Equal(0x00, formula.Expression[2]);            // #NULL!
+            Assert.Equal(ExcelError.Null, formula.Result.Error);
+        }
+
+        Assert.Equal(0x27, document.Cells["A5"].Formula!.Expression[0]);   // reference class, as SUM's argument
+        Assert.Equal(0x47, document.Cells["A2"].Formula!.Expression[0]);   // value class, at the top
+        Assert.Equal(0x46, document.Cells["A6"].Formula!.Expression[0]);   // ($A$1 $A$1):$C$3 is one area: a memory area
     }
 }

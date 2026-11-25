@@ -11,9 +11,12 @@ internal static class BooleanText
     public static string Of(bool value) => value ? True : False;
 
     /// <summary>Parses <c>TRUE</c> or <c>FALSE</c>, ignoring case.</summary>
-    public static bool TryParse(string text, out bool value)
+    public static bool TryParse(string text, out bool value) => TryParse(text.AsSpan(), out value);
+
+    /// <summary>Parses <c>TRUE</c> or <c>FALSE</c>, ignoring case.</summary>
+    public static bool TryParse(ReadOnlySpan<char> text, out bool value)
     {
-        value = string.Equals(text, True, StringComparison.OrdinalIgnoreCase);
-        return value || string.Equals(text, False, StringComparison.OrdinalIgnoreCase);
+        value = text.Equals(True, StringComparison.OrdinalIgnoreCase);
+        return value || text.Equals(False, StringComparison.OrdinalIgnoreCase);
     }
 }

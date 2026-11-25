@@ -24,13 +24,18 @@ public sealed class ExcelCell
     }
 
     // The value: a string or an ExcelFormula; or, until first access, the file buffer
-    // the number, text or formula record is read from at _dataOffset. Numbers are never cached, so
+    // the number, text or formula record is read from at DataOffset. Numbers are never cached, so
     // reading them does not allocate.
     private object? _payload;
-    private int _dataOffset;
 
-    // The value of a number cell set with SetNumber, kept out of _payload so that setting it does not box.
-    private double _number;
+    // While _payload is the file buffer, the offset of the cell's data in it; for a number set with SetNumber, the
+    // number's bits, kept out of _payload so that setting it does not box. A cell never needs both, so they share
+    // the field and a cell is no larger for either.
+    private long _data;
+
+    private int DataOffset => (int)_data;
+
+    private double StoredNumber => BitConverter.Int64BitsToDouble(_data);
 
     // An empty, locked cell. Cells belong to a grid, which creates them (ExcelCellGrid's indexer).
     internal ExcelCell()
@@ -108,16 +113,16 @@ public sealed class ExcelCell
         ? ReadNumber()
         : throw new InvalidOperationException("The cell is not a number cell.");
 
-    private double ReadNumber() => _payload is byte[] source ? ReadLazyDouble(source) : _number;
+    private double ReadNumber() => _payload is byte[] source ? ReadLazyDouble(source) : StoredNumber;
 
     private double ReadLazyDouble(byte[] source)
     {
-        if ((uint)_dataOffset > (uint)source.Length || source.Length - _dataOffset < 8)
+        if ((uint)DataOffset > (uint)source.Length || source.Length - DataOffset < 8)
         {
-            throw new ExcelFormatException($"A numeric cell's data at file offset {_dataOffset} runs past the end of the file.");
+            throw new ExcelFormatException($"A numeric cell's data at file offset {DataOffset} runs past the end of the file.");
         }
 
-        return System.Buffers.Binary.BinaryPrimitives.ReadDoubleBigEndian(source.AsSpan(_dataOffset));
+        return System.Buffers.Binary.BinaryPrimitives.ReadDoubleBigEndian(source.AsSpan(DataOffset));
     }
 
     /// <summary>
@@ -162,12 +167,12 @@ public sealed class ExcelCell
     {
         if (_payload is byte[] source)
         {
-            if (_dataOffset >= source.Length || _dataOffset + 1 + source[_dataOffset] > source.Length)
+            if (DataOffset >= source.Length || DataOffset + 1 + source[DataOffset] > source.Length)
             {
-                throw new ExcelFormatException($"A text cell's data at file offset {_dataOffset} runs past the end of the file.");
+                throw new ExcelFormatException($"A text cell's data at file offset {DataOffset} runs past the end of the file.");
             }
 
-            _payload = MacRoman.GetString(source.AsSpan(_dataOffset + 1, source[_dataOffset]));
+            _payload = MacRoman.GetString(source.AsSpan(DataOffset + 1, source[DataOffset]));
         }
 
         return (string?)_payload ?? string.Empty;
@@ -177,7 +182,7 @@ public sealed class ExcelCell
     {
         if (_payload is byte[] source)
         {
-            _payload = ExcelFormula.Read(source, _dataOffset);
+            _payload = ExcelFormula.Read(source, DataOffset);
         }
 
         return (ExcelFormula)_payload!;
@@ -199,7 +204,7 @@ public sealed class ExcelCell
         ExcelCellType.Number => ExcelValue.FromNumber(ReadNumber()),
         ExcelCellType.Text => ExcelValue.FromText(DecodeText()),
         ExcelCellType.NumericFormula or ExcelCellType.Formula => _payload is byte[] source
-            ? ExcelFormula.ReadResult(source.AsSpan(_dataOffset))
+            ? ExcelFormula.ReadResult(source.AsSpan(DataOffset))
             : DecodeFormula().Result,
         _ => ExcelValue.Empty,
     };
@@ -253,7 +258,7 @@ public sealed class ExcelCell
 
         ClearValue();
         Type = ExcelCellType.Number;
-        _number = value;
+        _data = BitConverter.DoubleToInt64Bits(value);
     }
 
     /// <summary>
@@ -333,7 +338,7 @@ public sealed class ExcelCell
     private void ClearValue()
     {
         _payload = null;
-        _number = 0;
+        _data = 0;
         Type = ExcelCellType.Empty;
         Word0 = 0;
         Word1 &= 0x0FFF;
@@ -345,7 +350,7 @@ public sealed class ExcelCell
     internal void LoadLazy(byte[] source, int dataOffset)
     {
         _payload = source;
-        _dataOffset = dataOffset;
+        _data = dataOffset;
     }
 
     /// <summary>

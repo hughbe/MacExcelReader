@@ -32,7 +32,7 @@ public sealed class ExcelExternalDocument
     /// Gets the six bytes that precede the name: the start of Excel's in-memory entry, which Excel never uses and keeps
     /// at 0 (spec §8). They are kept so a file round-trips byte for byte.
     /// </summary>
-    public byte[] Reserved { get; internal set; }
+    public ReadOnlyMemory<byte> Reserved { get; internal set; }
 
     /// <summary>
     /// Gets the names this sheet uses from the document (spec §10). A name token inside an external

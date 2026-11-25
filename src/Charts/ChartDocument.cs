@@ -29,7 +29,7 @@ public sealed class ChartDocument
     public ushort Signature { get; set; } = ChartSignature;
 
     /// <summary>Gets or sets the embedded p-code segment (empty for documents created here).</summary>
-    public byte[] CodeSegment { get; set; } = [];
+    public ReadOnlyMemory<byte> CodeSegment { get; set; }
 
     /// <summary>Gets or sets the 8-byte chart-set header (skipped by Excel on load).</summary>
     public byte[] ChartSetHeader { get; set; } = [0, 0, 0, 0, 0, 1, 0, 0x11];
@@ -276,7 +276,6 @@ public sealed class ChartDocument
             throw new InvalidOperationException("A chart document has one or two charts.");
         }
 
-        RequireLength(CodeSegment, null, "Code segment");
         RequireLength(ChartSetHeader, 8, "Chart-set header");
         RequireLength(Window, 12, "Window");
         RequireLength(PageSetup, PageSetupBodySize, "Page setup", allowNull: true);
@@ -305,7 +304,7 @@ public sealed class ChartDocument
         int seriesOffsetPosition = writer.Position;
         writer.WriteUInt16(0);
         writer.WriteZeros(HeaderSize - writer.Position);
-        writer.WriteBytes(CodeSegment);
+        writer.WriteBytes(CodeSegment.Span);
 
         writer.WriteBytes(ChartSetHeader);
         foreach (var chart in Charts)

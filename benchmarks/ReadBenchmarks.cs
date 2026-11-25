@@ -192,4 +192,33 @@ public class ReadBenchmarks
 
         return length;
     }
+
+    private readonly char[] _text = new char[512];
+
+    [Benchmark]
+    public int TryFormatDbFormCells()
+    {
+        int length = 0;
+        foreach (var cell in _dbFormDocument.Cells.NonEmptyCells)
+        {
+            ExcelValueFormatter.TryFormatCell(cell, _dbFormDocument, _text, out int written);
+            length += written;
+        }
+
+        return length;
+    }
+
+    [Benchmark]
+    public long WriteExpensesToStream()
+    {
+        ExcelDocument.Read(_expenses, copyData: false).Write(Stream.Null);
+        return _expenses.Length;
+    }
+
+    [Benchmark]
+    public long ExportDbFormSylkToStream()
+    {
+        _dbFormDocument.ExportSylk(Stream.Null);
+        return _dbForm.Length;
+    }
 }

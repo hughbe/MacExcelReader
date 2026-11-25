@@ -167,9 +167,8 @@ public class ExcelDocumentTests
     {
         var created = ExcelDocument.CreateWorksheet().ToArray();
         var excel = ExcelDocument.Read(File.ReadAllBytes(SamplePath("Worksheet1.xls")));
-        excel.CodeSegments.Clear();
-        excel.CodeSegments.Add([]);
-        excel.CodeSegments.Add([]);
+        excel.CodeSegment1 = default;
+        excel.CodeSegment2 = default;
         excel.Windows[0].ActiveColumn = 0;
         excel.Windows[0].ActiveRow = 0;
         excel.Windows[0].Selection[0] = new ExcelRange(0, 0, 0, 0);

@@ -5,13 +5,27 @@ namespace MacExcelReader.Internal;
 /// <summary>
 /// Growable big-endian writer.
 /// </summary>
-internal sealed class BigEndianWriter
+internal sealed class BigEndianWriter : IDisposable
 {
     private byte[] _buffer;
 
-    public BigEndianWriter(int capacity = 4096)
+    // Whether the buffer is rented from the shared pool, to be returned by Dispose.
+    private readonly bool _pooled;
+
+    public BigEndianWriter(int capacity = 4096, bool pooled = false)
     {
-        _buffer = new byte[Math.Max(16, capacity)];
+        _pooled = pooled;
+        capacity = Math.Max(16, capacity);
+        _buffer = pooled ? System.Buffers.ArrayPool<byte>.Shared.Rent(capacity) : new byte[capacity];
+    }
+
+    public void Dispose()
+    {
+        if (_pooled && _buffer.Length > 0)
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(_buffer);
+            _buffer = [];
+        }
     }
 
     public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, Position);
@@ -24,7 +38,18 @@ internal sealed class BigEndianWriter
     {
         if (Position + count > _buffer.Length)
         {
-            Array.Resize(ref _buffer, Math.Max(_buffer.Length + _buffer.Length / 2, Position + count));
+            int size = Math.Max(_buffer.Length + _buffer.Length / 2, Position + count);
+            if (_pooled)
+            {
+                var larger = System.Buffers.ArrayPool<byte>.Shared.Rent(size);
+                _buffer.AsSpan(0, Position).CopyTo(larger);
+                System.Buffers.ArrayPool<byte>.Shared.Return(_buffer);
+                _buffer = larger;
+            }
+            else
+            {
+                Array.Resize(ref _buffer, size);
+            }
         }
 
         var span = _buffer.AsSpan(Position, count);
@@ -92,5 +117,5 @@ internal sealed class BigEndianWriter
     /// Gets the bytes written. When they fill the buffer exactly, the buffer itself is returned and the writer must
     /// not be used again.
     /// </summary>
-    public byte[] ToArray() => Position == _buffer.Length ? _buffer : _buffer.AsSpan(0, Position).ToArray();
+    public byte[] ToArray() => !_pooled && Position == _buffer.Length ? _buffer : _buffer.AsSpan(0, Position).ToArray();
 }

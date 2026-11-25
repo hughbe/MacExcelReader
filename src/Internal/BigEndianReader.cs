@@ -73,6 +73,17 @@ internal sealed class BigEndianReader
     }
 
     /// <summary>
+    /// Reads bytes as memory over the buffer, without copying them.
+    /// </summary>
+    public ReadOnlyMemory<byte> ReadMemory(int count)
+    {
+        Require(count);
+        var result = _data.AsMemory(Position, count);
+        Position += count;
+        return result;
+    }
+
+    /// <summary>
     /// Reads bytes without copying them.
     /// </summary>
     public ReadOnlySpan<byte> ReadSpan(int count)

@@ -89,10 +89,19 @@ internal static class FormulaDecompiler
     /// <summary>
     /// Appends a name definition in R1C1 style. Its relative references already hold offsets (spec §11).
     /// </summary>
+    /// <summary>
+    /// Appends a name definition in A1 style, its relative references placed relative to <paramref name="relativeTo"/>.
+    /// </summary>
+    internal static void AppendDefinition(ref TextBuffer text, ExcelDefinedName name, ExcelDocument? document, ExcelCellAddress relativeTo)
+    {
+        var fixups = new FixupSource([], name.HasArrayConstants ? name.ArrayConstants : null, inPlace: true);
+        Write(ref text, name.Definition.Span, fixups, document, new References(relativeTo, r1c1: false));
+    }
+
     internal static void AppendDefinitionR1C1(ref TextBuffer text, ExcelDefinedName name, ExcelDocument? document)
     {
         var fixups = new FixupSource([], name.HasArrayConstants ? name.ArrayConstants : null, inPlace: true);
-        Write(ref text, name.Definition, fixups, document, new References(default, r1c1: true));
+        Write(ref text, name.Definition.Span, fixups, document, new References(default, r1c1: true));
     }
 
     // How references are written: A1 style, with a definition's relative parts placed relative to Origin, or R1C1

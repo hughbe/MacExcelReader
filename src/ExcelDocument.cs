@@ -64,15 +64,18 @@ public sealed class ExcelDocument
     /// <summary>Gets or sets the code signature of the build that wrote the file (header word 4).</summary>
     public ushort Signature { get; set; } = CodeSignature;
 
-    /// <summary>Gets the six zero bytes that follow the signature.</summary>
-    public byte[] HeaderReserved { get; private set; } = new byte[6];
+    /// <summary>Gets the six bytes that follow the signature, zero in every file.</summary>
+    public ReadOnlyMemory<byte> HeaderReserved { get; private set; } = new byte[6];
 
     /// <summary>
-    /// Gets the two embedded p-code segments (spec §4.1). They are only used when another build of Excel links
-    /// to this document while it is closed. Documents created with this library have empty segments. Excel
-    /// reads the data offset from a fixed position in the 24-byte header, so there must be exactly two.
+    /// Gets or sets the first of the two embedded p-code segments (spec §4.1), the one a different build of Excel
+    /// loads to read this document through a link while it is closed. Documents created with this library have
+    /// empty segments. A document read from a file refers to the file's bytes rather than copying them.
     /// </summary>
-    public List<byte[]> CodeSegments { get; } = [];
+    public ReadOnlyMemory<byte> CodeSegment1 { get; set; }
+
+    /// <summary>Gets or sets the second embedded p-code segment (spec §4.1).</summary>
+    public ReadOnlyMemory<byte> CodeSegment2 { get; set; }
 
     /// <summary>Gets or sets the function count of the writing build (208 for Excel 1.x).</summary>
     public ushort FunctionCount { get; set; } = (ushort)ExcelFunctions.Count;
@@ -213,8 +216,6 @@ public sealed class ExcelDocument
     private static ExcelDocument Create(ExcelDocumentKind kind)
     {
         var document = new ExcelDocument(ExcelSheetState.CreateDefault()) { Kind = kind };
-        document.CodeSegments.Add([]);
-        document.CodeSegments.Add([]);
         foreach (var name in new[] { "Criteria", "Database", "Print_Area", "Print_Titles", "Recorder" })
         {
             document.Names.Add(new ExcelDefinedName(name));
@@ -297,7 +298,7 @@ public sealed class ExcelDocument
         }
 
         ushort signature = reader.ReadUInt16();
-        var headerReserved = reader.ReadBytes(6);
+        var headerReserved = reader.ReadMemory(6);
         // Excel's Open reads neither the segment count nor the segment table (spec §4), and opens a file with junk in
         // them; it uses the segments only to link to a closed document. Keep the two segments the table describes when
         // it describes them, and two empty ones otherwise.
@@ -312,7 +313,7 @@ public sealed class ExcelDocument
         int dataOffset = reader.ReadUInt16();
         reader.Position = dataOffset;
         ushort functionCount = reader.ReadUInt16();
-        var document = new ExcelDocument(new ExcelSheetState(reader.ReadBytes(ExcelSheetState.Size)))
+        var document = new ExcelDocument(ExcelSheetState.Over(reader.ReadMemory(ExcelSheetState.Size)))
         {
             Signature = signature,
             Version = (ExcelFormatVersion)version,
@@ -327,9 +328,10 @@ public sealed class ExcelDocument
         };
 
         bool segmentsInFile = segmentInfo.All(s => s.Offset >= 0 && s.Offset + s.Length <= dataOffset);
-        foreach (var (length, offset) in segmentInfo)
+        if (segmentsInFile)
         {
-            document.CodeSegments.Add(segmentsInFile ? data.AsSpan(offset, length).ToArray() : []);
+            document.CodeSegment1 = data.AsMemory(segmentInfo[0].Offset, segmentInfo[0].Length);
+            document.CodeSegment2 = data.AsMemory(segmentInfo[1].Offset, segmentInfo[1].Length);
         }
 
         var table = new int[8];
@@ -441,7 +443,7 @@ public sealed class ExcelDocument
             int count = reader.ReadUInt16();
             for (int i = 0; i < count; i++)
             {
-                var reserved = reader.ReadBytes(6);
+                var reserved = reader.ReadMemory(6);
                 ExternalDocuments.Add(new ExcelExternalDocument(reader.ReadPascalString()) { Reserved = reserved });
             }
         }
@@ -470,7 +472,7 @@ public sealed class ExcelDocument
         int position = 0;
         foreach (var name in Names)
         {
-            var blocks = FormulaTokens.ReadConsecutiveArrayBlocks(name.Definition, data, ref position);
+            var blocks = FormulaTokens.ReadConsecutiveArrayBlocks(name.Definition.Span, data, ref position);
             if (blocks.Count > 0)
             {
                 name.ArrayConstants.AddRange(blocks);
@@ -556,7 +558,8 @@ public sealed class ExcelDocument
     public async Task WriteAsync(Stream stream, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        await stream.WriteAsync(Serialize().WrittenMemory, cancellationToken).ConfigureAwait(false);
+        using var writer = Serialize(pooled: true);
+        await stream.WriteAsync(writer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -593,7 +596,8 @@ public sealed class ExcelDocument
     public void Write(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        stream.Write(Serialize().WrittenSpan);
+        using var writer = Serialize(pooled: true);
+        stream.Write(writer.WrittenSpan);
     }
 
     /// <summary>
@@ -620,9 +624,9 @@ public sealed class ExcelDocument
     public void ExportSylk(Stream stream, ExcelVersion version = ExcelVersion.Excel100)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        var buffer = new ArrayBufferWriter<byte>();
+        using var buffer = new StreamBufferWriter(stream);
         ExportSylk(buffer, version);
-        stream.Write(buffer.WrittenSpan);
+        buffer.Flush();
     }
 
     /// <summary>
@@ -717,7 +721,7 @@ public sealed class ExcelDocument
             {
                 rows += padRow ? 1 : 0;
                 columns += padColumn ? 1 : 0;
-                Cells.EnsureSize(rows, columns);
+                Cells.Grow(rows, columns);
             }
         }
 
@@ -727,7 +731,7 @@ public sealed class ExcelDocument
     /// <summary>
     /// Serialises the document.
     /// </summary>
-    public byte[] ToArray() => Serialize().ToArray();
+    public byte[] ToArray() => Serialize(pooled: false).ToArray();
 
     /// <summary>
     /// Puts <see cref="Names"/> in the alphabetical order Excel keeps them in, ignoring case and accents, renumbering the name
@@ -763,7 +767,7 @@ public sealed class ExcelDocument
         {
             if (name.Definition.Length > 0)
             {
-                var definition = (byte[])name.Definition.Clone();
+                var definition = name.Definition.ToArray();
                 FormulaTokens.RemapNames(definition, definition, map, definition: true);
                 name.Definition = definition;
             }
@@ -844,7 +848,8 @@ public sealed class ExcelDocument
         return true;
     }
 
-    private BigEndianWriter Serialize()
+    // Builds the file. A pooled writer, for writing to a stream, must be disposed once its bytes are written.
+    private BigEndianWriter Serialize(bool pooled)
     {
         if (!NamesUnchanged())
         {
@@ -860,31 +865,22 @@ public sealed class ExcelDocument
 
         // A document read from a file usually saves to the same size, so a buffer of that size is returned without
         // a copy.
-        var writer = new BigEndianWriter(_sourceLength > 0 ? _sourceLength : 4096);
+        var writer = new BigEndianWriter(_sourceLength > 0 ? _sourceLength : 4096, pooled);
         writer.WriteUInt16(Magic);
         writer.WriteUInt16((ushort)Version);
         writer.WriteUInt16(Signature);
-        writer.WriteBytes(HeaderReserved);
-        if (CodeSegments.Count != 2)
-        {
-            throw new InvalidOperationException("A document must have exactly two code segments (they may be empty); Excel reads the data offset from header offset 22.");
-        }
+        writer.WriteBytes(HeaderReserved.Span);
 
-        writer.WriteUInt16((ushort)CodeSegments.Count);
-        int headerSize = 14 + 4 * CodeSegments.Count + 2;
-        int segmentOffset = headerSize;
-        foreach (var segment in CodeSegments)
-        {
-            writer.WriteUInt16((ushort)segment.Length);
-            writer.WriteUInt16((ushort)segmentOffset);
-            segmentOffset += segment.Length;
-        }
-
-        writer.WriteUInt16(checked((ushort)segmentOffset));
-        foreach (var segment in CodeSegments)
-        {
-            writer.WriteBytes(segment);
-        }
+        // Always two segments: Excel reads the data offset from header word 22, after two entries (spec §4).
+        writer.WriteUInt16(2);
+        const int headerSize = 14 + 4 * 2 + 2;
+        writer.WriteUInt16(checked((ushort)CodeSegment1.Length));
+        writer.WriteUInt16(headerSize);
+        writer.WriteUInt16(checked((ushort)CodeSegment2.Length));
+        writer.WriteUInt16(checked((ushort)(headerSize + CodeSegment1.Length)));
+        writer.WriteUInt16(checked((ushort)(headerSize + CodeSegment1.Length + CodeSegment2.Length)));
+        writer.WriteBytes(CodeSegment1.Span);
+        writer.WriteBytes(CodeSegment2.Span);
 
         ValidateExtraFunctionNames();
         writer.WriteUInt16(FunctionCount);
@@ -933,7 +929,7 @@ public sealed class ExcelDocument
             writer.WriteUInt16((ushort)ExternalDocuments.Count);
             foreach (var external in ExternalDocuments)
             {
-                writer.WriteBytes(external.Reserved);
+                writer.WriteBytes(external.Reserved.Span);
                 writer.WritePascalString(external.Name);
             }
         }

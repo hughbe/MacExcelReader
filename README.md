@@ -144,19 +144,23 @@ Measured with BenchmarkDotNet (`benchmarks/`) on an Apple Silicon Mac with .NET 
 
 | Operation | Time | Allocated |
 |-----------|-----:|----------:|
-| Read Expenses (15 KB, 988 cells) | 2.4 µs | 23 KB |
-| Read DB.FORM (24 KB, 433 cells, 275 formulas) | 6.4 µs | 37 KB |
-| Read large sheet | 56 µs | 854 KB |
-| Read large sheet, `copyData: false` | 11 µs | 27 KB |
-| Read large sheet, `copyData: false`, and sum every number via `NonEmptyCells` | 148 µs | 27 KB |
-| Read large sheet and create every cell object (`GetCell`) | 1.5 ms | 2.7 MB |
-| Read and re-save Expenses unchanged | 16 µs | 54 KB |
-| Read and re-save the large sheet unchanged | 753 µs | 2.5 MB |
-| Read DB.FORM and decompile all 275 formulas | 52 µs | 205 KB |
-| Parse `=IF(A1>0,SUM($A$1:$A$5)*2,-1)` | 0.83 µs | 2.4 KB |
-| Parse all 275 DB.FORM formulas from text | 110 µs | 315 KB |
+| Read Expenses (15 KB, 988 cells) | 0.82 µs | 17 KB |
+| Read DB.FORM (24 KB, 433 cells, 275 formulas) | 2.4 µs | 30 KB |
+| Read large sheet | 42 µs | 849 KB |
+| Read large sheet, `copyData: false` | 0.36 µs | 1.8 KB |
+| Read large sheet, `copyData: false`, and sum every number via `NonEmptyCells` | 119 µs | 1.8 KB |
+| Read large sheet and create every cell object (`GetCell`) | 1.4 ms | 2.7 MB |
+| Read and re-save Expenses unchanged | 11.3 µs | 32 KB |
+| Read Expenses with `copyData: false` and write it to a stream | 10.7 µs | 1.8 KB |
+| Read and re-save the large sheet unchanged | 626 µs | 1.7 MB |
+| Read DB.FORM and decompile all 275 formulas | 51 µs | 95 KB |
+| Format every DB.FORM cell for display, as strings | 11.6 µs | 20 KB |
+| Format every DB.FORM cell for display, into a span (`TryFormatCell`) | 14.8 µs | 0 B |
+| Export DB.FORM as SYLK to a stream | 68 µs | 120 B |
+| Parse `=IF(A1>0,SUM($A$1:$A$5)*2,-1)` | 0.46 µs | 144 B |
+| Parse all 275 DB.FORM formulas from text | 58 µs | 31 KB |
 
-The 854 KB when reading the large sheet is the copy of the input; pass `copyData: false` to avoid it.
+The 849 KB when reading the large sheet is the copy of the input; pass `copyData: false` to avoid it. Parsing allocates only the formula it returns.
 
 Displaying values allocates only the strings it returns, and nothing through the span forms
 (`ExcelValueFormatter.TryFormatCell`, `ExcelNumberFormat.TryFormat`, `ExcelValue.TryFormat`,

@@ -152,8 +152,8 @@ public class CellTests
         Assert.NotNull(grid.Find("C5"));
         Assert.Null(grid.Find("D5"));
         // The table may hold the blank margin past the sheet's last row and column (spec §6.1), and no more.
-        Assert.Throws<ArgumentOutOfRangeException>(() => grid.EnsureSize(16386, 1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => grid.EnsureSize(1, 258));
+        Assert.Throws<ArgumentOutOfRangeException>(() => grid.EnsureSize(16385, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => grid.EnsureSize(1, 257));
     }
 
     [Fact]
@@ -271,7 +271,7 @@ public class CellTests
         var document = ExcelDocument.CreateWorksheet();
         var above = new ExcelDefinedName("Above");
         above.SetDefinition("=B1", new ExcelCellAddress(1, 1), document);
-        Assert.Equal([0x2C, 0xFF, 0xFF, 0x00], above.Definition);   // row −1 and column 0, both relative
+        Assert.Equal([0x2C, 0xFF, 0xFF, 0x00], above.Definition.ToArray());   // row −1 and column 0, both relative
         Assert.Equal("D9", above.GetDefinitionText(document, new ExcelCellAddress(9, 3)));
     }
 

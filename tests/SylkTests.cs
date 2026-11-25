@@ -37,6 +37,19 @@ public class SylkTests
         document.ExportSylk(output, version);
 
         byte[] expected = File.ReadAllBytes(Path.Combine(DataDirectory, folder, sample + ".slk"));
+
+        // Through a stream, and through a buffer small enough to flush many times, the bytes are the same.
+        var stream = new MemoryStream();
+        document.ExportSylk(stream, version);
+        Assert.Equal(output.WrittenSpan.ToArray(), stream.ToArray());
+        var small = new MemoryStream();
+        using (var writer = new MacExcelReader.Internal.StreamBufferWriter(small, 16))
+        {
+            document.ExportSylk(writer, version);
+            writer.Flush();
+        }
+
+        Assert.Equal(output.WrittenSpan.ToArray(), small.ToArray());
         if (!output.WrittenSpan.SequenceEqual(expected))
         {
             var ours = Lines(output.WrittenSpan, sample);

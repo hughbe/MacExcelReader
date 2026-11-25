@@ -1582,13 +1582,16 @@ again.
 
 * Built only from cell references and areas on this sheet, it is a **memory area**, `26 xx xx xx n`. The
   compiler also works out the areas the expression stands for and puts them in the fix-ups (§12.5): the
-  operands of a union, the overlaps of an intersection, the bounding box of a range. `=SUM((A1,B2),C3)` is `26
+  operands of a union, the overlaps of an intersection, the bounding box of a range. A range with a side
+  that stands for no area, such as an intersection of cells that do not overlap, stands for none. `=SUM((A1,B2),C3)` is `26
   … 09 24… 24… 10 15 24… 42 02 04` with areas A1 and B2, and `=A1:B2 B1:C3` is `46 … 0F 25… 25… 0F` with one
   area, B1:B2.
-* Where a single value is needed (value class) and the areas are not exactly one, it is a **memory error**
-  instead, with no areas in the fix-ups: `=(A1,B2)` is `47 00 0F xx 09 24… 24… 10 15` (#VALUE!), and `=A1 B1`,
-  whose cells do not overlap, is `47 00 00 xx 09 24… 24… 0F` (#NULL!). Excel 1.03 compiled both (`Memory
-  Error` and `Errors` samples).
+* Where the expression stands for no area, or a single value is needed (value class) and it stands for more
+  than one, it is a **memory error** instead, with no areas in the fix-ups: `=(A1,B2)` is `47 00 0F xx 09 24…
+  24… 10 15` (#VALUE!), and `=A1 B1`, whose cells do not overlap, is `47 00 00 xx 09 24… 24… 0F` (#NULL!).
+  Excel 1.03 compiled both (`Memory Error` and `Errors` samples). No area gives #NULL! in any class: Excel 1.00
+  compiles `=SUM(($A$1 $B$2):$C$3)` to `27 00 00 xx 0F …` and `=($A$1 $B$2):$C$3` to `47 00 00 xx 0F …`
+  (`Empty Intersection Ranges`).
 * Otherwise (a name, a function result, another sheet) it is a **memory function**, `29 n` (`2E n` in a name
   definition).
 

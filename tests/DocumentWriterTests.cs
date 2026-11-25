@@ -15,7 +15,7 @@ public class DocumentWriterTests
         Assert.Equal(5, document.Names.Count);
         Assert.Single(document.Windows);
         Assert.False(document.Windows[0].DisplayFormulas);
-        Assert.Equal(2, document.CodeSegments.Count);
+        Assert.True(document.CodeSegment1.IsEmpty && document.CodeSegment2.IsEmpty);
 
         var reread = RoundTrip(document);
         Assert.Equal(0, reread.Cells.RowCount);
@@ -109,9 +109,12 @@ public class DocumentWriterTests
         Assert.Equal(2, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(12)));
         Assert.Equal(24, System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(22)));
 
+        // Two segments are always written, so the data offset lands at header word 22 (spec §4).
         var document = ExcelDocument.CreateWorksheet();
-        document.CodeSegments.Clear();
-        Assert.Throws<InvalidOperationException>(() => document.ToArray());
+        document.CodeSegment1 = new byte[] { 1, 2, 3 };
+        var reread = ExcelDocument.Read(document.ToArray());
+        Assert.Equal([1, 2, 3], reread.CodeSegment1.ToArray());
+        Assert.True(reread.CodeSegment2.IsEmpty);
     }
 
     [Fact]
