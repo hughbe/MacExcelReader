@@ -3,17 +3,17 @@ using MacExcelReader.Internal;
 namespace MacExcelReader;
 
 /// <summary>
-/// Formats values the way Excel 1.x displays them, through the tokens of their number format (spec §7). Dates use
-/// the 1904 date system: serial 0 is 1 January 1904.
+/// Formats values the way Excel 1.x displays them, through the tokens of their number format (spec §7,
+/// docs/Display.md). Dates use the 1904 date system: serial 0 is 1 January 1904.
 /// </summary>
 public static class ExcelValueFormatter
 {
     private static readonly DateTime s_epoch = new(1904, 1, 1);
 
     /// <summary>
-    /// Gets whether a format index is a date format the way Excel decides it (<c>34.04</c> in 1.00; spec §7): one of
-    /// the built-in date and time formats 10–18, or a user-defined format of <paramref name="document"/> that shows
-    /// a date (<see cref="ExcelNumberFormat.IsDate"/>).
+    /// Gets whether a format index is a date format the way Excel decides it (<c>34.04</c> in 1.00;
+    /// docs/Display.md): one of the built-in date and time formats 10–18, or a user-defined format of
+    /// <paramref name="document"/> that shows a date (<see cref="ExcelNumberFormat.IsDate"/>).
     /// </summary>
     public static bool IsDateFormat(int index, ExcelDocument? document = null)
         => index is >= 10 and <= 18
@@ -108,13 +108,13 @@ public static class ExcelValueFormatter
     /// <summary>
     /// Formats a number the way the General format does when Excel turns a number into text (as <c>""&amp;A1</c>
     /// does): rounded to 14 significant digits, written out in full from 1E-18 up to just below 1E+20 and with an
-    /// exponent outside that range (spec §7). This is General with room for 20 characters.
+    /// exponent outside that range (docs/Display.md). This is General with room for 20 characters.
     /// </summary>
     public static string FormatGeneral(double value) => FormatGeneral(value, 20);
 
     /// <summary>
     /// Formats a number the way the General format shows it in a column with room for <paramref name="width"/>
-    /// characters, not counting a minus sign (spec §7, <c>19.0c</c> in Excel 1.00): as many digits as fit,
+    /// characters, not counting a minus sign (docs/Display.md, <c>19.0c</c> in Excel 1.00): as many digits as fit,
     /// switching to an exponent when the number does not fit written out. A negative number that rounds to nothing
     /// shows as <c>0</c>, without its sign (<c>19.0d</c>).
     /// </summary>
@@ -441,7 +441,7 @@ public static class ExcelValueFormatter
     public static string FormatCell(ExcelCellRef cell, ExcelDocument? document = null)
         => FormatValue(cell.Value, cell.NumberFormat, document);
     /// <summary>
-    /// Formats a cell's value as Excel shows it in its column (spec Appendix D): General fits the column, fills repeat
+    /// Formats a cell's value as Excel shows it in its column (docs/Display.md): General fits the column, fills repeat
     /// across it, and a number, TRUE, FALSE or error too wide for it shows as a row of <c>#</c>. Text is returned
     /// whole, since Excel lets it run into the next cells (<see cref="LayoutCell"/>). Excel measures in pixels with
     /// the sheet's standard font; for a font or size missing from Excel 1.00's System, every character counts as one
@@ -467,7 +467,7 @@ public static class ExcelValueFormatter
     }
 
     /// <summary>
-    /// Works out how Excel draws a cell (spec Appendix D), as 1.00 and 1.5 do, or 1.03 with
+    /// Works out how Excel draws a cell (docs/Display.md), as 1.00 and 1.5 do, or 1.03 with
     /// <see cref="ExcelVersion.Excel103"/>: the text it shows, where it starts and the stretch of the
     /// row it is clipped to, in pixels from the left edge of column A. Returns null for a cell with no value, in a
     /// hidden column or in the margin column past IV (column 256), which Excel never draws.
@@ -585,8 +585,8 @@ public static class ExcelValueFormatter
     }
 
     /// <summary>
-    /// Gets the height of every row of a sheet, and how far below a row's top its text sits, in pixels (spec
-    /// Appendix D): the standard font's ascent + descent + 1, with the baseline one ascent down. 13 and 10 in
+    /// Gets the height of every row of a sheet, and how far below a row's top its text sits, in pixels
+    /// (docs/Display.md): the standard font's ascent + descent + 1, with the baseline one ascent down. 13 and 10 in
     /// Geneva 10. For a font family Excel 1.00's System lacks, the cached values in the sheet state are used.
     /// </summary>
     public static (int Height, int Baseline) GetRowMetrics(ExcelDocument document)

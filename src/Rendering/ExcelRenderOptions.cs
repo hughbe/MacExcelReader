@@ -30,6 +30,6 @@ public sealed class ExcelRenderOptions
     /// <summary>Gets or sets whether to show the window's selection and active cell, as the front window does.</summary>
     public bool Selection { get; set; } = true;
 
-    /// <summary>Gets or sets the release whose drawing to follow (spec Appendix D). Excel 1.00 by default.</summary>
+    /// <summary>Gets or sets the release whose drawing to follow (docs/Display.md). Excel 1.00 by default.</summary>
     public ExcelVersion Version { get; set; } = ExcelVersion.Excel100;
 }

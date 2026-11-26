@@ -1,7 +1,7 @@
 namespace MacExcelReader.Internal;
 
 /// <summary>
-/// How the Mac Plus ROM scales a font size the System has no bitmap for (spec Appendix D). <c>FMSwapFont</c> picks
+/// How the Mac Plus ROM scales a font size the System has no bitmap for (docs/Display.md). <c>FMSwapFont</c> picks
 /// another size of the family and returns the scale as numer ÷ denom, with denom 256 and numer the size ratio as a
 /// <c>Fixed</c> shifted right 8 bits: Geneva 11 drawn from Geneva 12 is 234/256, not 11/12. QuickDraw measures and draws
 /// with that ratio.

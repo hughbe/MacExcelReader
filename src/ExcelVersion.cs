@@ -13,7 +13,7 @@ public enum ExcelVersion
 
     /// <summary>
     /// Excel 1.03: encodes formulas exactly as 1.00 does (<see cref="Excel100"/>), but draws text in a font size the
-    /// System has no bitmap for with a pixel more per character (spec Appendix D).
+    /// System has no bitmap for with a pixel more per character (docs/Display.md).
     /// </summary>
     Excel103 = 103,
 

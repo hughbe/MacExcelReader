@@ -4,7 +4,7 @@ namespace MacExcelReader.Rendering;
 
 /// <summary>
 /// Draws a worksheet or macro sheet's window as Excel 1.00 shows it on a Macintosh screen: the column and row
-/// headings, gridlines, the cells' values laid out as spec Appendix D gives them, borders, the selection, the scroll
+/// headings, gridlines, the cells' values laid out as docs/Display.md gives them, borders, the selection, the scroll
 /// bars with Excel's split boxes, and optionally the window's frame. Only the visible part of the sheet is laid out,
 /// so drawing costs the same for a sheet of any size.
 /// </summary>
@@ -173,7 +173,7 @@ public static class ExcelRenderer
         private readonly List<(int Column, int Left, int Width)> _columns = [];
         private readonly List<(int Row, int Top)> _rows = [];
 
-        // Each column's left edge in pixels from column A, from the state block's widths (spec Appendix D).
+        // Each column's left edge in pixels from column A, from the state block's widths (docs/Display.md).
         private readonly int[] _sheetLefts = new int[ExcelCellGrid.MaxColumns + 2];
 
         public SheetLayout(ExcelDocument document, ExcelWindow window, MacBitmapFont font, View view, ExcelRenderOptions options)
@@ -357,7 +357,7 @@ public static class ExcelRenderer
                 }
 
                 // Text can run in from a cell either side of the visible columns, so lay out the nearest cell with a
-                // value beyond each edge too (spec Appendix D: text running into the next cells).
+                // value beyond each edge too (docs/Display.md: text running into the next cells).
                 int first = _columns[0].Column, last = _columns[^1].Column;
                 int before = first - 1;
                 while (before >= 0 && grid.GetCellType(row, before) == ExcelCellType.Empty)

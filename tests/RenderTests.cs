@@ -109,7 +109,7 @@ public class RenderTests
     [InlineData(15, 10, 384)]
     public void FontScale_IsFixRatioShiftedRight8Bits(int size, int bitmapSize, int numer)
     {
-        // FMSwapFont returns numer ÷ 256 rather than size ÷ bitmap size (spec Appendix D).
+        // FMSwapFont returns numer ÷ 256 rather than size ÷ bitmap size (docs/Display.md).
         Assert.Equal(numer, MacExcelReader.Internal.MacFontScale.Numer(size, bitmapSize));
     }
 

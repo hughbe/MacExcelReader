@@ -74,7 +74,7 @@ public class FormattingTests
         Assert.Equal(expected, ExcelValueFormatter.Format(value, format));
     }
 
-    // A format shows the number Excel's decimal conversion makes, at most 14 significant digits (spec §7), not the
+    // A format shows the number Excel's decimal conversion makes, at most 14 significant digits (docs/Display.md), not the
     // double's binary expansion; percent signs move its point rather than multiplying, so they cannot overflow.
     [Theory]
     [InlineData(0.30000000000000004, "0.000000000000000000", "0.300000000000000000")]
@@ -237,7 +237,7 @@ public class FormattingTests
     [Fact]
     public void TextSection_FormatsText()
     {
-        // Excel 1.5's @ shows text through @, and 0;-0;0;"t" replaces it with t (spec §7).
+        // Excel 1.5's @ shows text through @, and 0;-0;0;"t" replaces it with t (docs/Display.md).
         Assert.Equal("abc", Assert.Single(TestData.Load("Colour Formats").NumberFormats, f => f.ToText() == "@").Format("abc"));
         Assert.Equal("t", Assert.Single(TestData.Load("Format Text Section").NumberFormats).Format("abc"));
         Assert.Equal("abc", ExcelNumberFormat.BuiltIn[2].Format("abc"));
@@ -267,14 +267,14 @@ public class FormattingTests
     [InlineData(-2.5, 3, "-2.5")]              // the minus sign is not counted
     public void General_FitsTheColumn(double value, int width, string expected)
     {
-        // Excel 1.00's General (19.0c): spec §7.
+        // Excel 1.00's General (19.0c): docs/Display.md.
         Assert.Equal(expected, ExcelValueFormatter.FormatGeneral(value, width));
     }
 
     [Fact]
     public void DateFormats_AreDecidedAsExcelDoes()
     {
-        // 07.18 counts day, month and year tokens only; 34.04 adds the built-in formats 10–18 (spec §7).
+        // 07.18 counts day, month and year tokens only; 34.04 adds the built-in formats 10–18 (docs/Display.md).
         Assert.True(ExcelNumberFormat.BuiltIn[10].IsDate);    // m/d/yy
         Assert.False(ExcelNumberFormat.BuiltIn[16].IsDate);   // h:mm
         Assert.True(ExcelValueFormatter.IsDateFormat(16));
@@ -288,7 +288,7 @@ public class FormattingTests
     [Fact]
     public void Formats_FitTheirColumn()
     {
-        // Excel 1.00's display (19.0d, 19.0e; spec §7), counting the column in digit widths.
+        // Excel 1.00's display (19.0d, 19.0e; docs/Display.md), counting the column in digit widths.
         var general = ExcelNumberFormat.BuiltIn[0];
         Assert.Equal("1.235E+12", general.Format(1234567891234, 9));      // General switches to an exponent
         Assert.Equal("-123", general.Format(-123.456, 5));                 // the minus sign takes a character

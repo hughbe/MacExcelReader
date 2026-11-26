@@ -83,7 +83,7 @@ docs/Calculation.md).
 General writes the minus sign before it knows whether any digits will fit. When the number rounds to nothing in
 the room the column has, Excel writes `0` over the sign: −123 shows as `0` in a 12- or 15-pixel column (Geneva
 10), where 123 shows as nothing and −7 as `#`, and −0.4 shows as `0` in a 19-pixel column. A positive number
-never shows as a 0 it is not (spec Appendix D; `display-1.00.txt`).
+never shows as a 0 it is not ([Display](Display.md); `display-1.00.txt`).
 
 ## A file cut short before its print section crashes Excel 1.03
 

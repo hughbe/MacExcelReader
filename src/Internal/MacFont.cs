@@ -2,7 +2,7 @@ namespace MacExcelReader.Internal;
 
 /// <summary>
 /// The metrics of a bitmap font in the System file Excel 1.00 shipped with (on its Excel Data disk): what Excel's
-/// drawing code measures cells with (spec Appendix D). Excel picks the sheet's standard font and size (spec §6, 0x244 and
+/// drawing code measures cells with (docs/Display.md). Excel picks the sheet's standard font and size (spec §6, 0x244 and
 /// 0x246); QuickDraw draws bold by adding a pixel to every character, and Excel allows half the ascent for the slant
 /// of italic text.
 /// </summary>
@@ -101,12 +101,12 @@ internal sealed class MacFont
     /// <summary>The room Excel allows for the slant of italic text: half the ascent (spec §6, 0x248).</summary>
     public int ItalicExtra => Ascent / 2;
 
-    /// <summary>The height of every row: ascent + descent + 1 (spec Appendix D).</summary>
+    /// <summary>The height of every row: ascent + descent + 1 (docs/Display.md).</summary>
     public int RowHeight => Ascent + Descent + 1;
 
     /// <summary>
     /// Finds the font Excel 1.00 draws with, or null for a family its System lacks. A size with no bitmap is
-    /// scaled from the next larger size, or the largest there is (spec Appendix D).
+    /// scaled from the next larger size, or the largest there is (docs/Display.md).
     /// </summary>
     public static MacFont? Find(int number, int size)
     {
@@ -186,7 +186,7 @@ internal readonly struct TextMeasure
 
     /// <summary>
     /// Measures in pixels of <paramref name="font"/>. Releases measure alike, except that for a size with no bitmap
-    /// Excel 1.03 adds a pixel per character when it checks whether text fits (spec Appendix D).
+    /// Excel 1.03 adds a pixel per character when it checks whether text fits (docs/Display.md).
     /// </summary>
     public static TextMeasure Pixels(MacFont font, bool bold, ExcelVersion version = ExcelVersion.Excel100)
         => new(font, 1, bold, version == ExcelVersion.Excel103 && !font.IsReal);

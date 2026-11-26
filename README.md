@@ -131,6 +131,8 @@ The [usage guide](https://github.com/hughbe/MacExcelReader/blob/main/docs/Usage.
 |----------|----------------|
 | [Usage guide](https://github.com/hughbe/MacExcelReader/blob/main/docs/Usage.md) | The library's API, with examples |
 | [Format specification](https://github.com/hughbe/MacExcelReader/blob/main/docs/Spec.md) | The file format, byte by byte, with the code of each Excel release it comes from |
+| [How Excel 1.x displays a sheet](https://github.com/hughbe/MacExcelReader/blob/main/docs/Display.md) | How Excel formats values, fits them into cells and draws the window, pixel by pixel |
+| [How Excel 1.x exports SYLK](https://github.com/hughbe/MacExcelReader/blob/main/docs/Sylk.md) | What Excel's Save As writes for the SYLK type, byte for byte |
 | [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) | The harness that runs files in Excel under Mini vMac, and every experiment's results |
 | [Excel bugs and quirks](https://github.com/hughbe/MacExcelReader/blob/main/docs/ExcelBugs.md) | Excel's own bugs and oddities found along the way |
 | [Excel 1.x and BIFF2](https://github.com/hughbe/MacExcelReader/blob/main/docs/Biff2.md) | How the format differs from BIFF2, Excel 2.x's format |

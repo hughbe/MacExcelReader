@@ -162,7 +162,7 @@ foreach (var c in document.Cells.NonEmptyCells)
 ```
 
 To draw a sheet as Excel 1.00 did, `LayoutCell` gives each cell's text, where it starts and the stretch of the
-row it may cover, in pixels from the left edge of column A (spec Appendix D):
+row it may cover, in pixels from the left edge of column A ([Display](Display.md)):
 
 ```csharp
 if (ExcelValueFormatter.LayoutCell(document, row: 0, column: 1) is { } display)
@@ -380,7 +380,7 @@ document read and saved without changes is byte-for-byte identical to the origin
 ## Exporting SYLK
 
 `ExportSylk` writes a worksheet or macro sheet as SYLK, the text format Excel's Save As offers, with the bytes
-Excel 1.00–1.06 write, or Excel 1.5 with `ExcelVersion.Excel150` (spec Appendix C): Mac OS Roman text with carriage returns, R1C1 formulas with their current
+Excel 1.00–1.06 write, or Excel 1.5 with `ExcelVersion.Excel150` ([SYLK](Sylk.md)): Mac OS Roman text with carriage returns, R1C1 formulas with their current
 values, number formats, styles, column widths, names and links.
 
 ```csharp

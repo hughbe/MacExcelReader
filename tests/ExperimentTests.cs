@@ -794,7 +794,7 @@ public class ExperimentTests
         // Each row: a format's text, a value and =TEXT(value,format), recalculated by Excel 1.00. The values are ones
         // whose binary expansion, 14-digit conversion or rounding ties tell the rules apart: a format shows the 14
         // significant digits of Excel's decimal conversion, a tie at the 14th rounding down, then rounds them half up
-        // to its places (spec §7). TEXT gives #VALUE! for text longer than 255 characters (1E+300 written out).
+        // to its places (docs/Display.md). TEXT gives #VALUE! for text longer than 255 characters (1E+300 written out).
         var document = Load(name);
         int compared = 0;
         for (int row = 0; row < document.Cells.RowCount; row++)
@@ -827,7 +827,7 @@ public class ExperimentTests
     [InlineData("General As Text 2 1.5")]
     public void General_MatchesExcelsNumberToText(string name)
     {
-        // =""&B1 in Excel 1.00 and 1.5: 14 significant digits, written in full from 1E-18 to below 1E+20 (spec §7). The exact
+        // =""&B1 in Excel 1.00 and 1.5: 14 significant digits, written in full from 1E-18 to below 1E+20 (docs/Display.md). The exact
         // half 99999999999999.5 is the one value Excel rounds down.
         var document = Load(name);
         for (int row = 0; row < document.Cells.RowCount; row++)
@@ -1427,7 +1427,7 @@ public class ExperimentTests
     public void RenderedWindows_SaveTheirHeadingWidthAndPatternPhase(string name, int headingWidth, int phase)
     {
         // Excel 1.00 sizes the row-heading strip for the standard font and the widest row number shown, and saves the
-        // pane's pattern phase, which the gridlines' dots follow (spec §13, Appendix D).
+        // pane's pattern phase, which the gridlines' dots follow (spec §13, docs/Display.md).
         var window = Load(name).Windows[0];
         Assert.Equal(headingWidth, window.RowHeadingWidth);
         Assert.Equal(phase, window.State[19]);

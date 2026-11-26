@@ -4,7 +4,7 @@ using System.Text;
 namespace MacExcelReader.Tests;
 
 /// <summary>
-/// Checks the SYLK export against the files Excel 1.00 itself exported from the samples (spec Appendix C).
+/// Checks the SYLK export against the files Excel 1.00 itself exported from the samples (docs/Sylk.md).
 /// </summary>
 public class SylkTests
 {
@@ -128,7 +128,7 @@ public class SylkTests
     {
         var sheet = ExcelDocument.CreateWorksheet();
         sheet.Cells["A1"].SetText(text);
-        // B;Y1;X1 has already set the position (spec Appendix C).
+        // B;Y1;X1 has already set the position (docs/Sylk.md).
         Assert.Contains("\rB;Y1;X1\rO;L\rC;" + expected + "\r", Export(sheet));
     }
 

@@ -674,7 +674,7 @@ internal static class FormulaDecompiler
         {
             // Excel 1.00 reads a definition's 14-bit row offset with the relative-column flag (bit 14) as its sign
             // bit, inverted: with an absolute column −1 is R[-1], but with a relative column −3 is R[+16381]
-            // (Relative Names sample; spec Appendix C).
+            // (Relative Names sample; docs/Sylk.md).
             AppendOffset(ref text, offsets ? row - (RowWord.IsColumnRelative(rowWord) ? 0 : RowWord.RowMask + 1) : row - origin.Row);
         }
     }

@@ -55,7 +55,7 @@ public sealed class MacFontSet
 
     /// <summary>
     /// Gets a font as QuickDraw draws it: the bitmap of that size, or for a size with no bitmap one scaled from the
-    /// next larger size of the family, or from the largest if none is larger (spec Appendix D). Returns null for a
+    /// next larger size of the family, or from the largest if none is larger (docs/Display.md). Returns null for a
     /// family the System lacks.
     /// </summary>
     public MacBitmapFont? GetFont(int family, int size)

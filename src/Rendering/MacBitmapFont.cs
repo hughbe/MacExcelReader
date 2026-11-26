@@ -135,7 +135,7 @@ public sealed class MacBitmapFont
     }
 
     /// <summary>
-    /// Makes a size the System has no bitmap for from this one, as the Mac Plus ROM does (spec Appendix D): the Font
+    /// Makes a size the System has no bitmap for from this one, as the Mac Plus ROM does (docs/Display.md): the Font
     /// Manager's scale is numer ÷ 256 (<see cref="MacFontScale"/>), the ascent, descent and leading scale to the nearest
     /// pixel, widths add up at this size before they are scaled, and text is drawn at this size and stretched.
     /// </summary>

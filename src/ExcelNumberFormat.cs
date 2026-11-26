@@ -166,7 +166,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
 
     /// <summary>
     /// Gets whether the format shows a date: its positive section has a day, month or year token. Hours, minutes,
-    /// seconds and AM/PM do not count, as in Excel's own test (<c>07.18</c> in 1.00; spec §7).
+    /// seconds and AM/PM do not count, as in Excel's own test (<c>07.18</c> in 1.00; docs/Display.md).
     /// </summary>
     public bool IsDate
     {
@@ -271,11 +271,11 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
     public string Format(double value) => Format(value, null, TextMeasure.Characters);
 
     /// <summary>
-    /// Formats a number as Excel shows it in a column with room for <paramref name="width"/> characters (spec §7,
+    /// Formats a number as Excel shows it in a column with room for <paramref name="width"/> characters (docs/Display.md,
     /// <c>19.0d</c> and <c>19.0e</c> in Excel 1.00): General gets the characters the rest of the text leaves, a fill
     /// repeats into the room left, and text that does not fit becomes a row of <c>#</c>. Excel measures in pixels;
     /// this counts every character as one digit width, an approximation. For the pixel-exact result use
-    /// <see cref="ExcelValueFormatter.FormatCell(ExcelCell, ExcelDocument, int, ExcelVersion)"/> (spec Appendix D).
+    /// <see cref="ExcelValueFormatter.FormatCell(ExcelCell, ExcelDocument, int, ExcelVersion)"/> (docs/Display.md).
     /// </summary>
     public string Format(double value, int width) => Format(value, width, TextMeasure.Characters);
 
@@ -828,7 +828,7 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
             ReadOnlySpan<char> exponentPlaces = places[(integerCount + fractionCount)..count];
 
             // Excel's decimal conversion: at most 14 significant digits, the value being 0.digits × 10^point. The
-            // percent signs and scaling commas move the point (spec §7), so they cannot overflow the double.
+            // percent signs and scaling commas move the point (docs/Display.md), so they cannot overflow the double.
             Span<char> converted = stackalloc char[15];
             int convertedLength = ExcelValueFormatter.Num2Str(magnitude, converted, out int point);
             point += extra;

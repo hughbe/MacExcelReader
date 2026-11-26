@@ -3,7 +3,7 @@ using System.Globalization;
 namespace MacExcelReader.Tests;
 
 /// <summary>
-/// How Excel 1.00 draws cells (spec Appendix D), checked against what it showed on screen for sheets built by the library
+/// How Excel 1.00 draws cells (docs/Display.md), checked against what it showed on screen for sheets built by the library
 /// (docs/Testing.md). Unless a test says otherwise, the sheet uses the default font, Geneva 10, and Excel 1.00, 1.03 and
 /// 1.5 drew it the same, pixel for pixel.
 /// </summary>

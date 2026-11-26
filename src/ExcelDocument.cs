@@ -602,7 +602,7 @@ public sealed class ExcelDocument
 
     /// <summary>
     /// Writes the document as SYLK, the text interchange format, byte for byte as Excel 1.00's Save As does with
-    /// the SYLK type (spec Appendix C): Mac OS Roman text with carriage returns, formulas in R1C1 style, and
+    /// the SYLK type (docs/Sylk.md): Mac OS Roman text with carriage returns, formulas in R1C1 style, and
     /// characters outside printable ASCII escaped. Give the file Finder type <c>TEXT</c>.
     /// </summary>
     /// <remarks>Like <see cref="Save(string)"/>, this first sets the grid size from the cells (spec §6.1).</remarks>
