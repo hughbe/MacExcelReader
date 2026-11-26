@@ -458,9 +458,57 @@ public class FormulaParserTests
         var huge = "RunMe(" + string.Join(",", Enumerable.Repeat("1", 130)) + ")";
         Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse($"=IF(TRUE,{huge},0)", document));
         Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse($"={huge}:A1", document));
-        Assert.True(ExcelFormula.Parse("=(SUM(1)):A1", document).Expression.Length > 0);
-        Assert.True(ExcelFormula.Parse("=-SUM(1):A1", document).Expression.Length > 0);
-        Assert.True(ExcelFormula.Parse("=(-SUM(1)):A1", document).Expression.Length > 0);
+        Assert.True(ExcelFormula.Parse("=(IF(TRUE,B1)):A1", document).Expression.Length > 0);
+        Assert.True(ExcelFormula.Parse("=-IF(TRUE,B1):A1", document).Expression.Length > 0);
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse("=(-IF(TRUE,B1)):A1", document));
+    }
+
+    [Theory]
+    [InlineData("=A1:\"\"")]
+    [InlineData("=SUM(A1):B2")]
+    [InlineData("=MID(\"abc\",2,1):SUM(A1)")]
+    [InlineData("=(A1+0):B2")]
+    [InlineData("=0:$A1")]
+    [InlineData("=A1 SUM(B2)")]
+    [InlineData("=(A1,SUM(B2))")]
+    [InlineData("=SUM(A1,(A1,1))")]
+    [InlineData("=ROW(SUM(A1))")]
+    [InlineData("=AREAS(SUM(A1))")]
+    [InlineData("=COLUMN(NOW())")]
+    [InlineData("=A1:-B2")]
+    public void Parse_RefusesWhatExcelsCompilerRefuses(string text)
+    {
+        // Excel 1.00's FORMULA gave #VALUE! for each (or, for =A1:-B2, crashed): ':', intersection and union take only
+        // references, and so does an argument typed R alone (docs/Testing.md).
+        Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse(text, ExcelDocument.CreateWorksheet()));
+    }
+
+    [Theory]
+    [InlineData("=IF(TRUE,A1):B2")]
+    [InlineData("=CHOOSE(1,A1):B2")]
+    [InlineData("=INDEX(A1:C3,1,1):B2")]
+    [InlineData("=(A1):B2")]
+    [InlineData("=ROW(IF(TRUE,A1))")]
+    [InlineData("=ROWS(SUM(A1))")]
+    [InlineData("=ROWS({1,2})")]
+    [InlineData("=A1 IF(TRUE,B2)")]
+    [InlineData("=(A1,IF(TRUE,B2))")]
+    [InlineData("=-A1:B2")]
+    public void Parse_AcceptsWhatExcelsCompilerAccepts(string text)
+    {
+        // Functions that can return a reference count as one; ROWS takes an array too.
+        Assert.True(ExcelFormula.Parse(text, ExcelDocument.CreateWorksheet()).Expression.Length > 0);
+    }
+
+    [Theory]
+    [InlineData("=B$2:$C3:B2:C3", "460000000F2540018002010225C001C002010211")]
+    [InlineData("=(A1:B2,C3):B2:C3", "460000001525C000C001000124C00202101525C001C002010211")]
+    public void Parse_PairsCellsIntoAnAreaBeforeOtherRanges(string text, string excel)
+    {
+        // Excel 1.00's own compilation of each, from --recompile (bytes left over from memory cleared).
+        var document = ExcelDocument.CreateWorksheet();
+        var formula = ExcelFormula.Parse(text, document);
+        Assert.Equal(excel, Convert.ToHexString(FormulaTokens.ClearStaleBytes(formula.Expression)));
     }
 
     [Fact]
@@ -508,5 +556,18 @@ public class FormulaParserTests
         var formula = ExcelFormula.Parse("=" + new string('(', 100) + "1" + new string(')', 100));
         Assert.Equal(1.0, formula.Result.Number is 0 ? 1.0 : 1.0);
         Assert.Equal(103, formula.Expression.Length);
+    }
+
+    [Fact]
+    public void Parse_FindsANameIgnoringCaseAccentsAndLigatures()
+    {
+        // Excel treats aéx, AEX and aex as one name, and aæx as aaex (spec §11).
+        var document = ExcelDocument.CreateWorksheet();
+        document.Names.Add(new ExcelDefinedName("aex", [0x1E, 0x00, 0x01]));
+        document.Names.Add(new ExcelDefinedName("aaex", [0x1E, 0x00, 0x02]));
+        int aex = document.Names.Count - 1, aaex = document.Names.Count;
+        Assert.Equal(aex, ExcelFormula.Parse("=aéx", document).FixupWords.ToArray()[0]);
+        Assert.Equal(aex, ExcelFormula.Parse("=AEX", document).FixupWords.ToArray()[0]);
+        Assert.Equal(aaex, ExcelFormula.Parse("=aæx", document).FixupWords.ToArray()[0]);
     }
 }

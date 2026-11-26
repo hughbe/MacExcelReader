@@ -137,6 +137,50 @@ recalc 1                        state word 0x018 (1 marks the sheet as needing r
 
 The same format works for any new experiment: write a list and build it.
 
+## Running an experiment in one go
+
+```bash
+dotnet run --project dumper -- excel-test experiment out/Sheet1 out/Sheet2 ... -o results/ [--no-probe] [--each FORMULA]...
+```
+
+`experiment` does `pack`, `run` and `check` for a whole experiment in Excel 1.00 under MAME (below), however many
+files it has, and is the quickest way to ask Excel something:
+
+- **Disks.** It puts at most `--batch` files (30) on a disk and halves a batch whose disk overflows, so any number
+  of files can go in one command: 128 one-name sheets ran on nine disks in about 40 seconds.
+- **Commands.** Give each file a `FILE.commands`, one macro command per line, in UTF-8 (`pack` refuses anything
+  else rather than mangle accented letters). A command that gives an error does not stop the others.
+  `results/commands.tsv` lists every command with what it returned, by disk, file and Driver row, and the summary
+  shows the ones that gave an error. Wrap a command in `ISERROR(…)` to turn its failure into TRUE.
+- **Saves.** Excel's saves are collected in `results/saved/`, each disk's files as Excel left them in
+  `results/DISK/`, with `check`'s report in `results/DISK/check.txt` (`--verbose` shows it as it runs). Under
+  MAME about one save in twenty reaches the disk without its data, or with one 512-byte sector of it as zeros
+  (a formula then cannot be read). `check` treats a save as readable only if every formula and name in it
+  decodes, names any zeroed sectors, and `experiment` runs those files again on a disk of their own. A check
+  that fails on one disk is reported with the rest instead of ending the experiment.
+- **Crashes.** A disk that does not finish is split in halves until the file that stops Excel is found; its
+  last screen is in `results/DISK/screen.png`. Excel 1.00 crashes on some formulas it should refuse and on some
+  number formats ([Excel bugs](ExcelBugs.md)), so give a suspect formula or format a sheet of its own.
+- **Recompiling.** With `--recompile`, Driver enters each formula again with FORMULA, from the text GET.FORMULA
+  gave. `check` lists the ones Excel refused (FORMULA gave an error, so the cell kept the library's tokens and
+  would otherwise pass as a match) under "not recompiled", and `commands.tsv` has a row for each.
+
+Things to keep in mind when designing an experiment:
+
+- FORMULA and the other macro commands that take formula text read it as R1C1, whatever `A1.R1C1` says:
+  `=FORMULA("=A1+1")` gives `#VALUE!`. Write `=FORMULA("=R1C1+1")`, or `R[-1]C` for relative references.
+- `--recompile` goes through R1C1 text, which cannot say everything A1 text can: whole rows or columns with a
+  relative end compile to two areas joined by `:` ([Excel bugs](ExcelBugs.md#getformulas-whole-row-text-does-not-compile-back-the-same-excel-100-103)),
+  so token differences there are not differences in how Excel compiles typed A1 text.
+- Open grows a worksheet's table to every cell its formulas refer to (spec §6.1). A sheet referring to both
+  row 16384 and column IV (`IV16384`, or `IV2` and `B16384` in different formulas) needs about 25 MB, so Excel
+  will not open it, and a far reference can make the save too big for the disk. `pack` warns about a sheet whose
+  table would pass 1 MB; generated formulas should refer to cells near the top left.
+- Excel keeps one name for names that compare equal (spec §11), so a later `DEFINE.NAME` of an equal name
+  renames the earlier one rather than adding a second.
+- `dumper cell FILE ADDRESS` shows a formula's raw record when the library cannot decode it, to tell a lost
+  sector from a token the library does not know.
+
 ## Running it in MAME
 
 ```bash
@@ -287,6 +331,10 @@ window, so they differ from the renderer where it lies.
 | Nov 2026 | 1.00 | Sheets built to show text, bold, italic, alignments, fills, borders, a selection, scrolling, no gridlines, no headings, formulas shown, odd and hidden column widths, `Expenses`, Geneva 11 and 12, New York 10 and Monaco 9 as the standard font, and 17 scroll positions to row 16383, opened with `--keep-open` and each window captured from the screen | `ExcelRenderer` draws all but Geneva 11 pixel for pixel, apart from the mouse pointer: headings, gridlines and their pattern phase, clearing under spilled text, QuickDraw's italic, the selection and active cell, Excel's split boxes, the thumbs, and the grey past row 16384. The vertical thumb fits the 17 positions but its rule is inferred; Geneva 11, stretched from 12, differs in about 1,000 pixels (spec §13, [Display](Display.md); the `Render` samples, `tests/Data/Screens`) |
 | Nov 2026 | 1.00 | The same captures, with the vertical scroll bar's code decompiled (`18.0c`, `18.12`) and the Mac Plus ROM's text drawing read (`FMSwapFont`, `DrText`, `StretchBits`) | `ExcelRenderer` draws every capture pixel for pixel, Geneva 11 included, apart from the mouse pointer. The vertical scroll bar runs to 17982, with the first and last 20 rows taking 819 each; a scaled size is 234/256 of Geneva 12, not 11/12, which fixes the text widths, and StretchBits ORs together the rows and columns it shrinks ([Display](Display.md)) |
 | Nov 2026 | 1.00 | The headless harness (`excel-test run`, MAME's Mac Plus): the 27 `Render` windows captured again, `TEXT Digits 1`–`3` run again from their sheets and checked with `check` | Every window equals Excel 1.00's screen under Mini vMac outside the pointer, which the old captures held, and `ExcelRenderer` draws every pixel of each, frame and shadow included; the screens are now these captures. The TEXT sheets' saves have the same cells as the Mini vMac run and the samples, and `check` gives the same result. Excel 1.00's copy protection checks the disk Excel runs from |
+| Nov 2026 | 1.00 | `DEFINE.NAME` with every Mac OS Roman character from `0x80` to `0xFF` in a name, one sheet each after 31 plain names, run with `excel-test experiment` (128 sheets on nine disks in about 40 seconds); then twelve names and their equivalents (`Name Equivalents`) | Names compare ignoring case and accents, with `Æ`/`æ` as AE, `Œ`/`œ` as OE and `Ø`/`ø` as O; equal names are one name, which a later definition renames; `ß`, symbols and the capitals `0xE5`–`0xF4` are refused. The library's name order and formula name lookup now follow this (spec §11; `tests/Data/name-characters-1.00.txt`). About one save in twenty under MAME reached the directory without its data; `experiment` runs those again |
+| Nov 2026 | 1.00 | `Referenced Cells` (seven formulas referring to cells, whole rows and columns, areas to the last row and column, a name and another document) and its macro-sheet twin, opened and saved; then names defined with R1C1 offsets and used from other cells, typed by FORMULA in new sheets (`Name Relative Down`, `Off`, `Wrap Row`, `Wrap Column`) | Open grows a worksheet's table to every cell its formulas refer to, names' definitions included, plus the margin; areas reaching the last row or column don't count in that direction, other documents and macro sheets don't count at all. A relative name counts from the cell that uses it and wraps round the sheet; a formula whose table would not fit in memory gives `#VALUE!`. Typing a formula grows a new sheet's table in the count form, without a margin. The library sizes the tables it writes the same way (spec §6.1, §11) |
+| Nov 2026 | 1.00 | TEXT of three values in ten scientific formats, among them a run after the exponent with and without a `.` before it (`0E+00 0`, `0E+00.0`) | The exponent fills the digit runs after the `E` up to a `.`, padded to the placeholders after the `E`; runs after the `.` show only their 0s. The library showed `0E+00.0` as `1E+03.0` and `0E+00 0` as `1E+003 0` before; all ten now match ([Display](Display.md)) |
+| Nov 2026 | 1.00 | 960 random formulas on 12 sheets, recompiled by Excel (`--recompile`); then the refused and crashing ones narrowed down with FORMULA in R1C1, one per sheet | Excel's compiler takes only references (or IF, CHOOSE, INDEX and other functions that can return one) as operands of `:`, intersection and union, and as arguments typed R alone; 62 formulas the library compiled were refused, and the library now refuses them too. Excel pairs `cell:cell` into an area before other ranges (`=B$2:$C3:B2:C3`), which the library now does. FORMULA reads R1C1 only, and R1C1 text turns relative whole rows and columns into two areas, so those differences were not real. Two refused shapes crash Excel instead (spec §15.4, [Excel bugs](ExcelBugs.md)) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

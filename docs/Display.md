@@ -37,7 +37,11 @@ gives the rest:
   something.
 * Decimal digit runs: leading zeros always show, even for `04`; after them the significant digits, then `0`s
   for `06` only, so `04` drops trailing zeros.
-* Exponent `1D`/`1E`: `+` (for `1D`) or `-`, then the exponent's digits in the next run's positions.
+* Exponent `1D`/`1E`: `+` (for `1D`) or `-`, then the exponent's digits, as many as there are placeholders after
+  the `E` at least (the token's width), placed in the digit runs after it up to a `.` the way integer digits are,
+  with any that do not fit before the first. Digit runs after that `.` show only their `0` placeholders, and the
+  `.` prints: 1234.5678 in `0E+00 0` is `1E+00 3`, in `0E+00.0` `1E+003.0`, and 1.5E+123 in `0E+00000` is
+  `2E+00123` (`TEXT` in Excel 1.00).
 * `22` writes `$`; `0A` repeats its character to fill what the column has left; `01` inside a section gets
   General with the width the rest of the section leaves.
 * Date and time tokens go to `09.1a`, through the date conversion of `09.1b`, which fails past 2^32 − 1 seconds.

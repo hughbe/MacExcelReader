@@ -590,11 +590,6 @@ public static class FormulaTokens
     }
 
     /// <summary>
-    /// Reads the fix-up words of a cell formula in token order: for each name token its 1-based name
-    /// index, and for each external-sheet token its external-document index. Array and memory-area
-    /// blocks are skipped.
-    /// </summary>
-    /// <summary>
     /// The fix-up words of a cell formula (spec §12.5), in token order: for each name token its 1-based name index,
     /// and for each external-sheet token its external-document index. A <c>foreach</c> over it allocates nothing.
     /// </summary>

@@ -1428,4 +1428,143 @@ public class ExperimentTests
         Assert.Equal(headingWidth, window.RowHeadingWidth);
         Assert.Equal(phase, window.State[19]);
     }
+
+    [Fact]
+    public void NameEquivalents_ExcelMatchesNamesIgnoringCaseAccentsAndLigatures()
+    {
+        // DEFINE.NAME in Excel 1.00: twelve names, then twelve more each equal to one of them but for case, accents or
+        // a ligature. Each later name replaced the earlier one's spelling in place, and Excel keeps them in the order of
+        // their keys, Æ as AE coming before Ä as A (spec §11).
+        var document = Load("Name Equivalents");
+        Assert.Equal(
+            ["aæx", "AÄX", "aÇx", "aéx", "aîx", "aÑx", "aŒx", "aøx", "aüx", "aÿx", "AZX", "Bx", "Criteria", "Database", "Print_Area", "Print_Titles", "Recorder"],
+            document.Names.Select(n => n.Name));
+        Assert.True(document.NamesAreSorted);
+    }
+
+    // The formulas of Referenced Cells, one to a row of column A. Each would size the table differently if Excel's rule
+    // (spec §6.1) were not as found: D20 (21 x 5), rows 50:51 (52 rows), columns F:G (8 columns), B2:B16384 and B2:IV2
+    // (an area reaching the last row or column, which does not count), a name for $Z$90 (91 x 27) and another
+    // document's cell (which does not count).
+    private static readonly string[] ReferencedFormulas = ["=D20", "=SUM(50:51)", "=SUM(F:G)", "=SUM(B2:B16384)", "=SUM(B2:IV2)", "=Far", "=Other!K99"];
+
+    private static ExcelDocument BuildReferencedCells(bool macro)
+    {
+        var document = macro ? ExcelDocument.CreateMacroSheet() : ExcelDocument.CreateWorksheet();
+        document.ExternalDocuments.Add(new ExcelExternalDocument("Other"));
+        var far = new ExcelDefinedName("Far");
+        far.SetDefinition("=$Z$90", document);
+        document.Names.Add(far);
+        for (int i = 0; i < ReferencedFormulas.Length; i++)
+        {
+            var formula = ExcelFormula.Parse(ReferencedFormulas[i], document);
+            formula.SetResult(0);
+            document.Cells[i, 0].SetFormula(formula);
+        }
+
+        return document;
+    }
+
+    [Theory]
+    [InlineData("Referenced Cells", false, 91, 27)]
+    [InlineData("Referenced Cells Macro", true, 8, 2)]
+    public void ReferencedCells_ExcelGrowsAWorksheetsTableToCoverTheCellsItsFormulasReferTo(string name, bool macro, int rows, int columns)
+    {
+        // Excel opened the library's sheet (a 7 x 1 table with its margin, 8 x 2) and grew the worksheet's table to
+        // cover $Z$90 through the name Far, plus the margin; the macro sheet's stayed as it was. The library sizes a
+        // sheet it writes the same way.
+        var excel = Load(name);
+        Assert.Equal((rows, columns), (excel.Cells.RowCount, excel.Cells.ColumnCount));
+        var library = ExcelDocument.Read(BuildReferencedCells(macro).ToArray());
+        Assert.Equal((rows, columns), (library.Cells.RowCount, library.Cells.ColumnCount));
+    }
+
+    [Theory]
+    [InlineData("Name Relative Down", "Down", "C5", "2CC01403", 25, 6)]
+    [InlineData("Name Relative Wrap Row", "Up", "A1", "2CBFFF00", 16384, 1)]
+    [InlineData("Name Relative Wrap Column", "Left", "A1", "2C4000FF", 1, 256)]
+    public void NameRelative_ExcelGrowsTheTableToTheCellsTheNameRefersToFromWhereItIsUsed(string sample, string name, string usedAt, string definition, int rows, int columns)
+    {
+        // Each sheet started empty; a macro defined the name with R1C1 offsets from one cell and typed =name into
+        // another. Down is R[20]C[3] from C5, F25: the table is 25 x 6, still in the count form, with no margin. Up is
+        // R[-1]C1 and Left R1C[-1], defined from A2 and B1 and used in A1: they wrap round to A16384 and IV1.
+        var document = Load(sample);
+        Assert.Equal(definition, Convert.ToHexString(document.Names.Single(n => n.Name == name).Definition.Span));
+        Assert.Equal("=" + name, document.Cells[usedAt].Formula!.ToText(document));
+        Assert.Equal((rows, columns), (document.Cells.RowCount, document.Cells.ColumnCount));
+    }
+
+    [Fact]
+    public void NameRelativeOff_ExcelRefusesAFormulaWhoseTableWouldNotFitInMemory()
+    {
+        // Up3 is R[-3]C[-2], defined from E10. Typed in A1 it would refer to IU16382, a 16382 x 255 table of about
+        // 25 MB: FORMULA gave #VALUE! and the sheet stayed empty.
+        var document = Load("Name Relative Off");
+        Assert.Equal("2CFFFDFE", Convert.ToHexString(document.Names.Single(n => n.Name == "Up3").Definition.Span));
+        Assert.Empty(document.Cells.NonEmptyCells);
+    }
+
+    [Theory]
+    [InlineData("F6", "=B$2:$C3:B2:C3")]
+    [InlineData("F7", "=(A1:B2,C3):B2:C3")]
+    [InlineData("F8", "=A1:B2:C3")]
+    [InlineData("F9", "=A1:B2:C3:D4")]
+    [InlineData("F10", "=IF(TRUE,A1):B2")]
+    [InlineData("F11", "=INDEX(A1:C3,1,1):B2:C3")]
+    [InlineData("F12", "=-A1:B2")]
+    [InlineData("F13", "=A1 IF(TRUE,B2)")]
+    public void RangePairs_ExcelPairsCellsIntoAnAreaBeforeOtherRanges(string address, string text)
+    {
+        // Excel 1.00 entered each formula again from GET.FORMULA's text (--recompile), so these are its own tokens:
+        // B2:C3 after another range is one area, and functions that can return a reference are range operands
+        // (spec §15.4). The library compiles the same text to the same tokens.
+        var document = Load("Range Pairs");
+        var excel = document.Cells[address].Formula!;
+        Assert.Equal(text, excel.ToText(document));
+        var library = ExcelFormula.Parse(text, document);
+        Assert.Equal(Convert.ToHexString(FormulaTokens.ClearStaleBytes(excel.Expression)), Convert.ToHexString(FormulaTokens.ClearStaleBytes(library.Expression)));
+    }
+
+    [Theory]
+    [InlineData("F7", "=A:A:B:B")]
+    [InlineData("F8", "=$B:$B:B:B")]
+    [InlineData("F9", "=$A:$B")]
+    [InlineData("F10", "=1:1:3:3")]
+    [InlineData("F11", "=B:B:$B:$B")]
+    [InlineData("F12", "=A$1:B$2")]
+    public void R1C1WholeColumns_FormulaCompilesRelativeWholeColumnsAsTwoAreas(string address, string text)
+    {
+        // FORMULA, which reads R1C1 whatever A1.R1C1 says, in F5:F12: =A:B and =$B:B in A1 were refused, and
+        // C[-5]:C[-4], C2:C[-4], C1:C2, R[-9]:R[-7], C[-4]:C2 and R1C[-5]:R2C[-4] gave these. Only whole columns
+        // absolute at both ends are one area (docs/ExcelBugs.md).
+        var document = Load("R1C1 Whole Columns");
+        Assert.Null(document.Cells.Find(4, 5)?.Formula);
+        Assert.Null(document.Cells.Find(5, 5)?.Formula);
+        Assert.Equal(text, document.Cells[address].Formula!.ToText(document));
+    }
+
+    public static TheoryData<string, string, string> NameCharacters()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (string line in File.ReadLines(Path.Combine(AppContext.BaseDirectory, "Data", "name-characters-1.00.txt")).Where(l => !l.StartsWith('#')))
+        {
+            var fields = line.Split('\t');
+            data.Add(fields[0], fields[1], fields[2]);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(NameCharacters))]
+    public void NameCharacters_MatchExcelsComparison(string code, string character, string excel)
+    {
+        // Excel 1.00 took each Mac OS Roman character in a name as the letters it equals, or refused it
+        // (tests/Data/name-characters-1.00.txt, spec §11). The library's comparison treats the accepted ones alike.
+        Assert.Equal(code, MacRoman.GetBytes(character)[0].ToString("X2"));
+        if (excel != "refused")
+        {
+            Assert.Equal(Internal.NameKey.Of("a" + excel + "x"), Internal.NameKey.Of("a" + character + "x"));
+        }
+    }
 }

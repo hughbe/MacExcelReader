@@ -194,7 +194,7 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `cell <file> <address>` | Everything about one cell: value, date, formats, flags, formula, result, raw bytes and a token-by-token breakdown |
 | `parse <formula> [-f file] [--name] [--array] [--excel 1.5]` | Compile formula text and show the tokens Excel would store |
 | `sheet <list> <output> [--split N] [--excel 1.5]` | Build sheets from a formula list (`tests/Data`), for testing formulas in Excel |
-| `excel-test pack <disk> <files...>` / `excel-test run <disk>` / `excel-test check <disk>` | Test files in a real Excel under an emulator (`run`: Excel 1.00 in MAME, headless): see [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) |
+| `excel-test experiment <files...> -o <dir>` / `pack` / `run` / `check` | Test files in a real Excel under an emulator (`experiment` and `run`: Excel 1.00 in MAME, headless; `experiment` packs, runs and checks any number of files and reports each command's result): see [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) |
 | `names <file>` | Defined names, command shortcuts and definitions |
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |

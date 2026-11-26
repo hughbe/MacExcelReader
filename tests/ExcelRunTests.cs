@@ -42,4 +42,61 @@ public class ExcelRunTests
             Directory.Delete(folder, recursive: true);
         }
     }
+
+    [Fact]
+    public void Pack_RefusesCommandsThatAreNotUtf8()
+    {
+        // A .commands file saved as Latin-1 or Mac OS Roman would turn its accented letters into replacement
+        // characters; pack says so instead.
+        string folder = Directory.CreateTempSubdirectory("excel-pack-test-").FullName;
+        try
+        {
+            string sheet = Path.Combine(folder, "Sheet");
+            ExcelDocument.CreateWorksheet().Save(sheet);
+            File.WriteAllBytes(sheet + ".commands", System.Text.Encoding.Latin1.GetBytes("=DEFINE.NAME(\"aéx\",1)\n"));
+            Assert.NotEqual(0, Program.Main(["excel-test", "pack", Path.Combine(folder, "Test.dsk"), sheet]));
+            Assert.False(File.Exists(Path.Combine(folder, "Test.dsk")));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Experiment_RunsFilesOverSeveralDisksAndReportsEveryCommand()
+    {
+        if (!CanRun)
+        {
+            return;
+        }
+
+        string folder = Directory.CreateTempSubdirectory("excel-experiment-test-").FullName;
+        try
+        {
+            // Two sheets, one to a disk: a name with an accent, and a name Excel refuses, whose error must not stop
+            // the file's other commands.
+            string first = Path.Combine(folder, "First"), second = Path.Combine(folder, "Second");
+            ExcelDocument.CreateWorksheet().Save(first);
+            ExcelDocument.CreateWorksheet().Save(second);
+            File.WriteAllText(first + ".commands", "=DEFINE.NAME(\"aéx\",1)\n");
+            File.WriteAllText(second + ".commands", "=DEFINE.NAME(\"a∞x\",1)\n=DEFINE.NAME(\"ok\",2)\n");
+            string output = Path.Combine(folder, "out");
+            Program.Main(["excel-test", "experiment", first, second, "-o", output, "--batch", "1", "--no-probe"]);
+
+            Assert.True(Directory.Exists(Path.Combine(output, "X1")) && Directory.Exists(Path.Combine(output, "X2")));
+            Assert.Contains(ExcelDocument.Load(Path.Combine(output, "saved", "First saved")).Names, n => n.Name == "aéx");
+            var secondNames = ExcelDocument.Load(Path.Combine(output, "saved", "Second saved")).Names;
+            Assert.Contains(secondNames, n => n.Name == "ok");
+            Assert.DoesNotContain(secondNames, n => n.Name == "a∞x");
+
+            var results = File.ReadLines(Path.Combine(output, "commands.tsv")).Skip(1).Select(l => l.Split('\t')).ToList();
+            Assert.Equal(["TRUE", "#VALUE!", "TRUE"], results.Select(r => r[4]));
+            Assert.Equal(["First", "Second", "Second"], results.Select(r => r[1]));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
 }

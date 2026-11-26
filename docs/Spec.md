@@ -495,6 +495,25 @@ use: Excel 1.00 saves a value in A16384 with 0x014 = 16384, and values in IV1 an
 reads both back. The table is a full rectangle in memory too, so a sheet using both the last row and the last
 column needs about 25 MB: Excel 1.00 reports "Out of memory" instead.
 
+A worksheet's table covers not only its cells but every cell its formulas refer to. Open grows the table to
+them, with the margin, and typing a formula grows it to the formula's cells; so Excel saves a sheet whose only
+formula is `=D20` in A1 with a 21 × 5 table (last-index form) whatever size the file gave. What counts:
+
+* every cell or area reference in a cell's formula, except that an area running to row 16384 (`C:D`,
+  `B2:B16384`) does not count for rows and one running to column IV (`1:3`, `B2:IV2`) not for columns;
+* the definition of every name a formula uses, followed through the names it uses in turn, with relative rows
+  and columns taken from the cell that uses the name (§11). A name no formula uses does not count;
+* not a reference to another document (§10).
+
+Excel 1.00 saved `Referenced Cells`, whose formulas in A1:A7 are `=D20`, `=SUM(50:51)`, `=SUM(F:G)`,
+`=SUM(B2:B16384)`, `=SUM(B2:IV2)`, `=Far` (a name for `$Z$90`) and `=Other!K99`, with a 91 × 27 table, from a
+file with an 8 × 2 one. A macro sheet's table is not grown (`Referenced Cells Macro`, the same formulas, stays
+8 × 2), and neither is a table in the count form when a formula is typed: in a new sheet, `=Down` in C5 for
+`F25` gives a 25 × 6 count-form table with no margin (`Name Relative Down`). If the grown table would not fit in
+memory, Excel refuses the sheet or the formula: OPEN gives `#VALUE!` for a file with a formula referring to both
+the last row and the last column, and so does FORMULA for a formula referring to `IU16382`
+(`Name Relative Off`).
+
 ### 6.2 Password hash
 
 A protected document stores a 16-bit hash of its password, not the password, in state word `0x242`. The
@@ -810,10 +829,29 @@ Its formulas refer to these as `!DATABASE` (index 1) and `!FORM` (index 2).
 
 The defined names, then the data of the array constants their definitions contain.
 
-**Names.** A sequence of entries in alphabetical order, ending with a `0x00` byte. The order ignores case and
-accents: the French 1.01 puts `Critères` before `Criteria`. How it orders letters without a plain-letter base,
-such as `æ` and `ß`, is **(unknown)**. A name's 1-based position is the index `0x23` tokens use, so Save numbers
-the names in this order (`47.0b` in 1.00, `45.0c` in 1.03).
+**Names.** A sequence of entries in alphabetical order, ending with a `0x00` byte. A name's 1-based position is
+the index `0x23` tokens use, so Save numbers the names in this order (`47.0b` in 1.00, `45.0c` in 1.03).
+
+Excel compares names letter by letter, ignoring case and accents: the French 1.01 puts `Critères` before
+`Criteria`. Three letters stand for two or for a plain one, and the rest of Mac OS Roman cannot be in a name
+(`DEFINE.NAME` with each character from `0x80` to `0xFF`, `tests/Data/name-characters-1.00.txt`):
+
+| Characters | Compared as |
+|---|---|
+| `Ä` `Å` `á` `à` `â` `ä` `ã` `å` `À` `Ã` | A |
+| `Æ` `æ` | AE |
+| `Ç` `ç` | C |
+| `É` `é` `è` `ê` `ë` | E |
+| `í` `ì` `î` `ï` | I |
+| `Ñ` `ñ` | N |
+| `Ö` `ó` `ò` `ô` `ö` `õ` `Ø` `ø` `Õ` | O |
+| `Œ` `œ` | OE |
+| `Ü` `ú` `ù` `û` `ü` | U |
+| `ÿ` | Y |
+| Every other character from `0x80` up: `ß`, symbols, and the capitals `0xE5`–`0xF4` (`Â`, `Ê`, `Á` …) that later Systems added | Not allowed: `DEFINE.NAME` gives an error |
+
+Names that compare equal are one name: defining `aéx` when `aex` exists redefines it and renames it `aéx`, in
+its place (`Name Equivalents`, where `aæx`, as AAEX, comes before `AÄX`, as AAX).
 
 Excel finds a name typed in a formula by searching this order, and keeps the order by inserting each new name in
 its place; it never sorts the names it reads. In `Names Unsorted` the library wrote `Zeta` and `Alpha` after the
@@ -869,6 +907,9 @@ Definitions differ from cell formulas:
   `2C 40 04 FE` (Excel 1.00 and 1.5, `Relative Names` and `Relative Names 1.5` samples). So a definition
   written as `=B2` means different cells for different active cells; one whose references are all absolute, as
   in every one of Microsoft's samples, means the same cells everywhere.
+  An offset that runs off the sheet wraps round it: one row up from row 1 is row 16384, and one column left of
+  column A is IV (`Name Relative Wrap Row` and `Name Relative Wrap Column`, whose tables Excel 1.00 grew to
+  16384 rows and 256 columns for them, §6.1).
 
 A new worksheet always has five names with empty definitions: `Criteria`, `Database`, `Print_Area`,
 `Print_Titles`, `Recorder`. From 1.01 on they are items 30–34 of the string list `STR#` 256, so a translated
@@ -1516,6 +1557,21 @@ number typed as a constant on its own is taken as text (`1E306`, `1E-308`). Toke
 area keeps its columns absolute and a column area its rows. Each operand of a range is shown this way on its
 own, so `=1:1:16384:16384` is a range of two whole-row areas, `46 … 0F 25… 25… 11`, wrapped in a memory area
 like any range whose operands are not both single cells.
+
+**Ranges.** Two cell references with `:` between them are one area token, and Excel pairs them before it
+applies `:` to anything else: `=B$2:$C3:B2:C3` is the areas `B$2:$C3` and `B2:C3` joined by `11`, and
+`=(A1:B2,C3):B2:C3` ends with the area `B2:C3`, not with `B2` and `C3` as two ranges (Excel 1.00's own
+compilation of both through `--recompile`). `=A1:B2:C3` is the area `A1:B2` and the reference `C3`.
+
+**Reference operands.** The operands of `:`, intersection and union, and an argument whose accepted type is
+reference alone (ROW, COLUMN, AREAS), must be references: a cell, an area, a name, one of these in parentheses,
+a range, union or intersection, or a call to a function that can return a reference (IF, CHOOSE, INDEX and the
+others whose returned types include it, Appendix A) or to a user-defined function. Anything else is a syntax
+error, so Excel 1.00 never writes it: `=A1:""`, `=SUM(A1):B2`, `=(A1+0):B2`, `=A1 SUM(B2)`, `=(A1,SUM(B2))`,
+`=ROW(SUM(A1))` and `=COLUMN(NOW())` are refused, while `=IF(TRUE,A1):B2`, `=CHOOSE(1,A1):B2`,
+`=INDEX(A1:C3,1,1):B2`, `=ROW(IF(TRUE,A1))` and `=ROWS(SUM(A1))` (ROWS also takes an array) compile. A minus
+sign binds less tightly than `:`, so `=-A1:B2` is the negated area; `=A1:-B2` crashes Excel
+([Excel bugs and quirks](ExcelBugs.md#some-refused-ranges-crash-the-compiler-excel-100)).
 
 **TRUE and FALSE** without parentheses are `1D` constants.
 
@@ -2281,8 +2337,6 @@ recalculate the sheet when it opens it (§6; five 1.00 samples and seven 1.5 sam
 None of these affects reading the samples or writing valid files.
 
 * Which build saved Microsoft's version-18 `SIMUL EQUATIONS`, whose version rule differs from the released 1.5's (§2.1).
-* Where Excel's name order puts letters with no plain-letter base, such as `æ`, `ø` and `ß` (§11); the library
-  compares them by their own codes.
 
 ---
 

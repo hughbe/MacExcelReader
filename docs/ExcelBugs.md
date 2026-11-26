@@ -40,9 +40,9 @@ Seen in Excel 1.03. A macro that opens a file linked to other documents, such as
 references to non-resident sheets?" until someone answers. While the dialog is up, the macro's next commands
 can act on the wrong window. Pass 0 as OPEN's second argument (`=OPEN("Disk:File",0)`) to skip the question.
 
-## Macro FORMULA takes only R1C1 text (Excel 1.03)
+## Macro FORMULA takes only R1C1 text (Excel 1.00, 1.03)
 
-Seen in Excel 1.03. The macro command `FORMULA("=A1+1")` returns `#VALUE!` and enters nothing;
+Seen in Excel 1.00 and 1.03, whatever `A1.R1C1` has set. The macro command `FORMULA("=A1+1")` returns `#VALUE!` and enters nothing;
 `FORMULA("=R1C1+1")` works. In R1C1 mode `A1` is not a reference at all, so `=Other!A1` became a reference to
 an external *name* `A1`. Text from GET.FORMULA, which is R1C1, can be passed straight back.
 
@@ -103,10 +103,34 @@ Excel 1.00 titles a window with its volume when the document is not on the start
 `ACTIVATE("F 01 saved")` fails. The same title is written as the document name in workspace files (Appendix
 B).
 
-## GET.FORMULA's whole-row text does not compile back the same (Excel 1.03)
+## GET.FORMULA's whole-row text does not compile back the same (Excel 1.00, 1.03)
 
 Seen in Excel 1.03. `=A1:IV16384` comes back from GET.FORMULA as `=R[-20]:R[16363]`, and entering that text
 gives a different formula: a range of two whole-row areas wrapped in a memory area (`46 … 25 … 25 … 11`).
+Excel 1.00 does the same for any whole rows or columns with a relative end: `C[-5]:C[-4]` (A:B from F5),
+`C2:C[-4]` and `R[-9]:R[-7]` each compile to two areas joined by `:`, and only `C1:C2`, absolute at both ends,
+to one area. GET.FORMULA shows `$B:B`, whose ends are the same column, as one column (`C2`), which compiles
+back as `$B:$B`. So `excel-test --recompile`, which enters GET.FORMULA's text, cannot check how Excel
+compiles typed A1 text for these.
+
+## Some refused ranges crash the compiler (Excel 1.00)
+
+Seen in Excel 1.00 under MAME, entering formulas with the macro command FORMULA. Excel refuses a non-reference
+operand of `:` or intersection (spec §15.4) with a syntax error, but these crash it with a system error
+(ID = 02) instead:
+
+* a function call that cannot return a reference, then `:` or a space, then a union in parentheses whose last
+  reference has a relative row or column: `=SUM(R1C1):(R1C1,R[-2]C[-3])`, `=SUM(R1C1) (R1C1,R[-2]C[-3])`,
+  `=AND(R1C1,R1C2):(R1C1:R2C2,R[-2]C[-3])`. With that reference absolute (`=SUM(R1C1):(R1C1,R3C3)`), a
+  relative one earlier in the union (`(R1C1,R[-2]C[-3],R1C1)`), or no union (`=SUM(R1C1):(R[-2]C[-3])`),
+  Excel gives the syntax error;
+* a minus sign on the right of `:`: `=R1C1:-R2C2`.
+
+## A format with two exponents crashes TEXT (Excel 1.00)
+
+Seen in Excel 1.00 under MAME. TEXT with the format `;\###0.0E+00.00E+00$`, which has a second exponent, stops
+Excel with a system error (ID = 02). FORMAT.NUMBER refuses such a format, and so does the
+library.
 
 ## Display quirks of GET.FORMULA (Excel 1.03, 1.5)
 

@@ -91,6 +91,25 @@ public class FormattingTests
         Assert.Equal(expected, ExcelNumberFormat.Parse(format).Format(value));
     }
 
+    [Theory]
+    [InlineData(1234.5678, "0E+00.0", "1E+003.0")]
+    [InlineData(1234.5678, "0.00E+00", "1.23E+03")]
+    [InlineData(1234.5678, "0E+0", "1E+3")]
+    [InlineData(1234.5678, "0E-0", "1E3")]
+    [InlineData(0.00012345, "0E+0", "1E-4")]
+    [InlineData(0.00012345, "0.0E-00", "1.2E-04")]
+    [InlineData(1.5E+123, "0E+0", "2E+123")]
+    [InlineData(1.5E+123, "0E+00000", "2E+00123")]
+    [InlineData(1234.5678, "0E+00 0", "1E+00 3")]
+    [InlineData(1234.5678, "00E+00", "12E+02")]
+    public void Format_FillsTheExponentsRunsUpToADecimalPoint(double value, string format, string expected)
+    {
+        // TEXT in Excel 1.00 under the harness: the exponent, at least as many digits as there are placeholders after
+        // the E, fills the runs after it up to a '.' as an integer would; runs after the '.' show only their 0s
+        // (docs/Display.md).
+        Assert.Equal(expected, ExcelNumberFormat.Parse(format).Format(value));
+    }
+
     [Fact]
     public void Format_PercentOfTheLargestNumberIsDigits()
     {

@@ -799,18 +799,21 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         try
         {
             int integerCount = 0, fractionCount = 0, count = 0;
-            int part = 0; // 0 integer, 1 fraction, 2 exponent
+            // 0 integer, 1 fraction, 2 exponent, 3 after the exponent: the exponent's digits fill the runs after its
+            // sign up to a '.', as an integer's do, and runs after the '.' only show their 0s (`0E+00 0` shows 1234.5
+            // as 1E+00 3, `0E+00.0` as 1E+003.0).
+            int part = 0;
             foreach (var token in tokens)
             {
-                if (token.Code == 0x05 && part == 0)
+                if (token.Code == 0x05 && part is 0 or 2)
                 {
-                    part = 1;
+                    part++;
                 }
                 else if (token.Code is 0x1D or 0x1E)
                 {
                     part = 2;
                 }
-                else if (token.Code is 0x04 or 0x06 && token.Operands.Length == 1)
+                else if (token.Code is 0x04 or 0x06 && token.Operands.Length == 1 && part < 3)
                 {
                     char place = token.Code == 0x04 ? '#' : '0';
                     for (int n = 0; n < token.Operands[0]; n++)
@@ -862,9 +865,20 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
 
             ReadOnlySpan<char> integerDigits = digitText[..integerLength];
             ReadOnlySpan<char> fractionDigits = digitText.Slice(integerLength, decimals);
-            Span<char> exponentText = stackalloc char[11];
+            // The exponent has at least as many digits as its token says (the compiler counts every placeholder after
+            // the E): with more than its runs have room for, the rest go before their first position.
+            int exponentAt = tokens.FindIndex(static t => t.Code is 0x1D or 0x1E && t.Operands.Length == 1);
+            int exponentWidth = exponentAt < 0 ? 0 : tokens[exponentAt].Operands[0];
+            Span<char> exponentText = stackalloc char[16];
             Math.Abs(exponent).TryFormat(exponentText, out int exponentLength, default, CultureInfo.InvariantCulture);
             var exponentDigits = exponentText[..exponentLength].TrimStart('0');
+            if (exponentWidth > exponentPlaces.Length && exponentDigits.Length < exponentWidth)
+            {
+                int pad = Math.Min(exponentWidth, exponentText.Length) - exponentDigits.Length;
+                exponentDigits.CopyTo(exponentText[pad..]);
+                exponentText[..pad].Fill('0');
+                exponentDigits = exponentText[..(pad + exponentDigits.Length)];
+            }
 
             // Decimal places show their digit, except trailing zeros where the placeholder is #.
             int keep = fractionPlaces.Length;
@@ -900,8 +914,16 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
                             {
                                 AppendIntegerPlace(ref text, exponentDigits, exponentPlaces, exponentNext++, thousands: false);
                             }
+                            else if (part == 3 && token.Code == 0x06)
+                            {
+                                text.Append('0');
+                            }
                         }
 
+                        break;
+                    case 0x05 when part is 2 or 3:
+                        text.Append('.');
+                        part = 3;
                         break;
                     case 0x05 when part == 0:
                         text.Append('.');

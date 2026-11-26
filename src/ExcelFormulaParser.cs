@@ -707,8 +707,8 @@ internal static class ExcelFormulaParser
             {
                 int position = _current.Position;
                 Advance();
-                int right = ParseComparison();
-                node = Binary(position, UnionOperator, node, right);
+                int right = RequireReference(ParseComparison(), "A union");
+                node = Binary(position, UnionOperator, RequireReference(node, "A union"), right);
             }
 
             if (_current.Kind != TokenKind.End)
@@ -848,7 +848,7 @@ internal static class ExcelFormulaParser
                 && _current.Kind is TokenKind.Identifier or TokenKind.QuotedName or TokenKind.Bang or TokenKind.OpenParen)
             {
                 int position = _current.Position;
-                int right = ParseRange();
+                int right = RequireReference(ParseRange(), "An intersection");
                 left = Binary(position, IntersectionOperator, left, right);
             }
 
@@ -863,8 +863,24 @@ internal static class ExcelFormulaParser
                 NodeKind.Ref or NodeKind.Area or NodeKind.Name => true,
                 NodeKind.Paren => IsReferenceNode(node.A),
                 NodeKind.Binary => node.Code is IntersectionOperator or UnionOperator or RangeOperator,
+                // A function that can return a reference (IF, CHOOSE, INDEX), or a macro's, whose result is unknown.
+                NodeKind.Function => node.A == 255 || (ExcelFunctions.Get(node.A, _version) is { } function
+                    && (function.ReturnType & ExcelValueTypes.Reference) != 0),
                 _ => false,
             };
+        }
+
+        // Excel's compiler takes only references as the operands of ':', intersection and union, and as an argument
+        // that accepts nothing else (ROW, COLUMN, AREAS): =A1:"", =SUM(A1):B2 and =ROW(SUM(A1)) are syntax errors
+        // (Excel 1.00, docs/Testing.md).
+        private readonly int RequireReference(int index, string what)
+        {
+            if (!IsReferenceNode(index))
+            {
+                throw new ExcelFormulaSyntaxException($"{what} needs a reference", _nodes[index].Position);
+            }
+
+            return index;
         }
 
         private int ParseRange()
@@ -876,10 +892,33 @@ internal static class ExcelFormulaParser
                 Advance();
                 int right = TryParseWholeRowsOrColumns(0) is int rightWhole ? rightWhole : ParsePrimary();
                 ref readonly var a = ref _nodes[left];
-                ref readonly var b = ref _nodes[right];
-                left = a.Kind == NodeKind.Ref && b.Kind == NodeKind.Ref && a.External == b.External
-                    ? Area(a.Position, a.Row1, b.Row1, a.Column1, b.Column1, a.External)
-                    : Binary(position, RangeOperator, left, right);
+                if (a.Kind == NodeKind.Ref && _nodes[right].Kind == NodeKind.Ref && a.External == _nodes[right].External)
+                {
+                    left = Area(a.Position, a.Row1, _nodes[right].Row1, a.Column1, _nodes[right].Column1, a.External);
+                    continue;
+                }
+
+                // Excel pairs cell:cell into an area before it applies ':' to anything else, so B2:C3 in
+                // =B$2:$C3:B2:C3 or =(A1,C3):B2:C3 is one area token (Excel 1.00, docs/Testing.md).
+                if (_nodes[right].Kind == NodeKind.Ref && IsOperator(Op.Colon) && _next.Kind == TokenKind.Identifier)
+                {
+                    int pairPosition = _current.Position;
+                    Advance();
+                    int last = TryParseWholeRowsOrColumns(0) is int lastWhole ? lastWhole : ParsePrimary();
+                    ref readonly var b = ref _nodes[right];
+                    if (_nodes[last].Kind == NodeKind.Ref && b.External == _nodes[last].External)
+                    {
+                        left = Binary(position, RangeOperator, RequireReference(left, "':'"), Area(b.Position, b.Row1, _nodes[last].Row1, b.Column1, _nodes[last].Column1, b.External));
+                    }
+                    else
+                    {
+                        left = Binary(pairPosition, RangeOperator, Binary(position, RangeOperator, RequireReference(left, "':'"), right), RequireReference(last, "':'"));
+                    }
+
+                    continue;
+                }
+
+                left = Binary(position, RangeOperator, RequireReference(left, "':'"), RequireReference(right, "':'"));
             }
 
             return left;
@@ -1012,8 +1051,8 @@ internal static class ExcelFormulaParser
                     {
                         int position = _current.Position;
                         Advance();
-                        int right = ParseComparison();
-                        inner = Binary(position, UnionOperator, inner, right);
+                        int right = RequireReference(ParseComparison(), "A union");
+                        inner = Binary(position, UnionOperator, RequireReference(inner, "A union"), right);
                     }
 
                     Expect(TokenKind.CloseParen, ")");
@@ -1248,6 +1287,15 @@ internal static class ExcelFormulaParser
                     throw new ExcelFormulaSyntaxException($"{function.Name} takes {expected} argument(s), not {count}", name.Position);
                 }
 
+                for (int i = 0; i < count; i++)
+                {
+                    int argument = _arguments[first + i];
+                    if (function.GetArgumentType(i) == ExcelValueTypes.Reference && _nodes[argument].Kind != NodeKind.Missing)
+                    {
+                        RequireReference(argument, $"{function.Name}'s argument {i + 1}");
+                    }
+                }
+
                 return Add(new Node { Kind = NodeKind.Function, Position = name.Position, A = number, B = first, C = count, D = -1, Flag = dialog });
             }
 
@@ -1342,10 +1390,11 @@ internal static class ExcelFormulaParser
                 return false;
             }
 
+            // Excel matches a name ignoring case and accents, as it orders them (spec §11).
             var names = _document.Names;
             for (int i = 0; i < names.Count; i++)
             {
-                if (name.Equals(names[i].Name, StringComparison.OrdinalIgnoreCase))
+                if (NameKey.Equal(name, names[i].Name))
                 {
                     index = i + 1;
                     return true;

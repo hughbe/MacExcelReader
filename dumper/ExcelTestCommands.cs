@@ -106,7 +106,7 @@ sealed class PackCommand : Command<PackSettings>
             byte[] data = File.ReadAllBytes(path);
             if (File.Exists(path + ".commands"))
             {
-                commands[name] = File.ReadAllLines(path + ".commands").Where(l => l.TrimStart().StartsWith('=')).ToArray();
+                commands[name] = ReadCommands(path + ".commands");
             }
 
             if (ExcelTest.IsChart(data))
@@ -118,6 +118,17 @@ sealed class PackCommand : Command<PackSettings>
             {
                 files.Add(new MfsFile(name, sheet.FinderType, "XCEL", data, []));
                 targets.Add((name, sheet));
+                // Open grows a worksheet's table to every cell its formulas refer to (spec §6.1), and Excel refuses a
+                // sheet whose table would not fit in memory: one formula referring to IV16384 is enough.
+                if (sheet.Kind == ExcelDocumentKind.Worksheet)
+                {
+                    var (rows, columns) = sheet.ReferencedExtent();
+                    long bytes = (long)Math.Max(rows + 1, sheet.Cells.RowCount) * Math.Max(columns + 1, sheet.Cells.ColumnCount) * 6;
+                    if (bytes > 1 << 20)
+                    {
+                        AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(name)}'s formulas refer to cells up to row {rows} and column {columns}: Open will grow its table to about {bytes >> 20} MB, which Excel 1.00 under MAME (4 MB) refuses or cannot save to a floppy. Refer to nearer cells.[/]");
+                    }
+                }
             }
             else if (settings.NoProbe)
             {
@@ -149,6 +160,31 @@ sealed class PackCommand : Command<PackSettings>
             ? "In Excel 1.5: open Driver; it runs by itself. Then run [bold]excel-test check[/]."
             : "Run [bold]excel-test run[/] (Excel 1.00 in MAME), or in Excel open Driver and choose Macro > Run > Driver!Run (Option-Command-R). Then run [bold]excel-test check[/].");
         return 0;
+    }
+
+    // A .commands file is UTF-8, one command per line; Driver stores it as Mac OS Roman. Bytes that are not UTF-8 (a
+    // file written as Latin-1 or Mac OS Roman) would otherwise turn into replacement characters without a word.
+    internal static string[] ReadCommands(string path)
+    {
+        string[] lines;
+        try
+        {
+            lines = File.ReadAllLines(path, new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true));
+        }
+        catch (System.Text.DecoderFallbackException)
+        {
+            throw new InvalidOperationException($"{path} is not UTF-8: save it as UTF-8.");
+        }
+
+        foreach (string line in lines)
+        {
+            if (line.Any(c => c > 0x7F && MacRoman.GetString(MacRoman.GetBytes(c.ToString())) != c.ToString()))
+            {
+                throw new InvalidOperationException($"{path}: \"{line}\" has a character Mac OS Roman cannot hold.");
+            }
+        }
+
+        return lines.Where(l => l.TrimStart().StartsWith('=')).ToArray();
     }
 
     // Driver: column A holds the commands; column B labels each one, so check can map results back. A probe
@@ -375,6 +411,15 @@ sealed class CheckCommand : Command<CheckSettings>
                 continue;
             }
 
+            // Under emulation a save can occasionally reach the directory without its data (zeros where the file
+            // should be). Say so rather than stopping the check.
+            if (Unreadable(saved.Data) is { } reason)
+            {
+                AnsiConsole.MarkupLine($"[red]Excel's save cannot be read[/]: {Markup.Escape(reason)}. Run it again.");
+                problems++;
+                continue;
+            }
+
             AnsiConsole.MarkupLine(original.Data.AsSpan().SequenceEqual(saved.Data)
                 ? "  Bytes: identical."
                 : $"  Bytes: ours {original.Data.Length:N0}, Excel {saved.Data.Length:N0}; {DifferingBytes(original.Data, saved.Data):N0} differ in the common length.");
@@ -396,6 +441,50 @@ sealed class CheckCommand : Command<CheckSettings>
 
         AnsiConsole.MarkupLine(problems == 0 ? "[green]No unexpected differences.[/]" : $"[yellow]{problems} unexpected difference(s).[/]");
         return problems == 0 ? 0 : 1;
+    }
+
+    // Whether Excel's save is a file this library can read in full: a chart, or a sheet whose every formula decodes.
+    // Under emulation a save sometimes reaches the disk with its data, or one 512-byte sector of it, as zeros.
+    internal static bool IsReadable(byte[] data) => Unreadable(data) is null;
+
+    // Why Excel's save cannot be read, or null if it can, naming any whole sectors of zeros in it.
+    internal static string? Unreadable(byte[] data)
+    {
+        if (ExcelTest.IsChart(data))
+        {
+            return null;
+        }
+
+        try
+        {
+            var document = ExcelDocument.Read(data, copyData: false);
+            foreach (var entry in document.Cells.NonEmptyCells)
+            {
+                _ = entry.GetCell().Formula?.ToText(document);
+            }
+
+            for (int i = 0; i < document.Names.Count; i++)
+            {
+                _ = document.Names[i].GetDefinitionText(document);
+            }
+
+            return null;
+        }
+        catch (Exception e) when (e is ExcelFormatException or ArgumentException or IndexOutOfRangeException)
+        {
+            var zeroed = new List<string>();
+            for (int sector = 0; sector + 512 <= data.Length; sector += 512)
+            {
+                if (!data.AsSpan(sector, 512).ContainsAnyExcept((byte)0))
+                {
+                    zeroed.Add($"0x{sector:X}");
+                }
+            }
+
+            return zeroed.Count == 0
+                ? e.Message.TrimEnd('.')
+                : $"{e.Message.TrimEnd('.')}; the 512-byte sector(s) at {string.Join(", ", zeroed)} are all zeros, so part of the save did not reach the disk";
+        }
     }
 
     private static int CheckSheet(MfsFile original, MfsFile saved, Dictionary<string, ExcelCell> results, CheckSettings settings)
@@ -443,7 +532,7 @@ sealed class CheckCommand : Command<CheckSettings>
 
         // The tokens in Excel's re-save, with the bytes left over from memory cleared. After --recompile they are
         // Excel's own compilation of each formula.
-        int compared = 0;
+        int compared = 0, refused = 0;
         foreach (var entry in ours.Cells.NonEmptyCells)
         {
             int r = entry.Row;
@@ -451,6 +540,17 @@ sealed class CheckCommand : Command<CheckSettings>
             var cell = entry.GetCell();
             if (cell.Formula is not { } formula || (formula.IsArrayFormula && !formula.IsSharedAnchor) || excel.Cells.Find(r, c)?.Formula is not { } theirs)
             {
+                continue;
+            }
+
+            // A recompile Excel refused (FORMULA gave an error, as for text its compiler rejects) leaves the cell with
+            // our tokens, which would otherwise pass as a match.
+            if (results.TryGetValue("recompile " + original.Name + "!" + new ExcelCellAddress(r, c), out var recompiled)
+                && recompiled.Formula?.Result is { Kind: ExcelValueKind.Error } refusal)
+            {
+                AnsiConsole.MarkupLine($"  [red]{new ExcelCellAddress(r, c)} not recompiled[/] {Markup.Escape(formula.ToText(ours))}: FORMULA gave {Markup.Escape(refusal.ToString())}, so Excel's compiler rejects its text");
+                refused++;
+                problems++;
                 continue;
             }
 
@@ -465,9 +565,9 @@ sealed class CheckCommand : Command<CheckSettings>
             }
         }
 
-        if (compared > 0)
+        if (compared + refused > 0)
         {
-            AnsiConsole.MarkupLine($"  Tokens: {compared} formula(s) compared.");
+            AnsiConsole.MarkupLine($"  Tokens: {compared} formula(s) compared" + (refused > 0 ? $"; {refused} Excel would not compile." : "."));
         }
 
         if (settings.Bytes)

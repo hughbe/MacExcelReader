@@ -47,6 +47,9 @@ public sealed class Program
                 branch.AddCommand<RunCommand>("run")
                     .WithDescription("Run Driver in Excel 1.00 under MAME, headless, optionally capturing windows, and write Excel's saves back to the disk.")
                     .WithExample("excel-test", "run", "Test.dsk", "--capture", "Test:Sheet saved");
+                branch.AddCommand<ExperimentCommand>("experiment")
+                    .WithDescription("Pack, run (Excel 1.00 in MAME) and check files in one go, over as many disks as they need, reporting what each command returned.")
+                    .WithExample("excel-test", "experiment", "out/Sheet1", "out/Sheet2", "-o", "results");
                 branch.AddCommand<CheckCommand>("check")
                     .WithDescription("After Driver has run in Excel, compare Excel's results and re-saved copies with the originals.")
                     .WithExample("excel-test", "check", "Test.dsk");
@@ -326,11 +329,11 @@ sealed class CellCommand : Command<CellSettings>
             return 0;
         }
 
-        Describe(document, address, cell);
+        Describe(document, address, cell, settings.Input);
         return 0;
     }
 
-    internal static void Describe(ExcelDocument document, ExcelCellAddress address, ExcelCell cell)
+    internal static void Describe(ExcelDocument document, ExcelCellAddress address, ExcelCell cell, string? path = null)
     {
         var table = new Table().Title($"[bold]{address}[/]").AddColumn("Field").AddColumn("Value");
         table.AddRow("Type", cell.Type.ToString());
@@ -349,7 +352,24 @@ sealed class CellCommand : Command<CellSettings>
         table.AddRow("Protection", $"locked {Program.YesNo(cell.IsLocked)}, hidden {Program.YesNo(cell.IsHidden)}");
         table.AddRow("Attribute word", $"0x{cell.RawAttributes:X4}");
 
-        if (cell.Formula is { } formula)
+        ExcelFormula? decoded = null;
+        try
+        {
+            decoded = cell.Formula;
+        }
+        catch (ExcelFormatException e)
+        {
+            // Show what the file holds, so a formula the library cannot read can still be looked at.
+            table.AddRow("Formula", $"[red]cannot be read: {Program.Escape(e.Message)}[/]");
+            if (path is not null && ExcelDocument.Load(path).Cells.TryGetRawData(address.Row, address.Column, out var record) && record.Length > 15)
+            {
+                int length = Math.Min(record.Length, 15 + record[14] + 32);
+                table.AddRow("Record", Program.Hex(record[..length]) + "  (value 8, reserved 3, column, row word, length, expression, then fix-ups)");
+                table.AddRow("Expression", Program.Hex(record.Slice(15, Math.Min(record[14], record.Length - 15))));
+            }
+        }
+
+        if (decoded is { } formula)
         {
             var result = formula.Result;
             table.AddRow("Formula", Program.Escape(formula.ToText(document)));
@@ -363,7 +383,7 @@ sealed class CellCommand : Command<CellSettings>
 
         AnsiConsole.Write(table);
 
-        if (cell.Formula is { } f)
+        if (decoded is { } f)
         {
             AnsiConsole.Write(TokenTable(f.Expression.ToArray()));
         }
