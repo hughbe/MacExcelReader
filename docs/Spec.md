@@ -37,7 +37,7 @@ and comparing the bytes ([Testing in a real Excel](Testing.md)).
 
 ## Sources
 
-**Code.** The p-code and 68000 code in the applications' `PCOD` resources, disassembled:
+**Code.** The p-code and 68000 code in the applications' `PCOD` resources, disassembled (`tools/pcode.py`):
 
 | Release | Disk | Used for |
 |---------|------|----------|
@@ -49,6 +49,10 @@ and comparing the bytes ([Testing in a real Excel](Testing.md)).
 | Excel 1.5 (May 1988) | Excel 1.5 folder | Save (`47.0d`), format and token translation (`47.18`), function table and file-number table, version-18 rules. Each 1.5 change the spec names was checked against 1.06's code, the release before it. |
 
 Code is cited as `segment.procedure` in hexadecimal, for example `0f.00` (see Background).
+
+Drawing (Appendix D) also follows the Macintosh's own code: the Mac Plus ROM (checksum `4D1F8172`) that the screens
+were captured under, cited by ROM offset, with Apple's 1985 QuickDraw source (`DrawText.a`, `Stretch.a`), and
+the scroll bar definition (`CDEF` 1) in the System file on Excel 1.00's Data disk.
 
 **Samples.** 37 documents and one workspace file from Microsoft's disks, and 87 files Excel saved in
 experiments. A reader built from this spec reads all of them, and a writer rebuilds them byte for byte.
@@ -2332,8 +2336,8 @@ None of these affects reading the samples or writing valid files.
 * Which build saved Microsoft's version-18 `SIMUL EQUATIONS`, whose version rule differs from the released 1.5's (§2.1).
 * Where Excel's name order puts letters with no plain-letter base, such as `æ`, `ø` and `ß` (§11); the library
   compares them by their own codes.
-* How Excel places the vertical scroll bar's thumb, which the library fits to 18 measured rows, and how QuickDraw
-  stretches a font size with no bitmap (Appendix D).
+* How the 64K ROM that Excel 1.00 also ran on draws a font size with no bitmap, and what a later System's `FOND`
+  resources change in bold headings of that size (Appendix D).
 
 ---
 
@@ -2908,16 +2912,19 @@ for its slant. The widths are the advance widths in the font's `FONT` resource; 
 Data disk has bitmaps of Chicago 12, New York 10, 12, 20 and 24, Geneva 9, 10, 12, 14, 18, 20 and 24, and
 Monaco 9.
 
-Excel also allows any other size. QuickDraw draws one the System has no bitmap for (`RealFont` false) from the
-next larger bitmap of the family, or from the largest if none is larger, scaling every width by size ÷ that
-bitmap's size and keeping positions in fractions of a pixel: Geneva 11 from Geneva 12 (a `0`, 8 pixels there, is
-7⅓), Geneva 16 from Geneva 18, Monaco 12 from Monaco 9. `TextWidth` adds up the fractions and rounds the total
-down, so `1E+04` in Geneva 11 is 34 pixels. The ascent and descent scale to the nearest pixel (Geneva 11: 11 and
-3). Excel 1.00's `09.1c` adds a pixel to both cached digit widths when `RealFont` is false, and on screen a `#`
-counts as 9 pixels too. So a Geneva 11 digit counts as 8 pixels and a `#` as 9, while text is checked against
-the room at its plain width: `TRUE` (27½ pixels) fits a 29-pixel room. Excel 1.03 instead keeps a flag for a
-scaled size, and uses it both to widen those divisors and to add a pixel per character to the width it checks
-(below).
+Excel also allows any other size. The Font Manager draws one the System has no bitmap for (`RealFont` false) from
+the next larger bitmap of the family, or from the largest if none is larger: Geneva 11 from Geneva 12, Geneva 16
+from Geneva 18, Monaco 12 from Monaco 9. It returns the scale as numer ÷ denom with denom 256 and numer
+`FixRatio`(size, bitmap size) shifted right 8 bits, so not exactly size ÷ bitmap size: Geneva 11 is 234/256 of
+Geneva 12, not 11/12 (`FMSwapFont` in the Mac Plus ROM, at ROM offset `0xED7C`; `FixRatio`, at `0x1593A`, rounds
+down). The widths stay the bitmap's whole pixels, a pixel more each for bold, and `TextWidth` adds them up before
+it scales the total and rounds down (ROM `0x8CE8`): `1E+04`, 38 pixels in Geneva 12, is 34 in Geneva 11, and a `0`
+on its own is 7 (8 × 234/256 = 7.3). The ascent, descent and leading scale to the nearest pixel (`GetFontInfo`;
+Geneva 11: 11, 3 and 1). Excel 1.00's `09.1c` adds a pixel to both cached digit widths when `RealFont` is false,
+and on screen a `#` counts as 9 pixels too. So a Geneva 11 digit counts as 8 pixels and a `#` as 9, while text is
+checked against the room at its plain width: `TRUE` (28 pixels) fits a 29-pixel room. Excel 1.03 instead keeps a
+flag for a scaled size, and uses it both to widen those divisors and to add a pixel per character to the width it
+checks (below).
 
 **Releases.** In a size the System has a bitmap for, Excel 1.03 and 1.5 draw cells exactly as 1.00 does:
 every test sheet in Geneva 10 came out the same, pixel for pixel. In a size with no bitmap, Excel 1.5 still
@@ -2925,7 +2932,11 @@ matches 1.00 cell for cell, while Excel 1.03 does not: when it checks whether te
 character on top of the scaled width. In Geneva 11, `TRUE` (28 pixels) needs 32 pixels of room in 1.03 and 28 in
 1.00 and 1.5, and `1E+04` (34) needs 39. The bold column and row headings of a scaled size depend on the System
 rather than on Excel: Excel 1.00 draws them with heavier letters under the System on its own Data disk than under
-a later System, where it matches 1.03 and 1.5 pixel for pixel. The cells look the same under both.
+a later System, where it matches 1.03 and 1.5 pixel for pixel. The cells look the same under both. `FMSwapFont`
+takes the extra width a style adds from the family's `FOND` resource when there is one and the Font Manager's
+flags allow it, scaled to the size (ROM `0xE7A8`–`0xE7CE` and `0xEA36`–`0xEA82`), and otherwise adds a whole pixel
+for bold; the Data disk's System has no `FOND` resources, and a later one has, which accounts for the difference
+**(inferred)**: the later System was not examined.
 
 **Rows.** Every row has the same height, the font's ascent + descent + 1 (`09.1c`; 13 in Geneva 10, 15 in Geneva
 11), and its bottom pixel is its gridline. `09.1c` also sets a floor from the screen's size that no font reaches.
@@ -2980,9 +2991,28 @@ the bottom row of the font's rectangle (ascent + descent), rounded down: in Gene
 baseline moves 1 pixel and the top of a capital 4; in Geneva 12, with a descent of 3, 2 and 5. Bold ORs each
 glyph with itself a pixel to the right.
 
-**A size with no bitmap** is drawn by QuickDraw from the next larger size, or the largest: drawn at that size and
-stretched (Inside Macintosh, the Font Manager). Taking for each pixel the bitmap pixel under its centre comes within one
-pixel in fifty of Excel 1.00's Geneva 11 **(inferred)**; the exact stretching is not established.
+**A size with no bitmap** is drawn at the bitmap's size and stretched, by QuickDraw's `DrText` and `StretchBits`
+(the Mac Plus ROM's, which match `DrawText.a` and `Stretch.a` in Apple's 1985 QuickDraw source). With *x* and *y*
+the pen, *u* the text's width at the bitmap's size (bold included) and *n*/256 the scale:
+
+1. `DrText` draws the text at the bitmap's size, from the pen, into a buffer: the source rectangle runs from *x* to
+   *x* + *u* + 32 (slop for bold and italic, in the srcOr to srcBic modes) and from *y* − the bitmap's ascent down
+   the height of its font rectangle. Bold and italic are applied in the buffer as for a real size.
+2. `MapRect` maps the rectangle to the scaled size: each edge's distance from the pen times *n*/256, rounded to the
+   nearest pixel away from the pen.
+3. `StretchBits` copies the buffer into the mapped rectangle. Down the rows, an error term starts at minus half the
+   source height; each source row read adds the destination height, rows are ORed together while it stays at or
+   below 0, and a destination row is written, and repeated while subtracting the source height leaves it at or
+   above 0. Across, the fraction *f* = `FixRatio`(smaller width, larger width) steps a 16-bit error term that
+   starts at *f* ÷ 2: shrinking, source column *i* goes to destination column ⌊(*f* ÷ 2 + *i* × *f*) ÷ 65536⌋,
+   columns falling together ORed; enlarging, destination column *i* takes that source column. For exact ratios
+   `StretchBits` has faster routines: ½, ¼ and ¾ give the same columns, 2, 3, 4, 6, 8, 16 and multiples of 8 repeat
+   each source column, and 1.5 gives each 4 source columns 1, 2, 1 and 2 destination columns.
+4. The pen moves *u* × *n* ÷ 256, rounded down: the scaled `TextWidth`.
+
+Pixels kerned left of the pen are not copied. These rules reproduce Excel 1.00's Geneva 11 pixel for pixel. They
+are the Mac Plus ROM's, which the screens were captured under; Excel 1.00 also ran on the 64K ROM of the 512K Mac,
+whose text drawing is **(unknown)**.
 
 ### The window
 
@@ -3021,9 +3051,18 @@ included), and the last row's and column's gridlines are solid lines.
 **Scroll bars.** The System's scroll bars sit on the content area's right and bottom edges, 16 pixels wide, with
 the grow box in the corner. Excel draws a black split box, 4 pixels long, before each bar's first arrow; dragging it
 splits the window (§13, offsets 37 and 39). The thumb is a 14 × 16 white square inside the track, which is filled
-with `ltGray`. The horizontal thumb's position is the left column out of 255, as the Control Manager places a
-value: (column × travel + 127) ÷ 255 pixels from the left of its travel, where the travel is the track's length
-less the thumb's. The vertical thumb is not proportional to the top row **(inferred)**: in a window of the default
-height, whose thumb travels 208 pixels, it sits (row × travel) ÷ 416 pixels down for the first 20 rows, then
-(row + 848) × travel ÷ 18000, and at the end of its travel when row 16384 is at the top; this fits all 18 rows
-measured, from 1 to 16383.
+with `ltGray`. The bars are controls with a minimum of 0: the horizontal bar's value is the left column and its
+maximum 255, the vertical bar's maximum is 17982 and its value comes from the top row (`18.0c` sets them,
+`18.01` and `18.11` set the value with `SetCtlValue`, and dragging the thumb maps the value back with `18.13`;
+`16.0c`, `16.01`, `16.11` and `16.13` in 1.03). The value of top row *r* (`18.12`; `16.12` in 1.03) gives the first and last 20 rows 819 each,
+so that the thumb moves for each of the first rows, and the 16,343 rows between them the rest:
+
+| Top row *r* (from 0) | Value |
+|---|---|
+| 0–19 | (*r* × 819 + 10) ÷ 20 |
+| 20–16362 | ((*r* − 20) × 16344 + 8171) ÷ 16343 + 819 |
+| 16363–16383 | ((*r* − 16363) × 819 + 10) ÷ 20 + 17163 |
+
+Each division rounds down; row 16383 gives 17982. The System's scroll bar (`CDEF` 1) puts the thumb value × travel ÷
+maximum pixels along its travel, the track's length less the thumb's, rounding up only when the remainder is more
+than half the maximum: (column × travel + 127) ÷ 255 for the horizontal thumb.

@@ -7,6 +7,8 @@ specification it is built from. The library is unreleased, so its API can change
 
 - `src/`: the library. `dumper/`: the `dumper` command-line tool, including `sheet` (build test sheets) and
   `excel-test` (the harness for running files in a real Excel). `tests/`: xUnit tests over `tests/Samples`.
+- `tools/`: `pcode.py`, the p-code disassembler (`python3 -I tools/pcode.py EXCEL.rsrc 18.12` lists a procedure
+  from the application's resource fork), and `minivmac/` for the harness.
 - `docs/Spec.md`: the format. `docs/ExcelBugs.md`: Excel's own bugs and quirks. `docs/Testing.md`: the harness
   and the results of every experiment run.
 

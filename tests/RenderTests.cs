@@ -93,12 +93,47 @@ public class RenderTests
     [Fact]
     public void FontSet_ScalesASizeWithNoBitmap()
     {
-        // From the largest size there is, the widths kept in fractions: 7 × 15/10 = 10.5 a character.
+        // From the largest size there is, scaled by 384/256: the widths add up before they are scaled, 7 × 1.5 = 10.5 a
+        // character.
         var font = BoxFonts().GetFont(3, 15)!;
         Assert.False(font.IsReal);
         Assert.Equal(15, font.Ascent);
         Assert.Equal(21, font.MeasureText("ab"));
         Assert.Equal(31, font.MeasureText("abc"));
+    }
+
+    [Theory]
+    [InlineData(11, 12, 234)]
+    [InlineData(16, 18, 227)]
+    [InlineData(12, 9, 341)]
+    [InlineData(15, 10, 384)]
+    public void FontScale_IsFixRatioShiftedRight8Bits(int size, int bitmapSize, int numer)
+    {
+        // FMSwapFont returns numer ÷ 256 rather than size ÷ bitmap size (spec Appendix D).
+        Assert.Equal(numer, MacExcelReader.Internal.MacFontScale.Numer(size, bitmapSize));
+    }
+
+    [Fact]
+    public void FontScale_TextWidthRoundsDownAndMetricsRound()
+    {
+        // 1E+04 is 38 pixels in Geneva 12: 38 × 234/256 = 34.7 in Geneva 11. Its ascent 12 becomes 11, descent 3 stays 3.
+        Assert.Equal(34, MacExcelReader.Internal.MacFontScale.Width(38, 234));
+        Assert.Equal(11, MacExcelReader.Internal.MacFontScale.Round(12, 234));
+        Assert.Equal(3, MacExcelReader.Internal.MacFontScale.Round(3, 234));
+        Assert.Equal(-11, MacExcelReader.Internal.MacFontScale.Round(-12, 234));
+    }
+
+    [Fact]
+    public void ScaledText_StretchesOneAndAHalfTimesAsStretchBitsDoes()
+    {
+        // "ab" at 15 from the box font's 10: the buffer is 14 + 32 = 46 columns, mapped to 69, exactly 1.5, so StretchBits
+        // uses ONE.5, which gives each 4 source columns 1, 2, 1 and 2 columns. The boxes at source columns 1–5 and 8–12
+        // become columns 1–8 and 12–18 from the pen.
+        var font = BoxFonts().GetFont(3, 15)!;
+        var bitmap = new MonoBitmap(40, 30);
+        Assert.Equal(21, font.DrawText(bitmap, 5, 20, "ab"));
+        var columns = Enumerable.Range(0, 40).Where(x => bitmap[x, 14]).Select(x => x - 5);
+        Assert.Equal(Enumerable.Range(1, 8).Concat(Enumerable.Range(12, 7)), columns);
     }
 
     [Fact]
@@ -234,6 +269,27 @@ public class RenderTests
     [InlineData(16000, 194)]
     [InlineData(16383, 208)]
     public void VerticalThumb_MatchesExcel(int topRow, int offset) => Assert.Equal(offset, ExcelRenderer.VerticalThumbOffset(topRow, 208));
+
+    // Excel 1.00's 18.12: the first and last 20 rows take 819 of the scroll bar's 17982 each.
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 41)]
+    [InlineData(19, 778)]
+    [InlineData(20, 819)]
+    [InlineData(8191, 8990)]
+    [InlineData(16362, 17162)]
+    [InlineData(16363, 17163)]
+    [InlineData(16383, 17982)]
+    public void VerticalScrollValue_FollowsExcel(int topRow, int value) => Assert.Equal(value, ExcelRenderer.VerticalScrollValue(topRow));
+
+    [Theory]
+    [InlineData(127, 0)]
+    [InlineData(128, 1)]
+    public void Thumb_RoundsUpOnlyPastHalf(int leftColumn, int offset)
+    {
+        // The scroll bar CDEF rounds the remainder up only when it is more than half the maximum: 127 of 255 is not.
+        Assert.Equal(offset, ExcelRenderer.HorizontalThumbOffset(leftColumn, 1));
+    }
 
     // And the horizontal thumb, 427 pixels of travel.
     [Theory]

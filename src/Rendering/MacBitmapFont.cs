@@ -118,8 +118,6 @@ public sealed class MacBitmapFont
         ? BinaryPrimitives.ReadInt16BigEndian(resource[offset..])
         : throw new ExcelFormatException("A FONT resource runs past its end.");
 
-    private static long FloorDiv(long a, long b) => a >= 0 ? a / b : -((-a + b - 1) / b);
-
     // Reads `count` bits of a strike row from bit `location`, into the top of a ulong.
     private static ulong ReadStrikeBits(ReadOnlySpan<byte> row, int location, int count)
     {
@@ -137,69 +135,157 @@ public sealed class MacBitmapFont
     }
 
     /// <summary>
-    /// Makes a size the System has no bitmap for from this one, as QuickDraw does (spec Appendix D): the advance widths
-    /// scaled by size ÷ this size and kept in fractions of a pixel, the ascent and descent rounded to the nearest pixel,
-    /// and text drawn at this size and then stretched to the new one.
+    /// Makes a size the System has no bitmap for from this one, as the Mac Plus ROM does (spec Appendix D): the Font
+    /// Manager's scale is numer ÷ 256 (<see cref="MacFontScale"/>), the ascent, descent and leading scale to the nearest
+    /// pixel, widths add up at this size before they are scaled, and text is drawn at this size and stretched.
     /// </summary>
     internal MacBitmapFont Scale(int size)
     {
-        int Round(int value) => (2 * value * size + Size) / (2 * Size);
-        return new MacBitmapFont(Family, size, Round(Ascent), Round(Descent), Round(Leading), Height, _rows, isReal: false)
+        int numer = MacFontScale.Numer(size, Size);
+        return new MacBitmapFont(Family, size, MacFontScale.Round(Ascent, numer), MacFontScale.Round(Descent, numer),
+            MacFontScale.Round(Leading, numer), Height, _rows, isReal: false)
         {
             _source = this,
+            _numer = numer,
         };
     }
 
-    // The bitmap font a scaled size is drawn from.
+    // The bitmap font a scaled size is drawn from, and the Font Manager's numer for it (over 256).
     private MacBitmapFont? _source;
+    private int _numer;
 
-    // Draws text in a scaled size: at the bitmap's size into a buffer, then stretched to this size, each pixel taking
-    // the bitmap pixel under its centre. This comes close to QuickDraw but is not exact: Excel 1.00's Geneva 11 differs
-    // from it in about one pixel in fifty where glyphs fall between pixels.
+    // Draws text in a scaled size as QuickDraw's DrText does when the Font Manager asks for stretching (Mac Plus ROM;
+    // DrawText.a in Apple's QuickDraw source). DrText draws the text at the bitmap's size, from the pen, into a buffer
+    // as tall as the font's rectangle and as wide as the text plus 32 pixels of slop for bold and italic; maps that
+    // rectangle to the new size with MapRect; and copies the buffer into the mapped rectangle with StretchBits, which
+    // ORs together the source rows, and the source columns, that fall into one destination row or column.
     private int DrawScaled(MacBitmapFont source, MonoBitmap target, int x, int baseline, ReadOnlySpan<char> text, bool bold, bool italic,
         int clipLeft, int clipTop, int clipRight, int clipBottom)
     {
-        const int margin = 16;
-        int sourceWidth = source.MeasureText(text, bold) + 2 * margin + source.Height;
-        var buffer = new MonoBitmap(Math.Max(1, sourceWidth), source.Height);
-        source.DrawText(buffer, margin, source.Ascent, text, bold, italic);
+        // StdTxMeas: the bitmap's widths, a pixel more each for bold, added up unscaled.
+        int unscaled = source.MeasureText(text, bold);
+        int advance = MacFontScale.Width(unscaled, _numer);
+        int srcWidth = unscaled + 32, srcHeight = source.Height;
+        int srcTop = baseline - source.Ascent;
 
-        int S = source.Size, D = Size;
-        int top = baseline - Ascent;
-        int height = (int)Math.Min(int.MaxValue, ((long)source.Height * D + S - 1) / S);
-        int width = (int)Math.Min(int.MaxValue, ((long)sourceWidth * D + S - 1) / S);
-        int dMargin = margin * D / S + 1;
-        int originX = x - dMargin;
+        // MapRect moves each edge's distance from the pen by numer ÷ 256, rounded to the nearest pixel.
+        int dstLeft = x, dstRight = x + MacFontScale.Round(srcWidth, _numer);
+        int dstTop = baseline + MacFontScale.Round(srcTop - baseline, _numer);
+        int dstBottom = baseline + MacFontScale.Round(srcTop + srcHeight - baseline, _numer);
+        int dstWidth = dstRight - dstLeft, dstHeight = dstBottom - dstTop;
 
-        // Only the pixels inside the clip rectangle and the target are worked out, however large the size.
-        int firstRow = Math.Max(0, Math.Max(clipTop, 0) - top), lastRow = Math.Min(height, Math.Min(clipBottom, target.Height) - top);
-        int firstColumn = Math.Max(0, Math.Max(clipLeft, 0) - originX), lastColumn = Math.Min(width, Math.Min(clipRight, target.Width) - originX);
-        for (int dy = firstRow; dy < lastRow; dy++)
+        // StretchBits draws only inside the destination rectangle, the clip rectangle and the target.
+        int minLeft = Math.Max(Math.Max(clipLeft, 0), dstLeft), minRight = Math.Min(Math.Min(clipRight, target.Width), dstRight);
+        int minTop = Math.Max(Math.Max(clipTop, 0), dstTop), minBottom = Math.Min(Math.Min(clipBottom, target.Height), dstBottom);
+        if (minLeft >= minRight || minTop >= minBottom)
         {
-            int sy = (int)Math.Min(source.Height - 1, (2L * dy + 1) * S / (2 * D));
-            for (int dx = firstColumn; dx < lastColumn; dx++)
-            {
-                int sxp = margin + (int)FloorDiv((2L * (dx - dMargin) + 1) * S, 2L * D);
-                if (sxp >= 0 && sxp < buffer.Width && buffer[sxp, sy])
-                {
-                    target[originX + dx, top + dy] = true;
-                }
-            }
+            return advance;
         }
 
-        return MeasureText(text, bold);
+        // The buffer, with column 0 at the pen: pixels kerned left of the pen are not copied.
+        const int margin = 64;
+        var buffer = new MonoBitmap(srcWidth + margin, srcHeight);
+        source.DrawText(buffer, margin, source.Ascent, text, bold, italic);
+
+        // Horizontally StretchBits picks a routine from FixRatio's fraction of the smaller width over the larger
+        // (SetupStretch). The general ones step a 16-bit error term, starting at half the fraction, by the fraction:
+        // when shrinking (SHRINK) each source column goes to the destination column the carries have reached, and when
+        // stretching (STRETCH) each destination column takes the source column they have reached. The fast routines for
+        // exact ratios repeat each source column 2, 3, 4, 6, 8, 16 or any multiple of 8 times, and stretch to 1.5 times
+        // by giving each 4 source columns 1, 2, 1 and 2 destination columns (ONE.5). Shrinking to ½, ¼ and ¾ has fast
+        // routines too, which give what SHRINK gives.
+        bool shrinking = dstWidth < srcWidth;
+        int ratio = (int)(shrinking ? MacFontScale.FixRatio(dstWidth, srcWidth) : MacFontScale.FixRatio(srcWidth, dstWidth)) & 0xFFFF;
+        int repeat = dstWidth == srcWidth ? 1 : shrinking ? 0 : ratio switch
+        {
+            0x8000 => 2,
+            0x5555 => 3,
+            0x4000 => 4,
+            0x2AAA => 6,
+            0x2000 => 8,
+            0x1000 => 16,
+            _ => dstWidth % srcWidth == 0 && dstWidth / srcWidth % 8 == 0 ? dstWidth / srcWidth : 0,
+        };
+        int Step(int i) => repeat > 0 ? i / repeat
+            : !shrinking && ratio == 0xAAAA ? i / 6 * 4 + (0b11_11_10_01_01_00 >> (i % 6 * 2) & 3)
+            : (int)(((ratio >> 1) + (long)i * ratio) >> 16);
+
+        // Vertically a DDA with an error term starting at minus half the source height: each destination row is the
+        // OR of the source rows read since the last, and is repeated while the error stays at or above zero.
+        var row = new bool[srcWidth];
+        var dstRow = new bool[dstWidth];
+        int error = -(srcHeight >> 1), sourceRow = 0, vertical = dstTop;
+        while (sourceRow < srcHeight)
+        {
+            Array.Clear(row);
+            do
+            {
+                for (int i = 0; i < srcWidth; i++)
+                {
+                    row[i] |= buffer[margin + i, sourceRow];
+                }
+
+                sourceRow++;
+                error += dstHeight;
+            }
+            while (error <= 0 && sourceRow < srcHeight);
+
+            Array.Clear(dstRow);
+            if (shrinking)
+            {
+                for (int i = 0; i < srcWidth; i++)
+                {
+                    if (row[i])
+                    {
+                        dstRow[Step(i)] = true;
+                    }
+                }
+            }
+            else
+            {
+                for (int i = minLeft - dstLeft; i < minRight - dstLeft; i++)
+                {
+                    int column = Step(i);
+                    dstRow[i] = column < srcWidth && row[column];
+                }
+            }
+
+            do
+            {
+                if (vertical >= minTop)
+                {
+                    for (int px = minLeft; px < minRight; px++)
+                    {
+                        if (dstRow[px - dstLeft])
+                        {
+                            target[px, vertical] = true;
+                        }
+                    }
+                }
+
+                if (++vertical >= minBottom)
+                {
+                    return advance;
+                }
+
+                error -= srcHeight;
+            }
+            while (error >= 0);
+        }
+
+        return advance;
     }
 
     /// <summary>
-    /// Gets the width of text in pixels, as QuickDraw's <c>TextWidth</c> gives it: bold adds a pixel per character,
-    /// and the fractions of a scaled size add up before the total is rounded down.
+    /// Gets the width of text in pixels, as QuickDraw's <c>TextWidth</c> gives it: bold adds a pixel per character, and
+    /// in a scaled size the bitmap's widths add up before the total is scaled and rounded down.
     /// </summary>
     public int MeasureText(ReadOnlySpan<char> text, bool bold = false)
     {
         if (_source is { } source)
         {
-            // The bitmap's widths add up in fractions of a pixel at this size, and the total is rounded down.
-            return (int)((long)(source.MeasureText(text) * Size) / source.Size) + (bold ? text.Length : 0);
+            // TextWidth adds up the bitmap's widths (a pixel more each for bold) and scales the total, rounding down.
+            return MacFontScale.Width(source.MeasureText(text, bold), _numer);
         }
 
         int width = 0;

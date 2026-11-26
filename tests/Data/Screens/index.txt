@@ -11,7 +11,7 @@ Render Scrolled 1000 100	Render2:T 1000 100 saved	359	139	373	153	0
 Render Scrolled 16000 240	Render2:T 16000 240 saved	359	154	374	168	0
 Render Scrolled Data	Render2:T Data 150 10 saved	358	170	373	184	0
 Render Geneva 12	Render2:F Geneva 12 saved	359	59	374	73	0
-Render Geneva 11	Render2:F Geneva 11 saved	0	0	0	0	1076
+Render Geneva 11	Render2:F Geneva 11 saved	359	43	374	57	0
 Render New York 10	Render2:F New York 10 saved	359	91	374	105	0
 Render Monaco 9	Render2:F Monaco 9 saved	359	75	373	89	0
 Render Row 1	Render3:V 00001 saved	409	43	423	58	0

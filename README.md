@@ -48,8 +48,9 @@ The library targets .NET 9 and has no dependencies.
   formats, overlay charts and the series data, in Microsoft Chart's 8-byte decimal numbers.
 - **Drawing.** `ExcelRenderer` draws a sheet's window as Excel 1.00 shows it, as a one-bit picture or PNG, with
   the bitmap fonts of a System file you supply: headings, gridlines, cells laid out as Excel lays them out,
-  borders, the selection and the scroll bars. It matches 26 windows captured from Excel 1.00's screen pixel for
-  pixel, and draws a window in about 0.2 ms whatever the sheet's size.
+  borders, the selection and the scroll bars, and sizes the System has no bitmap for stretched as the Mac Plus
+  ROM stretches them. It matches all 27 windows captured from Excel 1.00's screen pixel for pixel, and draws a
+  window in about 0.2 ms whatever the sheet's size.
 - **Workspaces.** Read and write "Resume Excel" files: the settings and the windows Excel reopens.
 - **SYLK export.** `ExportSylk` writes a sheet as SYLK, byte for byte as Excel 1.00's or 1.5's Save As does,
   checked against 178 files the two exported. It allocates nothing per cell.

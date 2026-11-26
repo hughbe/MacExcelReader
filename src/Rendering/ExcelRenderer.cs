@@ -550,28 +550,48 @@ public static class ExcelRenderer
         }
     }
 
-    // How far the vertical thumb sits from the top of its travel (inferred from Excel 1.00 scrolled to 18 rows in a
-    // window of the default height, whose thumb travels 208 pixels): half a pixel a row for the first 20 rows, then
-    // (row + 848) ÷ 18000 of the travel, and all of it at the last row.
-    internal static int VerticalThumbOffset(int topRow, int travel)
+    // The vertical scroll bar's value for a top row (18.12 in Excel 1.00): 0 to 17982, with the first and last 20
+    // rows taking 819 each and the rows between sharing the rest, so that the thumb moves for every one of the first
+    // rows.
+    internal const int VerticalScrollMax = 17982;
+
+    internal static int VerticalScrollValue(int topRow)
     {
-        if (topRow <= 0 || travel <= 0)
+        if (topRow < 20)
+        {
+            return (topRow * 819 + 10) / 20;
+        }
+
+        if (topRow < 16363)
+        {
+            return (int)(((long)(topRow - 20) * 16344 + 8171) / 16343) + 819;
+        }
+
+        return ((topRow - 16363) * 819 + 10) / 20 + 17163;
+    }
+
+    // How far the vertical thumb sits from the top of its travel: the Control Manager's position for the top row's
+    // scroll value out of 17982.
+    internal static int VerticalThumbOffset(int topRow, int travel) =>
+        ThumbOffset(VerticalScrollValue(Math.Clamp(topRow, 0, ExcelCellGrid.MaxRows - 1)), VerticalScrollMax, travel);
+
+    // How far the horizontal thumb sits from the left of its travel: the Control Manager's position for the left
+    // column out of 255.
+    internal static int HorizontalThumbOffset(int leftColumn, int travel) => ThumbOffset(Math.Clamp(leftColumn, 0, 255), 255, travel);
+
+    // The System's scroll bar (CDEF 1) places the thumb value × travel ÷ max pixels along its travel, rounding up only
+    // when the remainder is more than half of max.
+    private static int ThumbOffset(int value, int max, int travel)
+    {
+        if (travel <= 0)
         {
             return 0;
         }
 
-        if (topRow >= ExcelCellGrid.MaxRows - 1)
-        {
-            return travel;
-        }
-
-        int offset = topRow < 20 ? topRow * travel / 416 : (topRow + 848) * travel / 18000;
-        return Math.Min(offset, travel);
+        int product = value * travel;
+        int offset = product / max;
+        return product % max > max / 2 ? offset + 1 : offset;
     }
-
-    // How far the horizontal thumb sits from the left of its travel: the Control Manager's position for a value of the
-    // left column out of 255, rounded to the nearest pixel.
-    internal static int HorizontalThumbOffset(int leftColumn, int travel) => travel <= 0 ? 0 : (leftColumn * travel + 127) / 255;
 
     private static void DrawFrame(MonoBitmap bitmap, int width, int height, string title, MacBitmapFont titleFont)
     {
