@@ -6,8 +6,8 @@ for worksheets, macro sheets and charts.
 
 For Excel 1.00 it runs headless, from the command line or the tests, in [MAME](https://www.mamedev.org/)'s Mac
 Plus (`brew install mame`), with no window and nobody at the keyboard. You need the Mac Plus ROM and Excel 1.00's
-Data and Program disk images; none are included. Other releases still run in
-[Mini vMac](https://www.gryphel.com/c/minivmac/) by hand.
+Data and Program disk images; none are included. Other releases run in
+[Mini vMac](https://www.gryphel.com/c/minivmac/) by hand, which also remains a backup for 1.00.
 
 ## How it works
 
@@ -210,6 +210,13 @@ dotnet run --project dumper -- excel-test pack Render.dsk "out/R Basics" --volum
 dotnet run --project dumper -- excel-test run Render.dsk --capture "Render:R Basics saved=Render Basics.png" -o tests/Data/Screens
 MACEXCEL_SYSTEM=~/Excel/Data.img dotnet test --filter Rendering_MatchesExcelsScreen
 ```
+
+Without MAME, capture them in Mini vMac: pack with `--keep-open`, run Driver, bring each window to the front from
+the Window menu and capture Mini vMac's window at its exact pixels with macOS's `screencapture -o -l<window id>`
+(from a terminal allowed to record the screen). Every emulated pixel is a 2 × 2 block in the capture, below a
+28-pixel title bar: halve it and crop it to the window, title bar, frame and shadow, as one-bit PNGs like those in
+`tests/Data/Screens`. Captures made this way include the mouse pointer, which `run --capture` keeps out of every
+window, so they differ from the renderer where it lies.
 
 ## Results so far
 
