@@ -79,6 +79,7 @@ static class ExcelTest
 {
     public const string DriverName = "Driver";
     public const string SavedSuffix = " saved";
+    public const string FinishedAlert = "Driver finished";
 
     // The suffix keeps names within the 31 characters Excel's dialogs allow.
     public static string SavedName(string name) => (name.Length + SavedSuffix.Length > 31 ? name[..(31 - SavedSuffix.Length)] : name) + SavedSuffix;
@@ -146,7 +147,7 @@ sealed class PackCommand : Command<PackSettings>
 
         AnsiConsole.MarkupLine(version == ExcelVersion.Excel150
             ? "In Excel 1.5: open Driver; it runs by itself. Then run [bold]excel-test check[/]."
-            : "In Excel 1.03: open Driver, choose Macro > Run > Driver!Run (Option-Command-R). Then run [bold]excel-test check[/].");
+            : "Run [bold]excel-test run[/] (Excel 1.00 in MAME), or in Excel open Driver and choose Macro > Run > Driver!Run (Option-Command-R). Then run [bold]excel-test check[/].");
         return 0;
     }
 
@@ -290,10 +291,17 @@ sealed class PackCommand : Command<PackSettings>
             Put(command, "end command");
         }
 
+        // The alert tells whoever runs Driver, person or excel-test run, that it has finished.
+        Put($"=ALERT({Quote(ExcelTest.FinishedAlert)},2)", "finished");
         Put("=RETURN()", "end");
 
+        // Next (Option-Command-W) brings the next window to the front, for excel-test run to capture it.
+        int nextMacro = row;
+        Put("=ACTIVATE.NEXT()", "next window");
+        Put("=RETURN()", "end next");
+
         // Run is the command macro for Macro > Run (Option-Command-R); Excel 1.5 also runs Auto_Open on open.
-        var names = new List<string> { "Run" };
+        var names = new List<string> { "Run", "Next" };
         if (version == ExcelVersion.Excel150)
         {
             names.Add("Auto_Open");
@@ -304,14 +312,14 @@ sealed class PackCommand : Command<PackSettings>
             driver.Names.Add(new ExcelDefinedName(name, [], ExcelNameFlags.Reference)
             {
                 MacroKind = ExcelMacroKind.Command,
-                ShortcutKey = name == "Run" ? 'r' : null,
+                ShortcutKey = name switch { "Run" => 'r', "Next" => 'w', _ => null },
             });
         }
 
         driver.Names.Sort((a, b) => string.CompareOrdinal(a.Name.ToUpperInvariant(), b.Name.ToUpperInvariant()));
         foreach (string name in names)
         {
-            driver.Names.Single(n => n.Name == name).SetDefinition("=$A$1", driver, version);
+            driver.Names.Single(n => n.Name == name).SetDefinition(name == "Next" ? $"=$A${nextMacro + 1}" : "=$A$1", driver, version);
         }
 
         return (driver, probes);

@@ -1,7 +1,7 @@
 namespace MacExcelReader;
 
 /// <summary>
-/// How Excel 1.00 draws a cell's value in its row (spec Appendix D), from
+/// How Excel 1.00 draws a cell's value in its row (docs/Display.md), from
 /// <see cref="ExcelValueFormatter.LayoutCell(ExcelDocument, int, int, ExcelVersion)"/>. Positions are in pixels from the left edge
 /// of column A, with the sheet's columns side by side and hidden ones taking no room.
 /// </summary>

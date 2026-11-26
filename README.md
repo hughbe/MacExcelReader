@@ -24,7 +24,7 @@ The library targets .NET 9 and has no dependencies.
 
 ## Features
 
-- **Exact round-trips.** Every sample, the 37 documents from Microsoft's Excel 1.00, 1.03 and 1.5 disks and 117
+- **Exact round-trips.** Every sample, the 37 documents from Microsoft's Excel 1.00, 1.03 and 1.5 disks and 147
   files Excel saved in experiments, reads and writes back byte for byte: sheets and charts, version-17 and
   Excel 1.5's version-18 files. Fields the library does not model are kept as they are.
 - **Cells.** Integers, numbers, text and formulas with their current values, number formats, alignment, bold
@@ -46,6 +46,11 @@ The library targets .NET 9 and has no dependencies.
   itself would store, and defined names are kept in the order Excel searches them.
 - **Charts.** Type and options, axes and scales, legend, titles, data labels, free text and arrows, point
   formats, overlay charts and the series data, in Microsoft Chart's 8-byte decimal numbers.
+- **Drawing.** `ExcelRenderer` draws a sheet's window as Excel 1.00 shows it, as a one-bit picture or PNG, with
+  the bitmap fonts of a System file you supply: headings, gridlines, cells laid out as Excel lays them out,
+  borders, the selection and the scroll bars, and sizes the System has no bitmap for stretched as the Mac Plus
+  ROM stretches them. It matches all 27 windows captured from Excel 1.00's screen pixel for pixel, and draws a
+  window in about 0.2 ms whatever the sheet's size.
 - **Workspaces.** Read and write "Resume Excel" files: the settings and the windows Excel reopens.
 - **SYLK export.** `ExportSylk` writes a sheet as SYLK, byte for byte as Excel 1.00's or 1.5's Save As does,
   checked against 178 files the two exported. It allocates nothing per cell.
@@ -126,7 +131,9 @@ The [usage guide](https://github.com/hughbe/MacExcelReader/blob/main/docs/Usage.
 |----------|----------------|
 | [Usage guide](https://github.com/hughbe/MacExcelReader/blob/main/docs/Usage.md) | The library's API, with examples |
 | [Format specification](https://github.com/hughbe/MacExcelReader/blob/main/docs/Spec.md) | The file format, byte by byte, with the code of each Excel release it comes from |
-| [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) | The harness that runs files in Excel under Mini vMac, and every experiment's results |
+| [How Excel 1.x displays a sheet](https://github.com/hughbe/MacExcelReader/blob/main/docs/Display.md) | How Excel formats values, fits them into cells and draws the window, pixel by pixel |
+| [How Excel 1.x exports SYLK](https://github.com/hughbe/MacExcelReader/blob/main/docs/Sylk.md) | What Excel's Save As writes for the SYLK type, byte for byte |
+| [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) | The harness that runs files in Excel, headless under MAME or by hand in Mini vMac, and every experiment's results |
 | [Excel bugs and quirks](https://github.com/hughbe/MacExcelReader/blob/main/docs/ExcelBugs.md) | Excel's own bugs and oddities found along the way |
 | [Excel 1.x and BIFF2](https://github.com/hughbe/MacExcelReader/blob/main/docs/Biff2.md) | How the format differs from BIFF2, Excel 2.x's format |
 | [How Excel 1.x calculates](https://github.com/hughbe/MacExcelReader/blob/main/docs/Calculation.md) | What Excel 1.00 calculates, measured: arithmetic, functions, dates, text and errors |
@@ -187,11 +194,12 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `cell <file> <address>` | Everything about one cell: value, date, formats, flags, formula, result, raw bytes and a token-by-token breakdown |
 | `parse <formula> [-f file] [--name] [--array] [--excel 1.5]` | Compile formula text and show the tokens Excel would store |
 | `sheet <list> <output> [--split N] [--excel 1.5]` | Build sheets from a formula list (`tests/Data`), for testing formulas in Excel |
-| `excel-test pack <disk> <files...>` / `excel-test check <disk>` | Test files in a real Excel under an emulator: see [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) |
+| `excel-test pack <disk> <files...>` / `excel-test run <disk>` / `excel-test check <disk>` | Test files in a real Excel under an emulator (`run`: Excel 1.00 in MAME, headless): see [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) |
 | `names <file>` | Defined names, command shortcuts and definitions |
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |
 | `sylk <file> [-o out.slk] [--excel 1.5]` | The sheet as SYLK, as Excel 1.00 (or 1.5) exports it |
+| `render <file> --system <disk or rsrc> [-o out.png] [--no-frame] [--scale N]` | The sheet's window drawn as Excel 1.00 shows it, as a PNG, with the fonts of a System file (Excel 1.00's Data disk image works) |
 | `dump <file>` | Everything: header, settings, column widths, external references, names, windows, page breaks, print setup and cells |
 | `workspace <file>` | A workspace ("Resume Excel", type XLIN) file: settings and the windows it reopens |
 | `layout <file>` | Where each part of the file lies: header, code segments, state block and all eight sections |

@@ -3,6 +3,10 @@
 This describes the files Microsoft Excel 1.00 to 1.5 for the Macintosh save: worksheets, macro sheets and
 charts. It was reverse-engineered from the applications' code and checked against every sample file available.
 
+It covers the bytes a file holds and how they change between releases. What Excel does with them has documents
+of its own: [how it displays a sheet](Display.md), from formatting a value to drawing the window; [how it
+calculates](Calculation.md); [how it exports SYLK](Sylk.md); and [its bugs and quirks](ExcelBugs.md).
+
 ## Background: how Excel 1.x runs
 
 Most of the format follows from how Excel 1.x was built, and the spec cites Excel's code throughout, so this is
@@ -37,7 +41,7 @@ and comparing the bytes ([Testing in a real Excel](Testing.md)).
 
 ## Sources
 
-**Code.** The p-code and 68000 code in the applications' `PCOD` resources, disassembled:
+**Code.** The p-code and 68000 code in the applications' `PCOD` resources, disassembled (`tools/pcode.py`):
 
 | Release | Disk | Used for |
 |---------|------|----------|
@@ -101,8 +105,6 @@ misbehaves, for example with a file that breaks a rule given here.
 18. [Open questions](#18-open-questions)
 * [Appendix A. Functions](#appendix-a-functions)
 * [Appendix B. Workspace files](#appendix-b-workspace-files)
-* [Appendix C. SYLK export](#appendix-c-sylk-export)
-* [Appendix D. Drawing cells](#appendix-d-drawing-cells)
 
 ---
 
@@ -670,58 +672,7 @@ checks the keywords `General`, `AM/PM`, `A/P` and the currency symbol first. It 
 Every format in the samples and in the test lists compiles to Excel's own bytes (`Format Compiler` in Excel 1.00,
 `Format Compiler 1.5`).
 
-**How a format shows a number.** Excel's TEXT function, given each sample format and a range of values, shows
-these rules (`TEXT Formats 1`, `TEXT Formats 2`, `TEXT Date Limits` in Excel 1.00; `TEXT Formats 1.5`):
-
-* The section follows the sign, but a value that rounds to zero in its section's decimals uses the zero
-  section: 0.001234 in `0.0" N";0.0" S";0` shows `0`.
-* A single-section format shows a negative number as `-` and the format of its magnitude, dates included:
-  -1234.567 in `m/d/yy` is `-5/19/07`.
-* Dates and times round to the second (13:36:28.8 shows `13:36:29`). Excel converts the serial to seconds since
-  1904 with the Macintosh's date routines, so the last date it shows is 6 February 2040 (serial 49710.27); TEXT
-  gives #VALUE! after that.
-* Strings and literals show without their quotes, and digits fill the placeholders around literals:
-  1234.5 in `00-00-000` is `00-01-235`.
-
-Excel 1.00's display routine (`19.0d`, native code) works through the section's tokens one by one, which
-gives the rest:
-
-* Number header `03`: the value goes through Excel's decimal conversion (at most 14 significant digits, a tie at
-  the 14th rounding down), `c − b` is added to its decimal exponent (two per `%`, minus three per trailing
-  comma), and those decimal digits are rounded half up to the positions there are: 1.005 in `0.00` is `1.01` and
-  12345678901234.5 in `0.0` is `12345678901234.0`, since the conversion has already rounded it (`TEXT Digits`).
-* Integer digit runs: digits that do not fit go before the first placeholder; a position with no digit shows
-  `0` for `06` and nothing for `04`; with `07`, a comma follows every third position from the right that shows
-  something.
-* Decimal digit runs: leading zeros always show, even for `04`; after them the significant digits, then `0`s
-  for `06` only, so `04` drops trailing zeros.
-* Exponent `1D`/`1E`: `+` (for `1D`) or `-`, then the exponent's digits in the next run's positions.
-* `22` writes `$`; `0A` repeats its character to fill what the column has left; `01` inside a section gets
-  General with the width the rest of the section leaves.
-* Date and time tokens go to `09.1a`, through the date conversion of `09.1b`, which fails past 2^32 − 1 seconds.
-  `mmm` and `ddd` are the first three letters of the name, and 12-hour times show 0 as 12.
-
-A cell whose formatted text is wider than its column shows as many `#` as fit instead (`19.0e`). Appendix D
-gives the widths in pixels.
-
-Excel tests whether a format shows a date in two places. `07.18` looks for a day, month or year token (`0B`–`12`,
-`19`, `1A`) in the positive section; times alone do not count. Its caller `34.04` counts the built-in formats
-10–18, the time-only ones included, and any other format `07.18` accepts.
-
-TEXT will not take `General` or a fill (`*-0`), and gives #VALUE! for text longer than 255 characters (1E+300 in `0`). General (`19.0c`) fits the number into the characters the column
-has room for, W, not counting a minus sign (Appendix D gives W in pixels, and what happens to a negative number
-that rounds to nothing):
-
-* It is written with an exponent when it has more integer digits than W, or when it is below 1E-3 and its digits
-  do not fit, but not in a column narrower than 5 characters for numbers from 1E-3 to below 1E+4.
-* Written out, it is rounded half up to W digits, less one for a point and one more for a leading `0.`.
-* With an exponent, the mantissa has 1 digit up to W = 6 and W − 6 digits beyond that (one more when the
-  exponent has two digits), and the exponent at least two digits: `1E+06`, `1.23E-05`.
-
-Turning a number into text (`=""&A1`, in 1.00 and 1.5 alike, `General As Text`) is General with W = 20: 14
-significant digits, written out in full from 1E-18 to below 1E+20 (`0.00000000015`, `99900000000000000000`)
-and with an exponent outside that (`1E+20`, `1.2345678901234E+20`).
-
+How Excel shows a number in a format, General included, is in [How Excel 1.x displays a sheet](Display.md).
 ---
 
 ## 8. Section 1 — external documents and row index
@@ -1118,7 +1069,7 @@ one that stores the cursor, and the DISPLAY command:
 | Offset | Size | New window | Meaning |
 |-------:|-----:|-----------|---------|
 | 0 | byte | 0 | **Active cell column** |
-| 1 | byte | | Width of the row-heading strip in pixels, capped at 255 (29 in every sample). Used as the left offset when headings are shown. |
+| 1 | byte | | Width of the row-heading strip in pixels, capped at 255. Used as the left offset when headings are shown. Excel sets it from the standard font and the widest row number showing: 29 in Geneva 10, 32 in Geneva 11 and 12, 26 in New York 10 and Monaco 9, 45 in Geneva 10 with row 16384 showing ([Display](Display.md)). |
 | 2 | byte | 0 | **Active pane** (0–3); it indexes the per-pane bytes at offset 19 |
 | 3 | word | 0 | Top row, upper panes |
 | 5 | word | 0 | Top row, lower panes |
@@ -1130,7 +1081,7 @@ one that stores the cursor, and the DISPLAY command:
 | 14 | byte | cols − 1 | Right column, right panes |
 | 15 | word | cols − 1 | Word companion of offset 13; compared against the last-non-hidden-column bound (§6, 0x016) when drawing |
 | 17 | word | cols − 1 | Word companion of offset 14 |
-| 19 | 4 bytes | 0 | One byte per pane: the pattern phase (0–7). Excel rotates its 8-byte QuickDraw pattern by this many bytes before drawing in the pane, so that patterned drawing stays aligned as the pane scrolls. |
+| 19 | 4 bytes | 0 | One byte per pane: the pattern phase (0–7). Excel rotates its 8-byte QuickDraw pattern by this many bytes before drawing in the pane, so that patterned drawing stays aligned as the pane scrolls: the gridlines' dots follow it ([Display](Display.md)). Excel 1.00 saves 0 in Geneva 10, 5 in Geneva 11 and 12, and 3 in New York 10 and Monaco 9. |
 | 23 | 3 bytes | | Pointer to the selection list, left over from memory |
 | 26 | byte | 1 on a macro sheet | **Display formulas** |
 | 27 | byte | 1 | **Display gridlines** |
@@ -2785,187 +2736,3 @@ Each chart structure is the 392-byte form of the chart record (§16.5, the table
 Excel 2` the table at 652 holds 666 and 1058, the main (scatter) and overlay (pie) charts of `CLOCK.CH`, and
 the count is 2. The rest of the block is a heap: Excel allocates the chart structures, point formats, series
 and strings in it as it needs them (`30.11`), so their places vary.
-
----
-
-## Appendix C. SYLK export
-
-Save As and `SAVE.AS(name, type)` take type 1 Normal, 2 SYLK, 3 Text (tab-delimited) and 4 WKS (Lotus 1-2-3).
-Excel 1.00 numbers them 0–3 internally and dispatches in `47.05`: Normal goes to the document writer (`47.0b`),
-the others through `72.01` to the SYLK writer (`69.00`), the text writer (`6e.00`) and the WKS writer
-(`74.00`). The SYLK writer is described here from its code (`69.00`–`69.10`, with `72.20` for format codes) and
-checked against 84 samples Excel 1.00 exported and 94 Excel 1.5 exported: a writer that follows this
-description produces the same bytes for all of them. The writers of Excel 1.01–1.06 (`6a` in 1.04 and 1.06)
-differ from 1.00's in one way: they take TRUE, FALSE and the error names from a string list that a translation
-can change. Excel 1.5's (`70`) differs in
-three ways, given under **Excel 1.5** below.
-
-SYLK is a text form of the same model, so it also shows how Excel reads each field. The 84 exports
-(7,936 cells, 2,853 formulas) were compared with what this specification says the files hold. They disagreed
-in two places only, the format-text and whole-row rules, which §7 and §15.4 now give; every constant, number
-format, alignment, style, border, protection flag and name agreed.
-
-**Lines.** Each record is a line of Mac OS Roman text ending in a carriage return. Fields are separated by `;`,
-so a `;` inside a format, a text value or a formula is doubled. In `P`, `NN`, `NE` and `C` records a byte below
-32 or above 126 is escaped with ESC (`1B`) and:
-
-* `N` and a letter for the 11 characters of Excel's first table (PCOD 0 at `0x2CB6`): `a` for Æ, `q` for æ,
-  `i` for Ø, `y` for ø, `j` for Œ, `z` for œ, `{` for ß, `x` for †, `c` for ª, `k` for º and `` ` `` for Ω;
-* `N`, an accent letter and the base letter for an accented character (PCOD 0 at `0x2CA5`): `A` grave, `B`
-  acute, `C` circumflex, `D` tilde, `H` umlaut, `J` ring, `K` cedilla, so é is ESC `N B e`;
-* otherwise the byte's high nibble plus `0x20` and its low nibble plus `0x30`: £ (`A3`) is ESC `* 3`, and the
-  active-sheet document name `00` is ESC space `0`.
-
-**Records**, in the order Excel writes them:
-
-| Record | Written |
-|--------|---------|
-| `ID;PXL;N;E` | Always |
-| `P;P<format>` | One per number format: the 19 built-in, then the document's own, as format text (§7) |
-| `F;P<n>;D<code>10[;S…][;E][;G][;H];N<font> <size>` | The defaults: the format, alignment and style of the cell at the grid's margin corner (§6.1), or General with none when the grid has no margin. `E` if the front window shows formulas, `G` if it hides gridlines, `H` if it hides headings (§13); then the standard font number and size (§6). |
-| `B;Y<rows>;X<columns>` | The grid size (state words `0x014` and `0x274`), unless it has no rows |
-| `O[;P][;L][;M][;R][;E][;A<n> <change>]` | `P` protected, `L` A1 references, `M` manual calculation, `R` precision as displayed, `E` a macro sheet, `A` iteration with its count and maximum change (§6) |
-| `F;W<first> <last> <width>` | Each run of columns of one width in characters, except runs of 10: `(pixels + digit / 2 − 5) / digit`, rounded down, where `digit` is the width of 0 in the standard font, and 0 for a hidden column |
-| `F;…;C<column>` | A whole-column format: the margin row's cell in that column, for each column, when it differs from the defaults |
-| `F;…;R<row>` | A whole-row format: the margin column's cell in that row |
-| `NN;N<name>[;F][;G<key>];E<definition>` | Each name with a definition: `F` for a function macro, `G` and its shortcut key for a command macro |
-| `F;…` and `C;…` | For each cell, row by row: a format record if it differs from the defaults, then a cell record if it has a value, is unlocked or is hidden |
-| `NE;F<document>;S<source>;E<cells>` | After a formula that is only an external reference to absolute cells or a name (`=Budget!$A$1`, `=Budget!Rate`): the document, the cells (`R1C1:R2C2`) or name, and the cell or array range that uses it |
-| `E` | Always |
-
-**Formats.** An `F` record compares a cell with the defaults, not with the record before it. `P<n>` and the
-format code are written when the format or the alignment differs, `S` when the style differs (even to give an
-empty `S`). The code is `F` for a cell, `D` for the defaults, then a letter for the format and its decimals,
-then the alignment: `G` General, `L` left, `C` centre, `R` right, `X` fill. The format letter comes from its
-positive section (`72.20`): `%` for a number whose scaling is at least two more than its decimals, `$` for one
-whose first token after the header is the currency symbol, `I` for another with no decimals, `F` for another
-with decimals, `E` for a scientific section, and `G` for anything else, dates included. So `$#,##0.00` is
-`F$2`, `0.0%` `F%1` and `m/d/yy` `FG0`. The style letters are written in the order I, D, T, L, B, R: italic,
-bold, top, left, bottom and right borders.
-
-**Positions.** `Y` and `X` (1-based) are left out when they equal the last ones written. The `B` record is
-written the same way, so it sets them: in a one-column sheet the first cell has no `X`.
-
-**Cells.** `C`, the position, `N` if unlocked, `H` if hidden, then for a value `K` and:
-
-* an integer in decimal, a number as General shows it with room for 21 characters (§7; 1E+20 is
-  `100000000000000000000`);
-* text in quotes, with any quotes in it as they are;
-* TRUE, FALSE or an error name.
-
-A formula has `K` with its current value, then `E` and its R1C1 text. A cell of an array formula or table has
-instead (§12.6): at the anchor, `R` and `C` for the range's last cell, then `M` and the shared expression, or
-`T` and TABLE's inputs, such as `TR7C25,R5C24` (`#REF!` for a deleted input, nothing for a missing one). Every
-other cell of the range has `I` and the anchor's `R` and `C`. Like `Y` and `X`, `R` and `C` are left out when
-they repeat the last ones written.
-
-**R1C1 text.** The formula decompiler's R1C1 form:
-
-* An absolute row or column is `R5`, `C2`. A relative one is an offset with its sign, `R[+2]`, `C[-1]`, or `R`,
-  `C` alone for no offset.
-* An area that spans every column is rows, `R1:R16384` or `R[-20]:R[+16363]`, and one row alone is written once,
-  `R[-20]`; an area that spans every row is columns in the same way.
-* In a name definition a relative row or column is already an offset (§11). Excel 1.00 reads the row offset with
-  the relative-column flag as its sign bit, inverted: with an absolute column, `FF FF` read as −1 gives
-  `R[-1]C2`; with a relative column, −3 gives `R[+16381]C[-2]` (`Relative Names` sample; see Excel bugs).
-* References inside an external reference are written the same way: `CASHBUDGET!R33C2`.
-* Numbers, strings, names and functions are as in A1 style (§15.4).
-
-Cell type 7 (§9) has no case in the writer, as in every other cell switch.
-
-**Excel 1.5.** Its writer (`70.00`–`70.10`) is 1.00's with these changes:
-
-* Formats are written in 1.5's export form (§7): `P;P"$"#,##0\ ;;\("$"#,##0\)`, `P;Pm\/d\/yy`, `P;P@`.
-* When the grid has a margin (state word `0x020`, §6.1), every cell of the grid gets an `F` record, and each
-  has `P`, the format code and `S` whether or not they differ from the defaults: `F;P0;FG0G;S;Y1;X1`. The
-  `C` record that follows then needs no position. A grid in the count form gets `F` records as in 1.00.
-* The defaults record adds `L` and the gridline and heading colour, counting from 1, when the front window's
-  colour is not automatic (window state bytes 127 and 128, §13): `F;P0;DG0G10;L3;N3 10` for red.
-
----
-
-## Appendix D. Drawing cells
-
-Nothing in the file says how a cell looks on screen; Excel works it out from the value, the cell's format,
-alignment and style, the column widths and the sheet's standard font each time it draws a row. This appendix
-gives those rules, so that a reader can show a sheet as Excel 1.00 did. They come from Excel 1.00's drawing
-code, segment `19` (native 68000 code), and were checked against what Excel 1.00 showed for test sheets of
-General numbers in 13 column widths in plain, bold and italic, and of text, fills, alignments and neighbours
-(docs/Testing.md).
-
-**Coordinates.** Columns sit side by side from the left edge of column A, each as wide as its width in the
-state block (§6, `0x042`); a hidden column (width 0) takes no room and nothing in it is drawn. A column of width
-*w* whose left edge is *L* covers pixels *L* to *L* + *w* − 1, the last being its right gridline. Text is
-clipped so that it never covers that gridline.
-
-**Font.** Everything is measured with the sheet's standard font and size (`0x244`, `0x246`), Geneva 10 in every
-sample, with QuickDraw's `TextWidth`. `09.1c` caches its metrics (`0x248`–`0x254`). Bold, which QuickDraw draws by
-smearing each character a pixel to the right, makes every character a pixel wider: the bold `0` is 8 pixels in
-Geneva 10, the plain one 7. Italic text is given half the font's ascent (`0x248`, 5 in Geneva 10) of extra room
-for its slant. The widths are the advance widths in the font's `FONT` resource; the System file on Excel 1.00's
-Data disk has bitmaps of Chicago 12, New York 10, 12, 20 and 24, Geneva 9, 10, 12, 14, 18, 20 and 24, and
-Monaco 9.
-
-Excel also allows any other size. QuickDraw draws one the System has no bitmap for (`RealFont` false) from the
-next larger bitmap of the family, or from the largest if none is larger, scaling every width by size ÷ that
-bitmap's size and keeping positions in fractions of a pixel: Geneva 11 from Geneva 12 (a `0`, 8 pixels there, is
-7⅓), Geneva 16 from Geneva 18, Monaco 12 from Monaco 9. `TextWidth` adds up the fractions and rounds the total
-down, so `1E+04` in Geneva 11 is 34 pixels. The ascent and descent scale to the nearest pixel (Geneva 11: 11 and
-3). Excel 1.00's `09.1c` adds a pixel to both cached digit widths when `RealFont` is false, and on screen a `#`
-counts as 9 pixels too. So a Geneva 11 digit counts as 8 pixels and a `#` as 9, while text is checked against
-the room at its plain width: `TRUE` (27½ pixels) fits a 29-pixel room. Excel 1.03 instead keeps a flag for a
-scaled size, and uses it both to widen those divisors and to add a pixel per character to the width it checks
-(below).
-
-**Releases.** In a size the System has a bitmap for, Excel 1.03 and 1.5 draw cells exactly as 1.00 does:
-every test sheet in Geneva 10 came out the same, pixel for pixel. In a size with no bitmap, Excel 1.5 still
-matches 1.00 cell for cell, while Excel 1.03 does not: when it checks whether text fits, it adds a pixel per
-character on top of the scaled width. In Geneva 11, `TRUE` (28 pixels) needs 32 pixels of room in 1.03 and 28 in
-1.00 and 1.5, and `1E+04` (34) needs 39. The bold column and row headings of a scaled size depend on the System
-rather than on Excel: Excel 1.00 draws them with heavier letters under the System on its own Data disk than under
-a later System, where it matches 1.03 and 1.5 pixel for pixel. The cells look the same under both.
-
-**Rows.** Every row has the same height, the font's ascent + descent + 1 (`09.1c`; 13 in Geneva 10, 15 in Geneva
-11), and its bottom pixel is its gridline. `09.1c` also sets a floor from the screen's size that no font reaches.
-Text sits on a baseline one ascent below the row's top: in Geneva 10 capitals cover pixel rows 3–10 of 13 and
-descenders reach row 12.
-
-**The room.** A cell's value has its column's width less 2 pixels each side, and less the italic allowance for
-an italic cell, to fit in (`19.0a`): 71 pixels in a default 75-pixel column.
-
-**Numbers** (`19.0d`, `19.0e`):
-
-* General gets *W* = (room − the width of `-` for a negative number) ÷ the width of `0` characters, rounded
-  down, and is written as §7 describes. A negative number that rounds to nothing there loses its sign: Excel
-  writes the `-`, finds the digits gone and writes `0` over it. So −123 shows as `0` in a 12- or 15-pixel column
-  (*W* = 0), where 123 shows as nothing (see Excel bugs).
-* Any other format fits the room as §7 describes, in pixels: General inside a section gets (room − the width of
-  the rest of the text) ÷ the width of `0` characters, and a fill (`*`) repeats its character
-  (room − 1 − the width of the rest) ÷ its width times, rounded down, to at most 255 characters in all.
-* If the text is then wider than the room, the cell shows as many `#` as fit, room ÷ the width of `#` (9 in
-  Geneva 10, 10 bold), centred whatever the cell's alignment. A 71-pixel room holds 7.
-
-TRUE, FALSE and errors are fitted the same way: `TRUE` (26 pixels in Geneva 10) shows in a 30-pixel column, and
-`FALSE` and `#DIV/0!` become `##`. Text is never turned into `#`.
-
-**Alignment** (`19.0b`). General aligns text left, numbers right, and TRUE, FALSE and errors centre (`19.0e`).
-With *L* and *R* = *L* + *w* the cell's edges and *t* the text's width (with the italic allowance):
-
-| Alignment | Text starts at |
-|---|---|
-| Left | *L* + 2 |
-| Right | *R* − 2 − *t* |
-| Centre | (*L* + *R* − *t*) ÷ 2, rounded down |
-
-**Text running into the next cells** (`19.07`, with `19.04` and `19.05` finding where to stop). Text wider than
-its cell carries on over its neighbours, to the right for left-aligned and General text, to the left for
-right-aligned text and both ways for centred text, as long as each neighbour is blank. A cell with any value
-stops it, even empty text (`=""` or an empty constant) or a number; a blank cell that is only formatted, in any
-alignment including Fill, does not. Hidden columns let it through. The text is cut off at the first cell with a
-value, and at the left edge of column A. Numbers, TRUE, FALSE and errors never run on.
-
-**Fills** (`19.0b`). A Fill-aligned cell repeats its text, formatted as for display when it is a number, across
-a run: the cell itself and the blank Fill-aligned cells after it (hidden columns included). The text starts at
-*L* + 2 and is repeated (run width − 3 − the italic allowance) ÷ *t* times, rounded down: `ab` (11 pixels) 20
-times over three 75-pixel columns, `1.50` (24 pixels) 3 times in one. Text longer than that is drawn once and
-cut off at the run's end. A fill never runs into a blank cell that is not Fill aligned.

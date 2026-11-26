@@ -794,7 +794,7 @@ public class ExperimentTests
         // Each row: a format's text, a value and =TEXT(value,format), recalculated by Excel 1.00. The values are ones
         // whose binary expansion, 14-digit conversion or rounding ties tell the rules apart: a format shows the 14
         // significant digits of Excel's decimal conversion, a tie at the 14th rounding down, then rounds them half up
-        // to its places (spec §7). TEXT gives #VALUE! for text longer than 255 characters (1E+300 written out).
+        // to its places (docs/Display.md). TEXT gives #VALUE! for text longer than 255 characters (1E+300 written out).
         var document = Load(name);
         int compared = 0;
         for (int row = 0; row < document.Cells.RowCount; row++)
@@ -827,7 +827,7 @@ public class ExperimentTests
     [InlineData("General As Text 2 1.5")]
     public void General_MatchesExcelsNumberToText(string name)
     {
-        // =""&B1 in Excel 1.00 and 1.5: 14 significant digits, written in full from 1E-18 to below 1E+20 (spec §7). The exact
+        // =""&B1 in Excel 1.00 and 1.5: 14 significant digits, written in full from 1E-18 to below 1E+20 (docs/Display.md). The exact
         // half 99999999999999.5 is the one value Excel rounds down.
         var document = Load(name);
         for (int row = 0; row < document.Cells.RowCount; row++)
@@ -1363,5 +1363,69 @@ public class ExperimentTests
         Assert.Equal(0x27, document.Cells["A5"].Formula!.Expression[0]);   // reference class, as SUM's argument
         Assert.Equal(0x47, document.Cells["A2"].Formula!.Expression[0]);   // value class, at the top
         Assert.Equal(0x46, document.Cells["A6"].Formula!.Expression[0]);   // ($A$1 $A$1):$C$3 is one area: a memory area
+    }
+
+    // Excel 1.00's windows captured from the screen (tests/Data/Screens, docs/Testing.md), each with the sample Excel
+    // saved it as. The renderer draws every pixel as Excel did.
+    public static TheoryData<string> Screens() => new(File.ReadLines(ScreenIndex).Where(l => !l.StartsWith('#')).Select(l => l.Split('\t')[0]));
+
+    private static string ScreenIndex => Path.Combine(AppContext.BaseDirectory, "Data", "Screens", "index.txt");
+
+    [Theory]
+    [MemberData(nameof(Screens))]
+    public void Rendering_MatchesExcelsScreen(string name)
+    {
+        // Needs Excel's fonts: MACEXCEL_SYSTEM names Excel 1.00's Data disk image or a System file's resource fork.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var fields = File.ReadLines(ScreenIndex).First(l => l.Split('\t')[0] == name).Split('\t');
+        var expected = RenderTests.ReadPng(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", "Screens", name + ".png")));
+        var actual = Rendering.ExcelRenderer.Render(Load(name), fonts, new Rendering.ExcelRenderOptions { Title = fields[1] });
+        int differ = 0;
+        for (int y = 0; y < expected.Height; y++)
+        {
+            for (int x = 0; x < expected.Width; x++)
+            {
+                if (expected[x, y] != actual[x, y])
+                {
+                    differ++;
+                }
+            }
+        }
+
+        Assert.True(differ == 0 && (expected.Width, expected.Height) == (actual.Width, actual.Height), $"{differ} pixels differ from Excel's screen; {actual.Width} × {actual.Height} drawn, {expected.Width} × {expected.Height} captured");
+    }
+
+    private static readonly Lazy<Rendering.MacFontSet?> SystemFonts = new(() =>
+    {
+        string? path = Environment.GetEnvironmentVariable("MACEXCEL_SYSTEM");
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+        {
+            return null;
+        }
+
+        byte[] bytes = File.ReadAllBytes(path);
+        return bytes.Length > 1026 && bytes[1024] == 0xD2 && bytes[1025] == 0xD7
+            ? Rendering.MacFontSet.FromResourceFork(MfsImage.Read(bytes).Files.First(f => f.Name == "System").Resource)
+            : Rendering.MacFontSet.FromResourceFork(bytes);
+    });
+
+    [Theory]
+    [InlineData("Render Basics", 29, 0)]
+    [InlineData("Render Geneva 12", 32, 5)]
+    [InlineData("Render Geneva 11", 32, 5)]
+    [InlineData("Render New York 10", 26, 3)]
+    [InlineData("Render Monaco 9", 26, 3)]
+    [InlineData("Render Row 16383", 45, 0)]
+    public void RenderedWindows_SaveTheirHeadingWidthAndPatternPhase(string name, int headingWidth, int phase)
+    {
+        // Excel 1.00 sizes the row-heading strip for the standard font and the widest row number shown, and saves the
+        // pane's pattern phase, which the gridlines' dots follow (spec §13, docs/Display.md).
+        var window = Load(name).Windows[0];
+        Assert.Equal(headingWidth, window.RowHeadingWidth);
+        Assert.Equal(phase, window.State[19]);
     }
 }

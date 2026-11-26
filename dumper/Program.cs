@@ -44,6 +44,9 @@ public sealed class Program
                 branch.AddCommand<JunkCommand>("junk")
                     .WithDescription("Fill every field Excel is said to ignore or rebuild with junk, to test it in Excel.")
                     .WithExample("excel-test", "junk", "Expenses", "out/Expenses");
+                branch.AddCommand<RunCommand>("run")
+                    .WithDescription("Run Driver in Excel 1.00 under MAME, headless, optionally capturing windows, and write Excel's saves back to the disk.")
+                    .WithExample("excel-test", "run", "Test.dsk", "--capture", "Test:Sheet saved");
                 branch.AddCommand<CheckCommand>("check")
                     .WithDescription("After Driver has run in Excel, compare Excel's results and re-saved copies with the originals.")
                     .WithExample("excel-test", "check", "Test.dsk");
@@ -69,6 +72,9 @@ public sealed class Program
             config.AddCommand<SylkCommand>("sylk")
                 .WithDescription("Export the sheet as SYLK, byte for byte as Excel 1.00's Save As does.")
                 .WithExample("sylk", "Expenses", "-o", "Expenses.slk");
+            config.AddCommand<RenderCommand>("render")
+                .WithDescription("Draw a sheet's window as Excel 1.00 shows it, as a PNG, with the fonts of a System file.")
+                .WithExample("render", "Expenses", "--system", "Excel-Data.img", "-o", "Expenses.png");
         });
 
         return app.Run(args);

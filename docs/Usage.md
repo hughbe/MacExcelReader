@@ -162,7 +162,7 @@ foreach (var c in document.Cells.NonEmptyCells)
 ```
 
 To draw a sheet as Excel 1.00 did, `LayoutCell` gives each cell's text, where it starts and the stretch of the
-row it may cover, in pixels from the left edge of column A (spec Appendix D):
+row it may cover, in pixels from the left edge of column A ([Display](Display.md)):
 
 ```csharp
 if (ExcelValueFormatter.LayoutCell(document, row: 0, column: 1) is { } display)
@@ -171,6 +171,24 @@ if (ExcelValueFormatter.LayoutCell(document, row: 0, column: 1) is { } display)
     // ClipLeft 75, ClipRight 224 — left aligned, 2 pixels in, running on over a blank C1.
 }
 ```
+
+### Drawing a window
+
+`ExcelRenderer` draws one of a sheet's saved windows as Excel 1.00 shows it: headings, gridlines, every visible
+cell, borders, the selection and the scroll bars, with the window's frame if you want it. It needs the System's
+bitmap fonts, which the library does not carry: load them from the resource fork of the System file Excel ran
+under, such as the one on Excel 1.00's Data disk. The result is a one-bit `MonoBitmap`, which writes itself as a
+PNG.
+
+```csharp
+var fonts = MacFontSet.Load("System/..namedfork/rsrc");    // or MacFontSet.FromResourceFork(bytes)
+MonoBitmap picture = ExcelRenderer.Render(document, fonts, new ExcelRenderOptions { Title = "Expenses" });
+File.WriteAllBytes("Expenses.png", picture.ToPng());
+```
+
+Only the rows and columns that show are laid out, so a window takes the same time whatever the sheet's size:
+about 0.2 ms for `Expenses`, allocating little beyond the bitmap. Text in a size the System has no bitmap for
+(Geneva 11, say) is stretched from another size, which comes close to Excel but not pixel for pixel.
 
 Excel 1.x for Macintosh uses the **1904 date system**: serial 0 is 1 January 1904.
 
@@ -362,7 +380,7 @@ document read and saved without changes is byte-for-byte identical to the origin
 ## Exporting SYLK
 
 `ExportSylk` writes a worksheet or macro sheet as SYLK, the text format Excel's Save As offers, with the bytes
-Excel 1.00–1.06 write, or Excel 1.5 with `ExcelVersion.Excel150` (spec Appendix C): Mac OS Roman text with carriage returns, R1C1 formulas with their current
+Excel 1.00–1.06 write, or Excel 1.5 with `ExcelVersion.Excel150` ([SYLK](Sylk.md)): Mac OS Roman text with carriage returns, R1C1 formulas with their current
 values, number formats, styles, column widths, names and links.
 
 ```csharp

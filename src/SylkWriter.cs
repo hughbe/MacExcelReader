@@ -7,7 +7,7 @@ namespace MacExcelReader;
 
 /// <summary>
 /// Writes a document as SYLK, byte for byte as Excel's Save As with the SYLK type does: Excel 1.00 to 1.06, or
-/// Excel 1.5 (spec Appendix C).
+/// Excel 1.5 (docs/Sylk.md).
 /// </summary>
 /// <remarks>
 /// Each record is built in one reusable buffer of Mac OS Roman bytes and written to the output with a carriage
@@ -19,7 +19,7 @@ internal sealed class SylkWriter : IDisposable
     // Excel's widths are in pixels; SYLK's in characters, and a column of 10 needs no record.
     private const int StandardWidth = 10;
 
-    // Characters that Excel writes as ESC, 'N' and a letter (spec Appendix C): each pair is the letter and the Mac
+    // Characters that Excel writes as ESC, 'N' and a letter (docs/Sylk.md): each pair is the letter and the Mac
     // OS Roman character, from Excel 1.00's table at PCOD 0 offset 0x2CB6.
     private static ReadOnlySpan<byte> PlainLetters =>
         [(byte)'`', 0xBD, (byte)'a', 0xAE, (byte)'c', 0xBB, (byte)'i', 0xAF, (byte)'j', 0xCE, (byte)'k', 0xBC, (byte)'q', 0xBE, (byte)'x', 0xA0, (byte)'y', 0xBF, (byte)'z', 0xCF, (byte)'{', 0xA7];
@@ -349,7 +349,7 @@ internal sealed class SylkWriter : IDisposable
         }));
     }
 
-    // Classifies a format by its positive section (spec Appendix C): a number with % (two more scaling digits
+    // Classifies a format by its positive section (docs/Sylk.md): a number with % (two more scaling digits
     // than decimals), with a currency symbol first, or plain; scientific; or General for anything else, dates
     // included.
     private (char Code, int Digits) FormatCode(int index)
@@ -847,7 +847,7 @@ internal sealed class SylkWriter : IDisposable
     }
 
     // Writes the record and a carriage return. In records that carry text, a character below 32 or above 126 is
-    // written as ESC and two or three printable characters (spec Appendix C).
+    // written as ESC and two or three printable characters (docs/Sylk.md).
     private void EndRecord(bool escape)
     {
         var line = _line.AsSpan(0, _length);

@@ -7,11 +7,20 @@ specification it is built from. The library is unreleased, so its API can change
 
 - `src/`: the library. `dumper/`: the `dumper` command-line tool, including `sheet` (build test sheets) and
   `excel-test` (the harness for running files in a real Excel). `tests/`: xUnit tests over `tests/Samples`.
-- `docs/Spec.md`: the format. `docs/ExcelBugs.md`: Excel's own bugs and quirks. `docs/Testing.md`: the harness
-  and the results of every experiment run.
+- `tools/`: `pcode.py`, the p-code disassembler (`python3 -I tools/pcode.py EXCEL.rsrc 18.12` lists a procedure
+  from the application's resource fork), and `minivmac/` for running the harness by hand in releases other than 1.00
+  (`excel-test run` runs it headless in MAME for 1.00).
+- `docs/Spec.md`: the format. `docs/Display.md`: how Excel formats values and draws cells and windows.
+  `docs/Calculation.md`: what Excel calculates. `docs/Sylk.md`: Excel's SYLK export. `docs/ExcelBugs.md`: Excel's
+  own bugs and quirks. `docs/Testing.md`: the harness and the results of every experiment run.
 
 ## Working on the format
 
+- The spec describes the file format and how it changes across releases: the bytes, what they mean, and the rules
+  that decide what Excel writes. What Excel does beyond the bytes goes in a document of its own, not the spec:
+  display and drawing in `docs/Display.md`, calculation in `docs/Calculation.md`, SYLK export in `docs/Sylk.md`,
+  and a new document for anything else of that kind. Those documents follow the spec's conventions and cite its
+  sections as "spec §7".
 - Work from Excel 1.00 first: decompile 1.00's p-code and run experiments in Excel 1.00, then describe what
   1.01, 1.03 and 1.5 changed. The only 1.01 is the French release (`Excel 1.01/` beside the other Excel
   folders); it keeps 1.00's procedure numbers except where it inserts procedures, so give its number only where
@@ -42,7 +51,8 @@ specification it is built from. The library is unreleased, so its API can change
 - A later release's code can explain an earlier release's bytes: Excel 1.5 widening a field leaves values that
   1.00 and 1.03 carry along. Check Excel 1.5's code when Excel 1.00 never writes a byte.
 - Keep the spec clear and plain: no duplication between sections, the right level of detail, no filler.
-  Update §18 (open questions), `docs/Testing.md` (results table) and the README when findings change them.
+  Update §18 (open questions) or the open questions of the document the finding is in, `docs/Testing.md`
+  (results table) and the README when findings change them.
 
 ## Commands
 
