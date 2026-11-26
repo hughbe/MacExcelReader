@@ -1366,8 +1366,7 @@ public class ExperimentTests
     }
 
     // Excel 1.00's windows captured from the screen (tests/Data/Screens, docs/Testing.md), each with the sample Excel
-    // saved it as. Only the mouse pointer, which the renderer does not draw, may differ; Geneva 11, a size with no
-    // bitmap that QuickDraw scales, is drawn close to Excel but not exactly.
+    // saved it as. The renderer draws every pixel as Excel did.
     public static TheoryData<string> Screens() => new(File.ReadLines(ScreenIndex).Where(l => !l.StartsWith('#')).Select(l => l.Split('\t')[0]));
 
     private static string ScreenIndex => Path.Combine(AppContext.BaseDirectory, "Data", "Screens", "index.txt");
@@ -1385,22 +1384,19 @@ public class ExperimentTests
         var fields = File.ReadLines(ScreenIndex).First(l => l.Split('\t')[0] == name).Split('\t');
         var expected = RenderTests.ReadPng(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", "Screens", name + ".png")));
         var actual = Rendering.ExcelRenderer.Render(Load(name), fonts, new Rendering.ExcelRenderOptions { Title = fields[1] });
-        int left = int.Parse(fields[2]), top = int.Parse(fields[3]), right = int.Parse(fields[4]), bottom = int.Parse(fields[5]);
-        int allowed = int.Parse(fields[6]);
         int differ = 0;
         for (int y = 0; y < expected.Height; y++)
         {
             for (int x = 0; x < expected.Width; x++)
             {
-                bool pointer = x >= left && x < right && y >= top && y < bottom;
-                if (!pointer && expected[x, y] != actual[x, y])
+                if (expected[x, y] != actual[x, y])
                 {
                     differ++;
                 }
             }
         }
 
-        Assert.True(differ <= allowed, $"{differ} pixels differ from Excel's screen");
+        Assert.True(differ == 0 && (expected.Width, expected.Height) == (actual.Width, actual.Height), $"{differ} pixels differ from Excel's screen; {actual.Width} × {actual.Height} drawn, {expected.Width} × {expected.Height} captured");
     }
 
     private static readonly Lazy<Rendering.MacFontSet?> SystemFonts = new(() =>

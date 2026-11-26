@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\src\MacExcelReader.csproj" />
+    <ProjectReference Include="..\dumper\MacExcelDumper.csproj" />
   </ItemGroup>
 
   <ItemGroup>

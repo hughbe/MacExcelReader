@@ -4,8 +4,10 @@ The unit tests check the library against Excel's own files. This page covers the
 files the library wrote, or any others, into a real Excel 1.x and checking what Excel made of them. It works
 for worksheets, macro sheets and charts.
 
-You need [Mini vMac](https://www.gryphel.com/c/minivmac/) (or another Mac emulator), a Mac ROM, a bootable
-System disk and an Excel disk image. None are included.
+For Excel 1.00 it runs headless, from the command line or the tests, in [MAME](https://www.mamedev.org/)'s Mac
+Plus (`brew install mame`), with no window and nobody at the keyboard. You need the Mac Plus ROM and Excel 1.00's
+Data and Program disk images; none are included. Other releases still run in
+[Mini vMac](https://www.gryphel.com/c/minivmac/) by hand.
 
 ## How it works
 
@@ -22,16 +24,17 @@ For each file, Driver:
    `#REF!` for a reference to a document by name that was opened after Driver;
 3. saves it with Save As as `<name> saved` and closes it.
 
-Finally Driver saves itself, so its cells keep Excel's answers.
+Finally Driver saves itself, so its cells keep Excel's answers, and shows the alert "Driver finished".
 
 | Excel | Running Driver |
 |---|---|
-| 1.00, 1.01, 1.03, 1.04, 1.06 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R; Macro > Exécuter in the French 1.01). `check` cannot turn the French 1.01's GET.FORMULA text into A1, so read it from Driver. |
+| 1.00 | `excel-test run Test.dsk` ([below](#running-it-in-mame)), or as for 1.01 |
+| 1.01, 1.03, 1.04, 1.06 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R; Macro > Exécuter in the French 1.01). `check` cannot turn the French 1.01's GET.FORMULA text into A1, so read it from Driver. |
 | 1.5 | Open Driver. It runs by itself (Auto_Open). Pack with `--excel 1.5`. |
 
-Start Excel from its own disk, not by opening a document from the Finder, which may pick a newer Excel. To
-open a workspace (`XLIN`) file, which only the Finder can do, boot from a disk whose only Excel is the one under
-test: Excel 1.00's data disk has its own System. Then:
+By hand, start Excel from its own disk, not by opening a document from the Finder, which may pick a newer Excel.
+To open a workspace (`XLIN`) file, which only the Finder can do, boot from a disk whose only Excel is the one
+under test: Excel 1.00's data disk has its own System. Then:
 
 ```bash
 dotnet run --project dumper -- excel-test check Test.dsk [-o extracted/] [--all]
@@ -134,10 +137,54 @@ recalc 1                        state word 0x018 (1 marks the sheet as needing r
 
 The same format works for any new experiment: write a list and build it.
 
+## Running it in MAME
+
+```bash
+export MACEXCEL_SYSTEM=~/Excel/Data.img MACEXCEL_PROGRAM=~/Excel/Program.img MACEXCEL_ROM=~/Mac/MacPlus.ROM
+dotnet run --project dumper -- excel-test run Test.dsk [--capture "Volume:Name saved"]... [-o screens/]
+```
+
+`run` boots Excel 1.00 in MAME's Mac Plus, runs Driver, writes the disk back with Excel's saves for `check`, and
+exits 0 if Driver finished. MAME runs the Mac about 30 times faster than real time: a disk of three 100-formula
+sheets takes about five seconds. It needs:
+
+- `mame` on the `PATH` (or `--mame`);
+- the Mac Plus ROM (128K, checksum `4D1F8172`; Mini vMac's `vMac.ROM` is one, with bytes after it that `run`
+  ignores), `--rom` or `MACEXCEL_ROM`. `run` splits it into the even and odd halves MAME's `macplus` set wants.
+  MAME also wants the keyboard's microcontroller ROM, which `run` does not need: it writes an empty stand-in, so
+  MAME warns that `341-0332-a.bin` has the wrong checksum;
+- Excel 1.00's Data disk, for its System and Finder (`--system` or `MACEXCEL_SYSTEM`, which the renderer also
+  uses for fonts), and its Program disk (`--program` or `MACEXCEL_PROGRAM`). The Program disk must be one whose
+  copy protection passes in an emulator: the archive.org copy.
+
+How it works:
+
+- **Boot disk.** Excel's copy protection checks the disk Excel runs from, so `run` keeps the Program disk as it
+  is, grows it to 800K and adds the System and Finder, then copies in the Data disk's boot blocks with Excel as
+  the startup application. The Mac boots straight into Excel, with the test disk in the second drive.
+- **Keys.** MAME's Mac Plus keyboard cannot run without its microcontroller's ROM, so `dumper/excel-test.lua`,
+  MAME's autoboot script, posts key events into the Event Manager's queue itself, as PostEvent does. It opens
+  Driver with Command-O, typing its name to select it in the Open dialog; runs it with Option-Command-R; waits
+  for the "Driver finished" alert, answering and logging any other dialog with Return; and finally ejects the
+  test disk with Command-Shift-2, which flushes it.
+- **Captures.** For each `--capture` title, the script brings windows to the front with Driver's second macro,
+  `Next` (Option-Command-W, `ACTIVATE.NEXT`), until that one is in front, then copies the screen buffer and
+  crops it to the window, title bar, frame and shadow, as `tests/Data/Screens` holds them. The pointer stays in
+  the top left corner, over the Apple menu. `TITLE=FILE.png` names the PNG. Pack with `--keep-open`. Driver
+  cannot bring a window to the front with `ACTIVATE`, which gave an error for every saved file's title
+  (`Render:R Basics saved`, `R Basics saved`, `Render:R Basics`, `R Basics`) when run from a second macro.
+- **Failures.** If Driver does not finish within `--timeout` seconds of emulated time (default 3600), `run`
+  leaves the disk unchanged and keeps MAME's working folder, with the last screen as `screen.png`. `--work DIR`
+  keeps it anyway, `--screen FILE` saves the last screen, and `--show` opens MAME's window at real speed to
+  watch.
+
+`ExcelRunTests` runs Render Basics through `pack`, `run` and `check` and compares the capture with its golden
+when the three variables are set and MAME is installed.
+
 ## Running it in Mini vMac
 
-`tools/minivmac/start.sh SYSTEM.dsk EXCEL.dsk Test.dsk` restarts the emulator and mounts the disks in order.
-Things to know:
+For the other releases, `tools/minivmac/start.sh SYSTEM.dsk EXCEL.dsk Test.dsk` restarts the emulator and mounts
+the disks in order. Things to know:
 
 - **Focus:** Mini vMac pauses whenever its window is not in front.
 - **Disk limit:** Mini vMac mounts at most six disk images.
@@ -150,15 +197,17 @@ Things to know:
 
 ## Comparing drawing with Excel's screen
 
-To check `ExcelRenderer` against Excel, pack sheets with `--keep-open`, run Driver, bring each window to the front
-from the Window menu and capture Mini vMac's window at its exact pixels with macOS's `screencapture -o -l<window
-id>` (from a terminal allowed to record the screen). Every emulated pixel is a 2 × 2 block in the capture, below a
-28-pixel title bar. `tests/Data/Screens` holds the window part of each capture as a one-bit PNG, and
-`ExperimentTests.Rendering_MatchesExcelsScreen` draws Excel's save of each and compares it, masking the mouse
-pointer. It needs the System's fonts and passes without checking anything otherwise: set `MACEXCEL_SYSTEM` to
-Excel 1.00's Data disk image (or a System file's resource fork) to run it.
+To check `ExcelRenderer` against Excel, pack sheets with `--keep-open` and capture their windows with
+`excel-test run --capture`. `tests/Data/Screens` holds each capture as a one-bit PNG, with `index.txt` naming the
+sample Excel saved and the window's title, and `ExperimentTests.Rendering_MatchesExcelsScreen` draws Excel's save
+of each and compares every pixel. It needs the System's fonts and passes without checking anything otherwise:
+set `MACEXCEL_SYSTEM` to Excel 1.00's Data disk image (or a System file's resource fork) to run it. To capture
+them again, pack each volume's samples under the names in their titles:
 
 ```bash
+cp "tests/Samples/Excel 1.00/Render Basics" "out/R Basics"
+dotnet run --project dumper -- excel-test pack Render.dsk "out/R Basics" --volume Render --keep-open --no-probe
+dotnet run --project dumper -- excel-test run Render.dsk --capture "Render:R Basics saved=Render Basics.png" -o tests/Data/Screens
 MACEXCEL_SYSTEM=~/Excel/Data.img dotnet test --filter Rendering_MatchesExcelsScreen
 ```
 
@@ -229,6 +278,7 @@ MACEXCEL_SYSTEM=~/Excel/Data.img dotnet test --filter Rendering_MatchesExcelsScr
 | Nov 2026 | 1.00 | TEXT of 27 values in 11 formats (297 cases), chosen where the double's binary expansion, Excel's 14-digit conversion and rounding ties give different text | Every number format rounds Excel's 14-digit conversion half up to its places, not the double itself: 50 cases the library got wrong before, all now matching. TEXT gives #VALUE! past 255 characters ([Display](Display.md); `TEXT Digits 1`–`3`) |
 | Nov 2026 | 1.00 | Sheets built to show text, bold, italic, alignments, fills, borders, a selection, scrolling, no gridlines, no headings, formulas shown, odd and hidden column widths, `Expenses`, Geneva 11 and 12, New York 10 and Monaco 9 as the standard font, and 17 scroll positions to row 16383, opened with `--keep-open` and each window captured from the screen | `ExcelRenderer` draws all but Geneva 11 pixel for pixel, apart from the mouse pointer: headings, gridlines and their pattern phase, clearing under spilled text, QuickDraw's italic, the selection and active cell, Excel's split boxes, the thumbs, and the grey past row 16384. The vertical thumb fits the 17 positions but its rule is inferred; Geneva 11, stretched from 12, differs in about 1,000 pixels (spec §13, [Display](Display.md); the `Render` samples, `tests/Data/Screens`) |
 | Nov 2026 | 1.00 | The same captures, with the vertical scroll bar's code decompiled (`18.0c`, `18.12`) and the Mac Plus ROM's text drawing read (`FMSwapFont`, `DrText`, `StretchBits`) | `ExcelRenderer` draws every capture pixel for pixel, Geneva 11 included, apart from the mouse pointer. The vertical scroll bar runs to 17982, with the first and last 20 rows taking 819 each; a scaled size is 234/256 of Geneva 12, not 11/12, which fixes the text widths, and StretchBits ORs together the rows and columns it shrinks ([Display](Display.md)) |
+| Nov 2026 | 1.00 | The headless harness (`excel-test run`, MAME's Mac Plus): the 27 `Render` windows captured again, `TEXT Digits 1`–`3` run again from their sheets and checked with `check` | Every window equals Excel 1.00's screen under Mini vMac outside the pointer, which the old captures held, and `ExcelRenderer` draws every pixel of each, frame and shadow included; the screens are now these captures. The TEXT sheets' saves have the same cells as the Mini vMac run and the samples, and `check` gives the same result. Excel 1.00's copy protection checks the disk Excel runs from |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

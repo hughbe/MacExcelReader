@@ -133,7 +133,7 @@ The [usage guide](https://github.com/hughbe/MacExcelReader/blob/main/docs/Usage.
 | [Format specification](https://github.com/hughbe/MacExcelReader/blob/main/docs/Spec.md) | The file format, byte by byte, with the code of each Excel release it comes from |
 | [How Excel 1.x displays a sheet](https://github.com/hughbe/MacExcelReader/blob/main/docs/Display.md) | How Excel formats values, fits them into cells and draws the window, pixel by pixel |
 | [How Excel 1.x exports SYLK](https://github.com/hughbe/MacExcelReader/blob/main/docs/Sylk.md) | What Excel's Save As writes for the SYLK type, byte for byte |
-| [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) | The harness that runs files in Excel under Mini vMac, and every experiment's results |
+| [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) | The harness that runs files in Excel, headless under MAME or by hand in Mini vMac, and every experiment's results |
 | [Excel bugs and quirks](https://github.com/hughbe/MacExcelReader/blob/main/docs/ExcelBugs.md) | Excel's own bugs and oddities found along the way |
 | [Excel 1.x and BIFF2](https://github.com/hughbe/MacExcelReader/blob/main/docs/Biff2.md) | How the format differs from BIFF2, Excel 2.x's format |
 | [How Excel 1.x calculates](https://github.com/hughbe/MacExcelReader/blob/main/docs/Calculation.md) | What Excel 1.00 calculates, measured: arithmetic, functions, dates, text and errors |
@@ -194,7 +194,7 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `cell <file> <address>` | Everything about one cell: value, date, formats, flags, formula, result, raw bytes and a token-by-token breakdown |
 | `parse <formula> [-f file] [--name] [--array] [--excel 1.5]` | Compile formula text and show the tokens Excel would store |
 | `sheet <list> <output> [--split N] [--excel 1.5]` | Build sheets from a formula list (`tests/Data`), for testing formulas in Excel |
-| `excel-test pack <disk> <files...>` / `excel-test check <disk>` | Test files in a real Excel under an emulator: see [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) |
+| `excel-test pack <disk> <files...>` / `excel-test run <disk>` / `excel-test check <disk>` | Test files in a real Excel under an emulator (`run`: Excel 1.00 in MAME, headless): see [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) |
 | `names <file>` | Defined names, command shortcuts and definitions |
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |
