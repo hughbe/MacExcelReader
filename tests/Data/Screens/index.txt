@@ -1,28 +1,28 @@
-# Excel 1.00's windows, captured from Mini vMac: sample, title, then the box (left, top, right, bottom) the mouse pointer covers, which the renderer does not draw, and how many other pixels may differ.
-Render Basics	Render:R Basics saved	359	59	373	73	0
-Render Scrolled	Render:R Scrolled saved	359	107	373	121	0
-Render No Headings	Render:R No Headings saved	358	91	373	105	0
-Render Formulas	Render:R Macro saved	359	75	374	89	0
-Render Widths	Render:R Widths saved	359	122	373	137	0
-Render Expenses	Render:Expenses saved	354	31	368	45	0
-Render Scrolled 1 1	Render2:T 1 1 saved	359	107	373	121	0
-Render Scrolled 100 10	Render2:T 100 10 saved	359	122	373	137	0
-Render Scrolled 1000 100	Render2:T 1000 100 saved	359	139	373	153	0
-Render Scrolled 16000 240	Render2:T 16000 240 saved	359	154	374	168	0
-Render Scrolled Data	Render2:T Data 150 10 saved	358	170	373	184	0
-Render Geneva 12	Render2:F Geneva 12 saved	359	59	374	73	0
-Render Geneva 11	Render2:F Geneva 11 saved	359	43	374	57	0
-Render New York 10	Render2:F New York 10 saved	359	91	374	105	0
-Render Monaco 9	Render2:F Monaco 9 saved	359	75	373	89	0
-Render Row 1	Render3:V 00001 saved	409	43	423	58	0
-Render Row 2	Render3:V 00002 saved	409	59	423	73	0
-Render Row 3	Render3:V 00003 saved	409	75	424	89	0
-Render Row 8	Render3:V 00008 saved	408	91	423	105	0
-Render Row 16	Render3:V 00016 saved	409	107	423	121	0
-Render Row 32	Render3:V 00032 saved	409	122	423	137	0
-Render Row 64	Render3:V 00064 saved	409	139	423	153	0
-Render Row 200	Render3:V 00200 saved	409	154	424	168	0
-Render Row 500	Render3:V 00500 saved	408	170	423	184	0
-Render Row 2000	Render3:V 02000 saved	409	186	423	201	0
-Render Row 8000	Render3:V 08000 saved	409	202	423	216	0
-Render Row 16383	Render3:V 16383 saved	408	216	424	232	0
+# Excel 1.00's windows, captured from MAME's Mac Plus by `dumper excel-test run`: sample, then window title.
+Render Basics	Render:R Basics saved
+Render Scrolled	Render:R Scrolled saved
+Render No Headings	Render:R No Headings saved
+Render Formulas	Render:R Macro saved
+Render Widths	Render:R Widths saved
+Render Expenses	Render:Expenses saved
+Render Scrolled 1 1	Render2:T 1 1 saved
+Render Scrolled 100 10	Render2:T 100 10 saved
+Render Scrolled 1000 100	Render2:T 1000 100 saved
+Render Scrolled 16000 240	Render2:T 16000 240 saved
+Render Scrolled Data	Render2:T Data 150 10 saved
+Render Geneva 12	Render2:F Geneva 12 saved
+Render Geneva 11	Render2:F Geneva 11 saved
+Render New York 10	Render2:F New York 10 saved
+Render Monaco 9	Render2:F Monaco 9 saved
+Render Row 1	Render3:V 00001 saved
+Render Row 2	Render3:V 00002 saved
+Render Row 3	Render3:V 00003 saved
+Render Row 8	Render3:V 00008 saved
+Render Row 16	Render3:V 00016 saved
+Render Row 32	Render3:V 00032 saved
+Render Row 64	Render3:V 00064 saved
+Render Row 200	Render3:V 00200 saved
+Render Row 500	Render3:V 00500 saved
+Render Row 2000	Render3:V 02000 saved
+Render Row 8000	Render3:V 08000 saved
+Render Row 16383	Render3:V 16383 saved
