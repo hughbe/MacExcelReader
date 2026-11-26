@@ -144,7 +144,8 @@ export MACEXCEL_SYSTEM=~/Excel/Data.img MACEXCEL_PROGRAM=~/Excel/Program.img MAC
 dotnet run --project dumper -- excel-test run Test.dsk [--capture "Volume:Name saved"]... [-o screens/]
 ```
 
-`run` boots Excel 1.00 in MAME's Mac Plus, runs Driver, writes the disk back with Excel's saves for `check`, and
+`run` boots Excel 1.00 in MAME's Mac Plus, in the background (no window, no Dock icon, no focus taken: it starts
+MAME with SDL's dummy video and audio drivers and no input providers), runs Driver, writes the disk back with Excel's saves for `check`, and
 exits 0 if Driver finished. MAME runs the Mac about 30 times faster than real time: a disk of three 100-formula
 sheets takes about five seconds. It needs:
 

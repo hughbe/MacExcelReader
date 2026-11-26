@@ -267,9 +267,23 @@ sealed class RunCommand : Command<RunSettings>
             start.ArgumentList.Add(argument);
         }
 
-        foreach (string argument in settings.Show ? ["-window"] : new[] { "-video", "none", "-nothrottle" })
+        // Fully in the background: with -video none MAME's SDL layer still opens a blank window and registers as a
+        // foreground app, taking focus, unless SDL_VIDEODRIVER and SDL_AUDIODRIVER are "dummy" (the -videodriver and
+        // -audiodriver options alone are not enough). The script needs no host input: it posts its keys in memory.
+        string[] background =
+        [
+            "-video", "none", "-nothrottle", "-videodriver", "dummy", "-audiodriver", "dummy",
+            "-keyboardprovider", "none", "-mouseprovider", "none", "-joystickprovider", "none", "-lightgunprovider", "none",
+        ];
+        foreach (string argument in settings.Show ? ["-window"] : background)
         {
             start.ArgumentList.Add(argument);
+        }
+
+        if (!settings.Show)
+        {
+            start.Environment["SDL_VIDEODRIVER"] = "dummy";
+            start.Environment["SDL_AUDIODRIVER"] = "dummy";
         }
 
         Process process;
