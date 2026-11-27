@@ -137,9 +137,11 @@ need not be the same when TEXT compiles the format again: 1E10 shows as `1,000` 
 
 ## A format with two exponents crashes TEXT (Excel 1.00)
 
-Seen in Excel 1.00 under MAME. TEXT with the format `;\###0.0E+00.00E+00$`, which has a second exponent, stops
-Excel with a system error (ID = 02). FORMAT.NUMBER refuses such a format, and so does the
-library.
+Seen in Excel 1.00 under MAME, with 280 random formats one to a sheet. FORMAT.NUMBER refuses a format with two
+exponents in a section, as the library does, and so does TEXT when they are in the first section: it gives
+`#VALUE!` (`TEXT Two Exponents`, `0E+00 0:0E+00 0`, and 13 others). With them in a later section, TEXT stops Excel
+with a system error (ID = 02), whichever section the value uses: `TEXT(100,";####0.0E+0"" kg""0.00E+00;…")`
+crashes, though 100 takes the empty first section. All seven such formats crashed, and no other format did.
 
 ## Display quirks of GET.FORMULA (Excel 1.03, 1.5)
 

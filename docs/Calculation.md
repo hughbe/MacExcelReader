@@ -1,15 +1,16 @@
 # How Excel 1.x calculates
 
 The format records each formula's last result, but not how Excel worked it out. This records what Excel 1.00
-calculates, as measured: 181 formulas in `tests/Data/calc-1.00.txt`, each with the exact double Excel stored
-(samples `Calc 1` and `Calc 2`). They are a reference for anyone writing a calculator for these files; the library
+calculates, as measured: 347 formulas in `tests/Data/calc-1.00.txt`, each with the exact double Excel stored
+(samples `Calc 1`, `Calc 2` and `Calc 3`; a test checks the file against them). They are a reference for anyone writing a calculator for these files; the library
 itself does not calculate.
 
 ## Method
 
 The formulas were built into two worksheets with `dumper sheet --worksheet`, each formula given `FF FF` at offset 8
 of its record so that Excel 1.00 puts it on the list of formulas waiting to be recalculated when it opens the file
-(spec §12.3), then opened and saved by Driver (docs/Testing.md). Two things that do not work: a macro sheet, whose
+(spec §12.3), then opened and saved by Driver (docs/Testing.md). Marking the whole sheet as needing
+recalculation instead (its state word 0x018 set to 1, `recalc 1` in the formula list) works as well (`Calc 3`). Two things that do not work: a macro sheet, whose
 formulas Excel calculates only when they run as a macro, and CALCULATE.NOW on formulas that are not waiting.
 
 ## Numbers
@@ -24,20 +25,29 @@ formulas Excel calculates only when they run as a macro, and CALCULATE.NOW on fo
 * No result is outside the normal double range: overflow (`2^1023*2`, `1E308*10`, `EXP(710)`) is #NUM!, and
   underflow (`2^-1074`, `1E-308/1E10`) is 0, with no denormals. `1/0` and `0/0` are #DIV/0!.
 * The built-in functions are Excel's own code and are not correctly rounded: `SQRT(2)` is one unit in the last place
-  low (`3FF6A09E667F3BCC`), `EXP(1)` one high, `ATAN(1)*4` and `ATAN2(1,1)` two high. `SIN(PI())` is
-  1.2246402351403E-16 where the double π gives 1.2246467991473532E-16, so the argument is reduced with a π more
-  precise than a double; `SIN(1E10)` is #NUM!.
+  low (`3FF6A09E667F3BCC`), `EXP(1)` one high, `ATAN(1)*4` and `ATAN2(1,1)` two high. Against correctly rounded
+  results (`Calc 3`), `LN` and `LOG10` were exact in all 14 cases, `EXP` in 8 of 9, `SQRT` in 3 of 7 (the others
+  one low), and `SIN`, `COS`, `TAN`, `ATAN`, `ACOS` and `ASIN` within 2 units for arguments up to 3.
+* `SIN(PI())` is 1.2246402351403E-16 where the double π gives 1.2246467991473532E-16, so the argument is reduced
+  with a π more precise than a double; `COS(PI()/2)` is exactly 2^−52 and `TAN(PI()/2)` 16331326887777000. The
+  reduction loses accuracy as the argument grows, `SIN(1E5)` 10 units out and `COS(1E8)` 189, and from somewhere
+  between 1E8 and 1E9 the result is #NUM! (`SIN(1E9)`, `COS(1E9)`, `TAN(1E9)`).
 * `ROUND` rounds half away from zero on the decimal value: `ROUND(2.5,0)` 3, `ROUND(-2.5,0)` −3, `ROUND(1.005,2)`
   1.01 and `ROUND(2.675,2)` 2.68, though neither is exactly representable. A fractional count of digits is
-  truncated: `ROUND(15,-1.5)` is 20. `INT` rounds down (`INT(-2.7)` is −3).
-* `MOD` takes the sign of the divisor: `MOD(-7,3)` is 2 and `MOD(7,-3)` −2. `MOD(1E20,7)` is #NUM!.
+  truncated: `ROUND(15,-1.5)` is 20. The decimal value is Excel's 14-digit conversion, so digits past it are lost
+  first: `ROUND(1E15+0.5,0)` is 1E15. `INT` rounds down (`INT(-2.7)` is −3).
+* `MOD` takes the sign of the divisor: `MOD(-7,3)` is 2 and `MOD(7,-3)` −2. A large quotient is #NUM!: `MOD(1E20,7)`,
+  `MOD(1E10,3)` and `MOD(1E15+1,7)`, so the quotient must fit in 32 bits **(inferred)**.
+* `RATE` without a guess finds 0.0428 for `RATE(10,-100,800)` but gives #NUM! for `RATE(360,-599.55,100000)`,
+  whose answer is about 0.005: it does not converge over that many periods.
 
 ## Dates and times
 
 * Serial numbers are days from 1 January 1904 (0), up to 31 December 2040: `DATE(2040,1,1)` is 49674 and
   `DATE(2041,1,1)` and `DATE(1903,12,31)` are #NUM!. A two-digit year adds 1900.
 * A month or day past the end rolls over (`DATE(1984,13,1)` is 1 January 1985, `DATE(1984,2,30)` 1 March 1984).
-* `TIME(25,0,0)` wraps to 1:00; a negative time is #NUM!. `SECOND` rounds to the nearest second.
+* `TIME(25,0,0)` wraps to 1:00; a negative time is #NUM!. `HOUR`, `MINUTE` and `SECOND` round the time to the
+  nearest second first, so 0.999995 (23:59:59.57) is 0, 0 and 0, and half a second is 1 second.
 * `WEEKDAY` counts from Sunday = 1; day 0 is a Friday (6).
 * See [Excel bugs and quirks](ExcelBugs.md) for the dates Excel gets wrong.
 

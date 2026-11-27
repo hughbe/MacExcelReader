@@ -50,6 +50,9 @@ public sealed class Program
                 branch.AddCommand<ExperimentCommand>("experiment")
                     .WithDescription("Pack, run (Excel 1.00 in MAME) and check files in one go, over as many disks as they need, reporting what each command returned.")
                     .WithExample("excel-test", "experiment", "out/Sheet1", "out/Sheet2", "-o", "results");
+                branch.AddCommand<DiskFilesCommand>("files")
+                    .WithDescription("List the files on a floppy image (MFS or HFS), or copy them out with -o")
+                    .WithExample("excel-test", "files", "Test.dsk", "-o", "out");
                 branch.AddCommand<CheckCommand>("check")
                     .WithDescription("After Driver has run in Excel, compare Excel's results and re-saved copies with the originals.")
                     .WithExample("excel-test", "check", "Test.dsk");

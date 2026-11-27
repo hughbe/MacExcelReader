@@ -123,6 +123,13 @@ sealed class PackCommand : Command<PackSettings>
             if (File.Exists(path + ".commands"))
             {
                 commands[name] = ReadCommands(path + ".commands");
+                foreach (string command in commands[name])
+                {
+                    foreach (string warning in CommandLint.Check(command))
+                    {
+                        AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(name)}: {Markup.Escape(warning)}[/]");
+                    }
+                }
             }
 
             if (File.Exists(path + ".type"))
@@ -167,6 +174,14 @@ sealed class PackCommand : Command<PackSettings>
             else
             {
                 throw new InvalidOperationException($"The library cannot read {path}; pack it with --no-probe to test it in Excel anyway.");
+            }
+        }
+
+        foreach (string command in settings.Each.Concat(settings.End))
+        {
+            foreach (string warning in CommandLint.Check(command))
+            {
+                AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(warning)}[/]");
             }
         }
 
@@ -556,6 +571,36 @@ sealed class CheckCommand : Command<CheckSettings>
         }
     }
 
+    // Whether an expression has an area spanning every row or every column with a relative end: whole rows or
+    // columns that GET.FORMULA's R1C1 text cannot give back as one area.
+    internal static bool HasRelativeWholeRowsOrColumns(ReadOnlySpan<byte> expression)
+    {
+        try
+        {
+            foreach (var token in FormulaTokens.Enumerate(expression))
+            {
+                if (token.Code != 0x25 || token.Offset + 7 > expression.Length)
+                {
+                    continue;
+                }
+
+                int first = (expression[token.Offset + 1] << 8) | expression[token.Offset + 2];
+                int last = (expression[token.Offset + 3] << 8) | expression[token.Offset + 4];
+                bool allRows = (first & 0x3FFF) == 0 && (last & 0x3FFF) == ExcelCellGrid.MaxRows - 1;
+                bool allColumns = expression[token.Offset + 5] == 0 && expression[token.Offset + 6] == ExcelCellGrid.MaxColumns - 1;
+                if ((allRows && ((first | last) & 0x4000) != 0) || (allColumns && ((first | last) & 0x8000) != 0))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (ExcelFormatException)
+        {
+        }
+
+        return false;
+    }
+
     private static int CheckSheet(MfsFile original, MfsFile saved, Dictionary<string, ExcelCell> results, Dictionary<string, (bool Typed, string Text)> typed, CheckSettings settings)
     {
         bool all = settings.All;
@@ -601,7 +646,7 @@ sealed class CheckCommand : Command<CheckSettings>
 
         // The tokens in Excel's re-save, with the bytes left over from memory cleared. After --recompile they are
         // Excel's own compilation of each formula.
-        int compared = 0, refused = 0;
+        int compared = 0, refused = 0, expected = 0;
         foreach (var entry in ours.Cells.NonEmptyCells)
         {
             int r = entry.Row;
@@ -638,14 +683,27 @@ sealed class CheckCommand : Command<CheckSettings>
             bool sameFixups = formula.IsArrayFormula || formula.FixupWords.ToArray().SequenceEqual(theirs.FixupWords.ToArray());
             if (!a.AsSpan().SequenceEqual(b) || !sameFixups)
             {
-                AnsiConsole.MarkupLine($"  [yellow]{new ExcelCellAddress(r, c)} tokens[/] {Markup.Escape(formula.ToText(ours))}: ours {Convert.ToHexString(a)}, Excel {Convert.ToHexString(b)}" + (sameFixups ? "" : " (fix-ups differ)"));
-                problems++;
+                string label = $"{new ExcelCellAddress(r, c)} tokens";
+                string line = $"{Markup.Escape(formula.ToText(ours))}: ours {Convert.ToHexString(a)}, Excel {Convert.ToHexString(b)}" + (sameFixups ? "" : " (fix-ups differ)");
+                if (results.ContainsKey("recompile " + original.Name + "!" + new ExcelCellAddress(r, c)) && HasRelativeWholeRowsOrColumns(a))
+                {
+                    // Recompiling goes through GET.FORMULA's R1C1 text, which turns relative whole rows and columns
+                    // into two areas joined by ':' (docs/ExcelBugs.md): not a difference in how Excel compiles A1.
+                    AnsiConsole.MarkupLine($"  [grey]{label} {line} (R1C1 text cannot say this; type the formula with a FILE.type to check it)[/]");
+                    expected++;
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine($"  [yellow]{label}[/] {line}");
+                    problems++;
+                }
             }
         }
 
         if (compared + refused > 0)
         {
-            AnsiConsole.MarkupLine($"  Tokens: {compared} formula(s) compared" + (refused > 0 ? $"; {refused} Excel would not compile." : "."));
+            AnsiConsole.MarkupLine($"  Tokens: {compared} formula(s) compared" + (refused > 0 ? $"; {refused} Excel would not compile" : "")
+                + (expected > 0 ? $"; {expected} differ only as R1C1 text makes them." : "."));
         }
 
         // Typed formulas in cells our copy leaves empty (the library refused the text, or the .type file names a cell

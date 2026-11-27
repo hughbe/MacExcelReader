@@ -1641,6 +1641,67 @@ public class ExperimentTests
         Assert.Equal(text, document.Cells[address].Formula!.ToText(document));
     }
 
+    [Theory]
+    [InlineData("Calc 1")]
+    [InlineData("Calc 2")]
+    [InlineData("Calc 3")]
+    public void Calc_SamplesHoldTheResultsTheReferenceRecords(string sample)
+    {
+        // tests/Data/calc-1.00.txt records, section by section, each formula of the Calc samples with the result
+        // Excel 1.00 stored for it (docs/Calculation.md): the double in hex and as General shows it, text in quotes,
+        // or a logical value or error.
+        var expected = new List<string>();
+        bool inSection = false;
+        foreach (string line in File.ReadLines(Path.Combine(AppContext.BaseDirectory, "Data", "calc-1.00.txt")))
+        {
+            if (line.StartsWith("## ", StringComparison.Ordinal))
+            {
+                inSection = line == "## " + sample;
+            }
+            else if (inSection && line.StartsWith('='))
+            {
+                // The reference writes Calc 1's negative-zero constant as -0, which Excel and the library show as 0.
+                expected.Add(line.Replace("(-0)", "(0)", StringComparison.Ordinal));
+            }
+        }
+
+        var document = Load(sample);
+        var actual = new List<string>();
+        for (int row = 0; row < document.Cells.RowCount; row++)
+        {
+            for (int column = 0; column < document.Cells.ColumnCount; column++)
+            {
+                if (document.Cells.Find(row, column)?.Formula is not { } formula)
+                {
+                    continue;
+                }
+
+                var value = formula.Result;
+                string shown = value.Kind switch
+                {
+                    ExcelValueKind.Number => $"{BitConverter.DoubleToInt64Bits(value.Number):X16}  {ExcelValueFormatter.FormatGeneral(value.Number, 20)}",
+                    ExcelValueKind.Text => $"\"{value.Text}\"",
+                    _ => value.ToString(),
+                };
+                actual.Add($"{formula.ToText(document)}\t{shown}");
+            }
+        }
+
+        Assert.NotEmpty(expected);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void TextTwoExponents_ExcelRefusesTwoExponentsInTheFirstSection()
+    {
+        // TEXT(1234.5678,"0E+00 0:0E+00 0") gave #VALUE!; with the two exponents in a later section TEXT crashes Excel
+        // 1.00 instead (docs/ExcelBugs.md). The library refuses the format, as FORMAT.NUMBER does.
+        var document = Load("TEXT Two Exponents");
+        Assert.Equal("0E+00 0:0E+00 0", document.Cells[0, 0].TextValue);
+        Assert.Equal(ExcelError.Value, document.Cells[0, 2].Value.Error);
+        Assert.Throws<FormatException>(() => ExcelNumberFormat.Parse("0E+00 0:0E+00 0"));
+    }
+
     public static TheoryData<string> TextFormatSheets()
     {
         var data = new TheoryData<string>();

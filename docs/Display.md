@@ -130,8 +130,10 @@ rather than on Excel: Excel 1.00 draws them with heavier letters under the Syste
 a later System, where it matches 1.03 and 1.5 pixel for pixel. The cells look the same under both. `FMSwapFont`
 takes the extra width a style adds from the family's `FOND` resource when there is one and the Font Manager's
 flags allow it, scaled to the size (ROM `0xE7A8`–`0xE7CE` and `0xEA36`–`0xEA82`), and otherwise adds a whole pixel
-for bold; the Data disk's System has no `FOND` resources, and a later one has, which accounts for the difference
-**(inferred)**: the later System was not examined.
+for bold. The Data disk's System has no `FOND` resources, while System 3.2 (on Excel 1.04's disk) has five, and
+its Geneva `FOND` gives bold an extra width of 0 (the style table at offset 28 is all zeros, flags 0), so under it a
+scaled bold Geneva gets no extra pixel. Times and Helvetica's `FOND`s do have extra widths (Times bold 341/4096
+of the size). `excel-test files` lists and copies out a disk's files to look at them.
 
 **Rows.** Every row has the same height, the font's ascent + descent + 1 (`09.1c`; 13 in Geneva 10, 15 in Geneva
 11), and its bottom pixel is its gridline. `09.1c` also sets a floor from the screen's size that no font reaches.
@@ -264,5 +266,5 @@ than half the maximum: (column × travel + 127) ÷ 255 for the horizontal thumb.
 
 ## Open questions
 
-* How the 64K ROM that Excel 1.00 also ran on draws a font size with no bitmap, and what a later System's `FOND`
-  resources change in bold headings of that size.
+* How the 64K ROM that Excel 1.00 also ran on draws a font size with no bitmap. Running it needs the 64K ROM and
+  MAME's `mac512k`, neither of which this project has, and a 400K boot disk, which the 64K ROM needs.

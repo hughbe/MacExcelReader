@@ -24,6 +24,7 @@ static class HfsImage
         int blockSize = (int)BinaryPrimitives.ReadUInt32BigEndian(mdb.Slice(0x14));
         int firstBlock = BinaryPrimitives.ReadUInt16BigEndian(mdb.Slice(0x1C)) * 512;
         int catalogLength = (int)BinaryPrimitives.ReadUInt32BigEndian(mdb.Slice(0x92));
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         var encoding = Encoding.GetEncoding(10000);
 
         // Copies a fork from its extents: the first three, in the catalog or the MDB, then any more from the extents

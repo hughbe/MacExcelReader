@@ -184,14 +184,20 @@ files it has, and is the quickest way to ask Excel something:
   save holds its own compilation of every formula, or nothing where it refused one (the `Typed` samples).
   Typing takes about two seconds of emulated time a formula. Array formulas are not typed.
 
-Things to keep in mind when designing an experiment:
+Things to keep in mind when designing an experiment. `pack` warns about the ones marked *(warned)*, from each
+`.commands` line and `--each` and `--end`:
 
 - FORMULA and the other macro commands that take formula text read it as R1C1, whatever `A1.R1C1` says:
-  `=FORMULA("=A1+1")` gives `#VALUE!`. Write `=FORMULA("=R1C1+1")`, or `R[-1]C` for relative references.
+  `=FORMULA("=A1+1")` gives `#VALUE!`. Write `=FORMULA("=R1C1+1")`, or `R[-1]C` for relative references
+  *(warned)*.
+- Some formulas and formats crash Excel 1.00 where it should refuse them ([Excel bugs](ExcelBugs.md)): a number
+  format with two exponents in a section after the first, given to TEXT (two in the first section give `#VALUE!`);
+  `:` followed by a minus sign; and a function joined by `:` or a space to a union ending in a relative reference
+  *(warned)*. A crash costs a bisection of its disk, so give anything suspect a sheet of its own.
 - `--recompile` goes through R1C1 text, which cannot say everything A1 text can: whole rows or columns with a
   relative end compile to two areas joined by `:` ([Excel bugs](ExcelBugs.md#getformulas-whole-row-text-does-not-compile-back-the-same-excel-100-103)),
-  so token differences there are not differences in how Excel compiles typed A1 text. Type such formulas
-  instead (`FILE.type` above).
+  so token differences there are not differences in how Excel compiles typed A1 text. `check` shows those in grey
+  and does not count them; type such formulas instead (`FILE.type` above).
 - A typed formula that refers to its own cell makes Excel show "Can't resolve circular references"; the formula is
   still entered. Keep typed formulas' references clear of the cells they are typed into.
 - Open grows a worksheet's table to every cell its formulas refer to (spec §6.1). A sheet referring to both
@@ -201,7 +207,9 @@ Things to keep in mind when designing an experiment:
 - Excel keeps one name for names that compare equal (spec §11), so a later `DEFINE.NAME` of an equal name
   renames the earlier one rather than adding a second.
 - `dumper cell FILE ADDRESS` shows a formula's raw record when the library cannot decode it, to tell a lost
-  sector from a token the library does not know.
+  sector from a token the library does not know. `excel-test files DISK [-o DIR]` lists the files on a floppy
+  image, MFS or HFS, and copies them out with their resource forks (`NAME.rsrc`), since macOS no longer mounts
+  these disks.
 
 ## Running it in MAME
 
@@ -389,6 +397,9 @@ window, so they differ from the renderer where it lies.
 | Nov 2026 | 1.00 | The 1,042 TEXT results of the earlier random formats again, with Excel's display routine (`19.0d`) and format compiler (`07.09`) read from their code; then 1,200 new random formats (`TEXT Formats 01`–`23`; seven sheets crashed Excel) | The library's display now follows `19.0d` token by token: a second `.` prints and the decimals go on, each decimal run pads on its own, integer digits no run took come out at the point, the exponent's digits spread over the runs after the `E`, percent signs do not scale a scientific number, an empty section still shows `-`, and only the hour just before AM/PM is 12-hour. 237 differences became 5, and on the new formats 810 of 815 agree; every remaining one is a format whose exponent count Excel's compiler writes onto the `E` when it pads a thousands format, which the library now does too, leaving a count byte Excel fills from memory (spec §7, [Display](Display.md)) |
 | Nov 2026 | 1.01, 1.03, 1.04, 1.06, 1.5 | `excel-test run` and `experiment` in MAME: Render Basics in each release, captured; eight 1.03 samples (`Column Widths`, `Errors`, `Intersections`, `Macro Names`, `Table`, `Combination`, `Pie Exploded`, `Recalculated`) and seven 1.5 samples (`Colour Formats`, `Frozen Panes`, `Format Text Section`, `Functions 256 And Up`, `BEARINGS`, `LOAN1`, `PROFIT CHART`) on two disks each | Every release runs headless from its own disks under System 3.2, about four seconds a disk. Excel's saves match, apart from `Macro Names`' calculation mode (Excel's own setting) and the French built-in names 1.01 adds. 1.03 and 1.5 leave the volume out of a window's title; 1.5 titles its formula bar with its font's name |
 | Nov 2026 | 1.00 | 116 formulas typed in A1 text with `sheet --type`: whole columns and rows with every placing of `$`, ranges, intersections and unions of them, §15.4's range and reference-operand cases, signs before whole rows, and unions without parentheses mixed with other operators | Typed `=D:E`, `=$D:E` and `=30:31` are one area, unlike their R1C1 text. Three parser fixes: a comma outside a function's arguments is a union binding more tightly than every operator but range and intersection (`=1+D30,E31` is `1+(D30,E31)`), whole rows can follow an intersection's space, and a sign against digits makes a number (`=-30:31` is refused); a union with an empty side is a #NULL! memory error. The library now compiles every typed text to Excel's tokens and refuses the 20 Excel refuses (spec §15.4; `Typed Columns`, `Typed Rows`, `Typed Ranges`, `Typed Signs`, `Typed Unions`) |
+| Nov 2026 | 1.00 | The seven random-format sheets that crashed Excel, split into 280 formats with TEXT and FORMAT.NUMBER on sheets of their own | Only TEXT crashes, and only for a format with two exponents in a section after the first, whichever section the value uses; with them in the first section TEXT gives `#VALUE!` (`TEXT Two Exponents`), and FORMAT.NUMBER refuses both. `pack` now warns about these and the other crashing shapes ([Excel bugs](ExcelBugs.md)) |
+| Nov 2026 | 1.00 | `Calc 3`: 166 function results, among them square roots, exponentials, logarithms and trigonometry up to 1E9, MOD and ROUND at their limits, financial functions, statistics, dates and text, compared with correctly rounded values | `LN` and `LOG10` were exact, `EXP` and `SQRT` at most a unit out, the trigonometric functions within 2 units up to 3 and up to 189 at 1E8, then #NUM! at 1E9; `MOD` fails for large quotients, `ROUND` works on the 14-digit conversion, times round to the second, and `RATE` without a guess fails over 360 periods ([Calculation](Calculation.md); `tests/Data/calc-1.00.txt`, now checked against all three Calc samples) |
+| Nov 2026 | 1.00, 1.04 | The System files of Excel 1.00's Data disk and of Excel 1.04's disk (System 3.2), read with `excel-test files` | The Data disk's System has no `FOND` resources; System 3.2 has five, and Geneva's gives bold an extra width of 0, which is why a scaled size's bold headings are lighter under it ([Display](Display.md)) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every
