@@ -3,6 +3,7 @@
 --   volume       the test disk's volume name
 --   driver       Driver's file name
 --   timeout      seconds of emulated time before giving up
+--   auto_open    true when Excel runs Driver by itself as it opens it (Excel 1.5's Auto_Open)
 --   captures     window titles to bring to the front and capture, in order
 -- It works through the Mac's own memory only: it posts key events into the Event Manager's queue (the keyboard's
 -- microcontroller is not emulated), reads the window list and volume list from the low-memory globals, and copies
@@ -40,13 +41,14 @@ local function handle_string(h)
   return pstring(r32(h) & 0xFFFFFF)
 end
 
--- The front visible window that is a dialog (kind 2) or has a title, skipping Excel's untitled formula-bar
--- window: its kind, title, and record address. Lists are walked at most 64 deep, in case memory is not yet set up.
+-- The front visible window that is a dialog (kind 2) or has a title: its kind, title, and record address. Excel's
+-- own windows of kind 8 are skipped: the formula bar, which 1.00 leaves untitled and 1.5 titles with its font's
+-- name ("Times"), and the Clipboard. Lists are walked at most 64 deep, in case memory is not yet set up.
 local function front()
   local w = r32(WindowList) & 0xFFFFFF
   for _ = 1, 64 do
     if w == 0 then return nil end
-    if r8(w + 110) ~= 0 then
+    if r8(w + 110) ~= 0 and s16(w + 108) ~= 8 then
       local kind, title = s16(w + 108), handle_string(r32(w + 134))
       if kind == 2 or title ~= "" then return { address = w, kind = kind, title = title } end
     end
@@ -80,6 +82,21 @@ local function dialog_text(w)
   return table.concat(parts, " | ")
 end
 
+-- Whether a dialog has an editable text item (kind 16), as the Personalize dialog does.
+local function has_edit_text(w)
+  local items = r32(w + 156)
+  if items == 0 or r32(items) == 0 then return false end
+  local p = r32(items) & 0xFFFFFF
+  local count = s16(p) + 1
+  p = p + 2
+  for _ = 1, math.min(count, 64) do
+    local kind, length = r8(p + 12) & 0x7F, r8(p + 13)
+    if kind == 16 then return true end
+    p = p + 14 + length + (length % 2)
+  end
+  return false
+end
+
 local function windows()
   local names = {}
   local w = r32(WindowList) & 0xFFFFFF
@@ -109,7 +126,7 @@ end
 -- queue is never caught half changed.
 local pending = {}
 local function interrupts_enabled() return (cpu.state["SR"].value & 0x0700) == 0 end
-local function enqueue(what, message, modifiers)
+local function enqueue(what, message, modifiers, where)
   if (r16(SysEvtMask) >> what) & 1 == 0 then return true end
   local buffer = r32(SysEvtBuf) & 0xFFFFFF
   for i = 0, r16(SysEvtCnt) do
@@ -120,7 +137,7 @@ local function enqueue(what, message, modifiers)
       mem:write_u16(e + 6, what)
       mem:write_u32(e + 8, message)
       mem:write_u32(e + 12, r32(Ticks))
-      mem:write_u32(e + 16, r32(Mouse))
+      mem:write_u32(e + 16, where or r32(Mouse))
       mem:write_u16(e + 20, modifiers | 0x80)
       local tail = r32(EventQueue + 6)
       if tail == 0 then
@@ -163,6 +180,23 @@ local function key(ch, modifiers, char)
 end
 local function type_text(text)
   for i = 1, #text do key(text:sub(i, i)) end
+end
+
+-- Queues a click on a dialog's item: a mouse-down and a mouse-up at the middle of its rectangle, in global
+-- coordinates. With the mouse-up already queued, TrackControl sees the button released at once, inside the item.
+local function click_item(w, item)
+  local items = r32(w + 156)
+  if items == 0 or r32(items) == 0 then return end
+  local p = (r32(items) & 0xFFFFFF) + 2
+  for _ = 2, item do
+    local length = r8(p + 13)
+    p = p + 14 + length + (length % 2)
+  end
+  local v = (s16(p + 4) + s16(p + 8)) // 2 - s16(w + 8)
+  local h = (s16(p + 6) + s16(p + 10)) // 2 - s16(w + 10)
+  local where = ((v & 0xFFFF) << 16) | (h & 0xFFFF)
+  pending[#pending + 1] = { what = 1, message = 0, modifiers = 0, where = where }
+  pending[#pending + 1] = { what = 2, message = 0, modifiers = 0, where = where }
 end
 
 local function save_screen(path)
@@ -220,7 +254,21 @@ local function run()
     return pstring(CurApName) == CONFIG.application and front() ~= nil
   end)
   wait(3)
-  local test = wait_for("volume " .. CONFIG.volume, 60, function() return volume(CONFIG.volume) end)
+  -- Excel 1.04 and later ask for a name to personalize the copy with the first time they start: a dialog with a
+  -- text field in front before the test disk is mounted gets a name and a click on its first item, OK (Return does
+  -- not choose it). Other dialogs, such as 1.5's opening screen, close by themselves.
+  local test = wait_for("volume " .. CONFIG.volume, 60, function()
+    local w = front()
+    if w and w.kind == 2 and has_edit_text(w.address) then
+      say("dialog: " .. dialog_text(w.address))
+      type_text("Test")
+      wait(1)
+      click_item(w.address, 1)
+      wait(3)
+    end
+    return volume(CONFIG.volume)
+  end)
+  wait_for("a window in front", 60, function() local w = front() return w and w.kind ~= 2 end)
   say("started; " .. describe(front()))
 
   -- The pointer to the top left corner, over the Apple menu, out of any window: the mouse position's three
@@ -232,20 +280,26 @@ local function run()
   -- select it.
   mem:write_u16(SFSaveDisk, (-test.vrefnum) & 0xFFFF)
   key("o", CMD)
-  wait_for("the Open dialog", 30, function() local w = front() return w and w.kind == 2 end)
+  local open = wait_for("the Open dialog", 30, function() local w = front() return w and w.kind == 2 and w end)
   wait(2)
   type_text(CONFIG.driver)
   wait(1)
   key("\r")
-  wait_for("Driver to open", 60, function()
-    local w = front()
-    return w and w.kind ~= 2 and w.title:find(CONFIG.driver, 1, true)
-  end)
-  wait(2)
-  say("opened " .. describe(front()))
+  wait_for("the Open dialog to close", 60, function() local w = front() return not w or w.address ~= open.address end)
+  if CONFIG.auto_open then
+    -- Excel 1.5 runs Driver's Auto_Open as it opens it, before its window is drawn.
+    say("opening Driver, which runs itself")
+  else
+    wait_for("Driver to open", 60, function()
+      local w = front()
+      return w and w.kind ~= 2 and w.title:find(CONFIG.driver, 1, true)
+    end)
+    wait(2)
+    say("opened " .. describe(front()))
 
-  -- Driver!Run, by its shortcut, Option-Command-R.
-  key("r", CMD | OPTION, "\168")
+    -- Driver!Run, by its shortcut, Option-Command-R.
+    key("r", CMD | OPTION, "\168")
+  end
   wait_for_alert(CONFIG.finished, CONFIG.timeout)
   key("\r")
   wait(3)
@@ -254,11 +308,14 @@ local function run()
   -- Each capture: Driver!Next (Option-Command-W) brings the next window to the front (ACTIVATE.NEXT), until the one
   -- wanted is there.
   for i, title in ipairs(CONFIG.captures) do
+    -- Excel 1.00 puts the volume in the title of a file on another disk ("Render:R Basics saved"); 1.03 and 1.5
+    -- do not, so a title with a volume also matches the title without it.
+    local bare = title:match("^[^:]+:(.+)$")
     -- At most once round the windows: stop when the first one comes back.
     local found, first = false, nil
     for step = 1, 64 do
       local w = front()
-      if w and w.kind ~= 2 and w.title == title then found = true break end
+      if w and w.kind ~= 2 and (w.title == title or w.title == bare) then found = true break end
       if step == 1 then first = w and w.title elseif not w or w.title == first then break end
       key("w", CMD | OPTION, "\183")
       wait(2)
@@ -301,7 +358,7 @@ local finished = false
 emu.register_periodic(function()
   if finished then return end
   if #pending > 0 and interrupts_enabled() then
-    if enqueue(pending[1].what, pending[1].message, pending[1].modifiers) then
+    if enqueue(pending[1].what, pending[1].message, pending[1].modifiers, pending[1].where) then
       table.remove(pending, 1)
     end
   end

@@ -54,12 +54,16 @@ sealed class ExperimentSettings : CommandSettings
     [Description("Have check show the differences Excel is expected to make too.")]
     public bool All { get; init; }
 
+    [CommandOption("--excel <VERSION>")]
+    [Description("The Excel to run the files in: 1.0 (the default), 1.01, 1.03, 1.04, 1.06 or 1.5.")]
+    public string Excel { get; init; } = "1.0";
+
     [CommandOption("--system <IMAGE>")]
-    [Description("Excel 1.00's Data disk. Defaults to $MACEXCEL_SYSTEM.")]
+    [Description("The startup disk (excel-test run --system). Defaults to $MACEXCEL_SYSTEM, or $MACEXCEL_SYSTEM_1_03 and so on.")]
     public string? System { get; init; }
 
     [CommandOption("--program <IMAGE>")]
-    [Description("Excel 1.00's Program disk. Defaults to $MACEXCEL_PROGRAM.")]
+    [Description("Excel's Program disk or folder (excel-test run --program). Defaults to $MACEXCEL_PROGRAM, or $MACEXCEL_PROGRAM_1_03 and so on.")]
     public string? Program { get; init; }
 
     [CommandOption("--rom <FILE>")]
@@ -76,7 +80,7 @@ sealed class ExperimentSettings : CommandSettings
 }
 
 /// <summary>
-/// One command for a whole experiment in Excel 1.00 under MAME: packs the files onto as many disks as they need, runs
+/// One command for a whole experiment in Excel under MAME: packs the files onto as many disks as they need, runs
 /// Driver on each, checks Excel's saves, and reports what every command in the files' .commands returned.
 /// </summary>
 sealed class ExperimentCommand : Command<ExperimentSettings>
@@ -91,8 +95,8 @@ sealed class ExperimentCommand : Command<ExperimentSettings>
         {
             Files = inputs, Output = settings.Output, Volume = settings.Volume, Batch = settings.Batch, KeepOpen = settings.KeepOpen,
             NoProbe = settings.NoProbe, Recompile = settings.Recompile, SaveAsType = settings.SaveAsType, Each = settings.Each,
-            Verbose = settings.Verbose, All = settings.All, System = settings.System, Program = settings.Program, Rom = settings.Rom,
-            Mame = settings.Mame, Timeout = settings.Timeout,
+            Verbose = settings.Verbose, All = settings.All, Excel = settings.Excel, System = settings.System, Program = settings.Program, Rom = settings.Rom,
+            Mame = settings.Mame, Timeout = settings.Timeout, DiskSize = settings.DiskSize,
         };
         var missing = settings.Files.Where(f => !File.Exists(f)).ToList();
         if (missing.Count > 0)
@@ -258,6 +262,7 @@ sealed class ExperimentCommand : Command<ExperimentSettings>
             int run = new RunCommand().Execute(context, new RunSettings
             {
                 Disk = disk,
+                Excel = settings.Excel,
                 System = settings.System,
                 Program = settings.Program,
                 Rom = settings.Rom,
@@ -321,6 +326,7 @@ sealed class ExperimentCommand : Command<ExperimentSettings>
             Disk = disk,
             Files = files,
             Volume = volume,
+            Excel = settings.Excel,
             KeepOpen = settings.KeepOpen,
             NoProbe = settings.NoProbe,
             Recompile = settings.Recompile,

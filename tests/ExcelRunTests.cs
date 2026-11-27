@@ -3,15 +3,62 @@ using Xunit;
 namespace MacExcelReader.Tests;
 
 /// <summary>
-/// Runs the harness of docs/Testing.md end to end in a real Excel 1.00 under MAME: pack, run, capture and check.
+/// Runs the harness of docs/Testing.md end to end in a real Excel under MAME: pack, run, capture and check.
 /// </summary>
 public class ExcelRunTests
 {
-    // Needs MAME on the PATH and the three files the run command reads: MACEXCEL_SYSTEM (Excel 1.00's Data disk),
-    // MACEXCEL_PROGRAM (its Program disk) and MACEXCEL_ROM (the Mac Plus ROM). Passes without checking anything
+    // Needs MAME on the PATH and the files the run command reads: MACEXCEL_ROM (the Mac Plus ROM), and for each release
+    // its Program disk (MACEXCEL_PROGRAM for 1.00, MACEXCEL_PROGRAM_1_03 and so on) and, where that disk has no System
+    // Folder, a startup disk (MACEXCEL_SYSTEM, MACEXCEL_SYSTEM_1_5 and so on). Passes without checking anything
     // otherwise.
-    private static bool CanRun => new[] { "MACEXCEL_SYSTEM", "MACEXCEL_PROGRAM", "MACEXCEL_ROM" }
-        .All(v => Environment.GetEnvironmentVariable(v) is { Length: > 0 } path && File.Exists(path));
+    private static bool CanRun => CanRunRelease("1.0");
+
+    private static bool CanRunRelease(string release)
+    {
+        static bool Exists(string variable) => Environment.GetEnvironmentVariable(variable) is { Length: > 0 } path && (File.Exists(path) || Directory.Exists(path));
+        string suffix = release == "1.0" ? "" : "_" + release.Replace('.', '_');
+        bool needsSystem = release is not ("1.03" or "1.04");
+        return Exists("MACEXCEL_ROM") && Exists("MACEXCEL_PROGRAM" + suffix) && (!needsSystem || Exists("MACEXCEL_SYSTEM" + suffix));
+    }
+
+    [Theory]
+    [InlineData("1.01")]
+    [InlineData("1.03")]
+    [InlineData("1.04")]
+    [InlineData("1.06")]
+    [InlineData("1.5")]
+    public void Run_RunsDriverInEachRelease(string release)
+    {
+        if (!CanRunRelease(release))
+        {
+            return;
+        }
+
+        string folder = Directory.CreateTempSubdirectory("excel-run-test-").FullName;
+        try
+        {
+            string sheet = Path.Combine(folder, "R Basics");
+            File.Copy(Path.Combine(AppContext.BaseDirectory, "Samples", "Excel 1.00", "Render Basics"), sheet);
+            string disk = Path.Combine(folder, "Test.dsk");
+            Assert.Equal(0, Program.Main(["excel-test", "pack", disk, sheet, "--volume", "Render", "--keep-open", "--excel", release]));
+            Assert.Equal(0, Program.Main(["excel-test", "run", disk, "--excel", release, "--capture", "Render:R Basics saved=Captured.png", "-o", folder]));
+
+            // The French 1.01 adds its own built-in names, so only the others' saves match ours.
+            var saved = MfsImage.Read(File.ReadAllBytes(disk)).Files.Single(f => f.Name == "R Basics saved");
+            var document = ExcelDocument.Read(saved.Data);
+            Assert.Equal(ExcelDocument.Load(sheet).Cells.RowCount, document.Cells.RowCount);
+            if (release != "1.01")
+            {
+                Assert.Equal(0, Program.Main(["excel-test", "check", disk]));
+            }
+
+            Assert.True(new FileInfo(Path.Combine(folder, "Captured.png")).Length > 0);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
 
     [Fact]
     public void Run_ReSavesAndCapturesAWindowAsExcelDrawsIt()

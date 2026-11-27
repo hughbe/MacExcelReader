@@ -28,7 +28,7 @@ sealed class PackSettings : CommandSettings
     public string Volume { get; init; } = "Test";
 
     [CommandOption("--excel <VERSION>")]
-    [Description("The Excel that will run Driver: 1.0 (the default), 1.04 or 1.5, where Driver also runs by itself when opened (Auto_Open).")]
+    [Description("The Excel that will run Driver: 1.0 (the default), 1.01, 1.03, 1.04, 1.06 or 1.5, where Driver also runs by itself when opened (Auto_Open).")]
     public string Excel { get; init; } = "1.0";
 
     [CommandOption("--keep-open")]
@@ -95,7 +95,7 @@ sealed class PackCommand : Command<PackSettings>
 {
     public override int Execute(CommandContext context, PackSettings settings, CancellationToken cancellationToken)
     {
-        var version = settings.Excel switch { "1.5" => ExcelVersion.Excel150, "1.04" => ExcelVersion.Excel104, _ => ExcelVersion.Excel100 };
+        var version = settings.Excel switch { "1.5" => ExcelVersion.Excel150, "1.04" or "1.06" => ExcelVersion.Excel104, _ => ExcelVersion.Excel100 };
         var files = new List<MfsFile>();
         var targets = new List<(string Name, ExcelDocument? Sheet)>();
         var commands = new Dictionary<string, string[]>();
@@ -167,7 +167,7 @@ sealed class PackCommand : Command<PackSettings>
 
         AnsiConsole.MarkupLine(version == ExcelVersion.Excel150
             ? "In Excel 1.5: open Driver; it runs by itself. Then run [bold]excel-test check[/]."
-            : "Run [bold]excel-test run[/] (Excel 1.00 in MAME), or in Excel open Driver and choose Macro > Run > Driver!Run (Option-Command-R). Then run [bold]excel-test check[/].");
+            : "Run [bold]excel-test run[/] (Excel in MAME), or in Excel open Driver and choose Macro > Run > Driver!Run (Option-Command-R). Then run [bold]excel-test check[/].");
         return 0;
     }
 

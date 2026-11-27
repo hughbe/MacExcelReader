@@ -4,10 +4,10 @@ The unit tests check the library against Excel's own files. This page covers the
 files the library wrote, or any others, into a real Excel 1.x and checking what Excel made of them. It works
 for worksheets, macro sheets and charts.
 
-For Excel 1.00 it runs headless, from the command line or the tests, in [MAME](https://www.mamedev.org/)'s Mac
-Plus (`brew install mame`), with no window and nobody at the keyboard. You need the Mac Plus ROM and Excel 1.00's
-Data and Program disk images; none are included. Other releases run in
-[Mini vMac](https://www.gryphel.com/c/minivmac/) by hand, which also remains a backup for 1.00.
+It runs headless, from the command line or the tests, in [MAME](https://www.mamedev.org/)'s Mac Plus
+(`brew install mame`), with no window and nobody at the keyboard, for Excel 1.00, 1.01, 1.03, 1.04, 1.06 and 1.5.
+You need the Mac Plus ROM and each release's disks; none are included.
+[Mini vMac](https://www.gryphel.com/c/minivmac/), by hand, remains the backup.
 
 ## How it works
 
@@ -26,10 +26,12 @@ For each file, Driver:
 
 Finally Driver saves itself, so its cells keep Excel's answers, and shows the alert "Driver finished".
 
-| Excel | Running Driver |
+`excel-test run Test.dsk --excel VERSION` runs Driver in MAME ([below](#running-it-in-mame)); pack with the same
+`--excel`. By hand:
+
+| Excel | Running Driver by hand |
 |---|---|
-| 1.00 | `excel-test run Test.dsk` ([below](#running-it-in-mame)), or as for 1.01 |
-| 1.01, 1.03, 1.04, 1.06 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R; Macro > Exécuter in the French 1.01). `check` cannot turn the French 1.01's GET.FORMULA text into A1, so read it from Driver. |
+| 1.00, 1.01, 1.03, 1.04, 1.06 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R; Macro > Exécuter in the French 1.01). `check` cannot turn the French 1.01's GET.FORMULA text into A1, so read it from Driver; it also adds French built-in names (`Base_de_données` and so on) to every sheet it saves. |
 | 1.5 | Open Driver. It runs by itself (Auto_Open). Pack with `--excel 1.5`. |
 
 By hand, start Excel from its own disk, not by opening a document from the Finder, which may pick a newer Excel.
@@ -188,51 +190,77 @@ Things to keep in mind when designing an experiment:
 
 ```bash
 export MACEXCEL_SYSTEM=~/Excel/Data.img MACEXCEL_PROGRAM=~/Excel/Program.img MACEXCEL_ROM=~/Mac/MacPlus.ROM
-dotnet run --project dumper -- excel-test run Test.dsk [--capture "Volume:Name saved"]... [-o screens/]
+dotnet run --project dumper -- excel-test run Test.dsk [--excel 1.03] [--capture "Volume:Name saved"]... [-o screens/]
 ```
 
-`run` boots Excel 1.00 in MAME's Mac Plus, in the background (no window, no Dock icon, no focus taken: it starts
-MAME with SDL's dummy video and audio drivers and no input providers), runs Driver, writes the disk back with Excel's saves for `check`, and
-exits 0 if Driver finished. MAME runs the Mac about 30 times faster than real time: a disk of three 100-formula
-sheets takes about five seconds. It needs:
+`run` boots Excel in MAME's Mac Plus, in the background (no window, no Dock icon, no focus taken: it starts MAME
+with SDL's dummy video and audio drivers and no input providers), runs Driver, writes the disk back with Excel's
+saves for `check`, and exits 0 if Driver finished. MAME runs the Mac about 30 times faster than real time: a disk
+of three 100-formula sheets takes about five seconds, in any release. It needs:
 
 - `mame` on the `PATH` (or `--mame`);
 - the Mac Plus ROM (128K, checksum `4D1F8172`; Mini vMac's `vMac.ROM` is one, with bytes after it that `run`
   ignores), `--rom` or `MACEXCEL_ROM`. `run` splits it into the even and odd halves MAME's `macplus` set wants.
   MAME also wants the keyboard's microcontroller ROM, which `run` does not need: it writes an empty stand-in, so
   MAME warns that `341-0332-a.bin` has the wrong checksum;
-- Excel 1.00's Data disk, for its System and Finder (`--system` or `MACEXCEL_SYSTEM`, which the renderer also
-  uses for fonts), and its Program disk (`--program` or `MACEXCEL_PROGRAM`). The Program disk must be one whose
-  copy protection passes in an emulator: the archive.org copy.
+- the release's disks, `--program` and `--system` or the variables in the table: the disk (or folder) with Excel
+  on it, and a startup disk for its System and Finder where that disk has none.
+
+| `--excel` | Program (`--program`) | System (`--system`) |
+|---|---|---|
+| `1.0` (default) | `MACEXCEL_PROGRAM`: Excel 1.00's Program disk, the archive.org copy, whose copy protection passes in an emulator | `MACEXCEL_SYSTEM`: Excel 1.00's Data disk (which the renderer also uses for fonts) |
+| `1.01` | `MACEXCEL_PROGRAM_1_01`: the French 800K disk (WinWorld) | `MACEXCEL_SYSTEM_1_01`: any startup disk, such as Excel 1.04's |
+| `1.03` | `MACEXCEL_PROGRAM_1_03`: the 800K Excel Program disk, which has its own System Folder | not needed |
+| `1.04` | `MACEXCEL_PROGRAM_1_04`: the 800K disk (WinWorld), with its own System Folder | not needed |
+| `1.06` | `MACEXCEL_PROGRAM_1_06`: the 800K disk (WinWorld) | `MACEXCEL_SYSTEM_1_06`: as for 1.01 |
+| `1.5` | `MACEXCEL_PROGRAM_1_5`: a folder holding `Microsoft Excel` with its resource fork and Finder info (macOS only), or a disk with it | `MACEXCEL_SYSTEM_1_5`: as for 1.01 |
+
+The 1.03 and 1.04 disks both have System 3.2 and Finder 5.3, so every release after 1.00 runs under that System.
+The Mac Plus has 4MB, MAME's default, which is enough for 1.5.
 
 How it works:
 
-- **Boot disk.** Excel's copy protection checks the disk Excel runs from, so `run` keeps the Program disk as it
-  is, grows it to 800K and adds the System and Finder, then copies in the Data disk's boot blocks with Excel as
-  the startup application. The Mac boots straight into Excel, with the test disk in the second drive.
+- **Boot disk.** Excel 1.00's copy protection checks the disk Excel runs from, so for 1.00 `run` keeps the
+  Program disk as it is, grows it to 800K and adds the System and Finder, then copies in the Data disk's boot
+  blocks with Excel as the startup application (`bbHelloName`). The later releases came on HFS disks, whose
+  System looks for the startup application only in the System Folder, so `run` lifts Excel, its help file, the
+  System and the Finder onto a new 800K MFS disk, which has no folders, with the boot blocks of the disk the
+  System came from. None of them checks for its master disk. The Mac boots straight into Excel, with the test
+  disk in the second drive. Excel 1.01's application, `Microsoft Excel 1.01F`, is renamed `Microsoft Excel` there,
+  since the boot blocks hold 15 characters.
+- **Starting.** Excel 1.04, 1.06 and 1.5 ask for a name to personalize the copy every time, since the boot disk
+  is new each run: the script types one and clicks OK, which Return does not choose. Other dialogs at startup,
+  such as 1.5's opening screen, close by themselves.
 - **Keys.** MAME's Mac Plus keyboard cannot run without its microcontroller's ROM, so `dumper/excel-test.lua`,
-  MAME's autoboot script, posts key events into the Event Manager's queue itself, as PostEvent does. It opens
-  Driver with Command-O, typing its name to select it in the Open dialog; runs it with Option-Command-R; waits
-  for the "Driver finished" alert, answering and logging any other dialog with Return; and finally ejects the
-  test disk with Command-Shift-2, which flushes it.
+  MAME's autoboot script, posts key and mouse events into the Event Manager's queue itself, as PostEvent does. It
+  opens Driver with Command-O, typing its name to select it in the Open dialog; runs it with Option-Command-R
+  (Excel 1.5 runs it by itself, Auto_Open); waits for the "Driver finished" alert, answering and logging any
+  other dialog with Return; and finally ejects the test disk with Command-Shift-2, which flushes it.
+- **Windows.** The script skips Excel's own windows (kind 8): the formula bar, which 1.00 leaves untitled and
+  1.5 titles with its font's name (`Times`), and the Clipboard.
 - **Captures.** For each `--capture` title, the script brings windows to the front with Driver's second macro,
   `Next` (Option-Command-W, `ACTIVATE.NEXT`), until that one is in front, then copies the screen buffer and
   crops it to the window, title bar, frame and shadow, as `tests/Data/Screens` holds them. The pointer stays in
-  the top left corner, over the Apple menu. `TITLE=FILE.png` names the PNG. Pack with `--keep-open`. Driver
-  cannot bring a window to the front with `ACTIVATE`, which gave an error for every saved file's title
-  (`Render:R Basics saved`, `R Basics saved`, `Render:R Basics`, `R Basics`) when run from a second macro.
+  the top left corner, over the Apple menu. `TITLE=FILE.png` names the PNG. Pack with `--keep-open`. Excel 1.00
+  titles the window of a file on another disk with its volume (`Render:R Basics saved`); 1.03 and 1.5 do not
+  (`R Basics saved`), so a title with a volume also matches the window without it. Driver cannot bring a window
+  to the front with `ACTIVATE`, which gave an error for every saved file's title (`Render:R Basics saved`,
+  `R Basics saved`, `Render:R Basics`, `R Basics`) when run from a second macro in 1.00.
 - **Failures.** If Driver does not finish within `--timeout` seconds of emulated time (default 3600), `run`
   leaves the disk unchanged and keeps MAME's working folder, with the last screen as `screen.png`. `--work DIR`
   keeps it anyway, `--screen FILE` saves the last screen, and `--show` opens MAME's window at real speed to
   watch.
 
-`ExcelRunTests` runs Render Basics through `pack`, `run` and `check` and compares the capture with its golden
-when the three variables are set and MAME is installed.
+`excel-test experiment` takes the same `--excel`, `--program` and `--system`. `ExcelRunTests` runs Render Basics
+through `pack`, `run` and `check` and compares the capture with its golden for 1.00, and runs it in each later
+release whose variables are set (only that the run finishes for the French 1.01). Each test passes without
+checking anything when its variables are not set or MAME is not installed.
 
 ## Running it in Mini vMac
 
-For the other releases, `tools/minivmac/start.sh SYSTEM.dsk EXCEL.dsk Test.dsk` restarts the emulator and mounts
-the disks in order. Things to know:
+Mini vMac is the backup, for watching a run by hand or anything the MAME script cannot do.
+`tools/minivmac/start.sh SYSTEM.dsk EXCEL.dsk Test.dsk` restarts the emulator and mounts the disks in order. Things
+to know:
 
 - **Focus:** Mini vMac pauses whenever its window is not in front.
 - **Disk limit:** Mini vMac mounts at most six disk images.
@@ -339,6 +367,7 @@ window, so they differ from the renderer where it lies.
 | Nov 2026 | 1.00 | TEXT of three values in ten scientific formats, among them a run after the exponent with and without a `.` before it (`0E+00 0`, `0E+00.0`) | The exponent fills the digit runs after the `E` up to a `.`, padded to the placeholders after the `E`; runs after the `.` show only their 0s. The library showed `0E+00.0` as `1E+03.0` and `0E+00 0` as `1E+003 0` before; all ten now match ([Display](Display.md)) |
 | Nov 2026 | 1.00 | 960 random formulas on 12 sheets, recompiled by Excel (`--recompile`); then the refused and crashing ones narrowed down with FORMULA in R1C1, one per sheet | Excel's compiler takes only references (or IF, CHOOSE, INDEX and other functions that can return one) as operands of `:`, intersection and union, and as arguments typed R alone; 62 formulas the library compiled were refused, and the library now refuses them too. Excel pairs `cell:cell` into an area before other ranges (`=B$2:$C3:B2:C3`), which the library now does. FORMULA reads R1C1 only, and R1C1 text turns relative whole rows and columns into two areas, so those differences were not real. Two refused shapes crash Excel instead (spec §15.4, [Excel bugs](ExcelBugs.md)) |
 | Nov 2026 | 1.00 | The 1,042 TEXT results of the earlier random formats again, with Excel's display routine (`19.0d`) and format compiler (`07.09`) read from their code; then 1,200 new random formats (`TEXT Formats 01`–`23`; seven sheets crashed Excel) | The library's display now follows `19.0d` token by token: a second `.` prints and the decimals go on, each decimal run pads on its own, integer digits no run took come out at the point, the exponent's digits spread over the runs after the `E`, percent signs do not scale a scientific number, an empty section still shows `-`, and only the hour just before AM/PM is 12-hour. 237 differences became 5, and on the new formats 810 of 815 agree; every remaining one is a format whose exponent count Excel's compiler writes onto the `E` when it pads a thousands format, which the library now does too, leaving a count byte Excel fills from memory (spec §7, [Display](Display.md)) |
+| Nov 2026 | 1.01, 1.03, 1.04, 1.06, 1.5 | `excel-test run` and `experiment` in MAME: Render Basics in each release, captured; eight 1.03 samples (`Column Widths`, `Errors`, `Intersections`, `Macro Names`, `Table`, `Combination`, `Pie Exploded`, `Recalculated`) and seven 1.5 samples (`Colour Formats`, `Frozen Panes`, `Format Text Section`, `Functions 256 And Up`, `BEARINGS`, `LOAN1`, `PROFIT CHART`) on two disks each | Every release runs headless from its own disks under System 3.2, about four seconds a disk. Excel's saves match, apart from `Macro Names`' calculation mode (Excel's own setting) and the French built-in names 1.01 adds. 1.03 and 1.5 leave the volume out of a window's title; 1.5 titles its formula bar with its font's name |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every
