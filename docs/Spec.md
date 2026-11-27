@@ -902,7 +902,6 @@ Definitions differ from cell formulas:
 * Fix-ups are applied **in place**. A `0x23` token's first two operand bytes hold the name index; a `0x1A`
   token's last three operand bytes are `00 00 <document index>`; and a name token inside an external reference
   holds the index in that document's list in section 3 (§10).
-* A definition can be a union written without parentheses, such as `=$C$9,$E$9,$C$10` (`INVOICE TEMPLATE`).
 * Token classes follow the rules for array formulas (§15.4).
 * A **relative** row or column in a cell or area reference (`2C`, `2D`) is an **offset** from the cell the name
   is used in, not a cell index: 14-bit two's complement in the row word, a signed byte for the column. An
@@ -1440,7 +1439,8 @@ the samples, Microsoft's and the ones Excel saved in experiments, and compiling 
 that saved each file (§2.3): the tokens match byte for byte, apart from the bytes §15.2 describes as left over
 from memory, in every case except the pre-release 1.5 build's FORMULA calls (§2.3) and the few formulas the
 unit tests list as exceptions, which Excel kept from an earlier version of the library or which A1 text cannot
-express.
+express. The A1 rules were also checked against text typed into Excel 1.00 as a person types it (the `Typed`
+samples, docs/Testing.md): the library compiles each text to Excel's tokens and refuses the ones Excel refuses.
 
 Excel 1.01's compiler (`11.00`, identical to 1.03's `0f.00`) produces the same tokens as 1.00's; the two
 differ only in reading text. 1.00 always separates arguments and array elements with a comma (character 44 in
@@ -1559,9 +1559,13 @@ number typed as a constant on its own is taken as text (`1E306`, `1E-308`). Toke
 
 **Whole rows and columns.** Excel 1.00 shows an area that spans every column (A to IV) as rows, `=$1:$16384` or
 `=1:2`, and one that spans every row (1 to 16384) as columns, `=A:B`, and accepts both forms when typed. A row
-area keeps its columns absolute and a column area its rows. Each operand of a range is shown this way on its
-own, so `=1:1:16384:16384` is a range of two whole-row areas, `46 … 0F 25… 25… 11`, wrapped in a memory area
-like any range whose operands are not both single cells.
+area keeps its columns absolute and a column area its rows. Typed A1 text compiles each pair to one area token,
+whatever its `$` signs: `=D:E`, `=$D:E`, `=E:$E`, `=30:31` and `=$31:31` are `45` and six bytes (`Typed Columns`,
+`Typed Rows`, Excel 1.00). Each operand of a range is shown this way on its own, so `=1:1:16384:16384` is a range
+of two whole-row areas, `46 … 0F 25… 25… 11`, wrapped in a memory area like any range whose operands are not both
+single cells; typed `=D:D:E:E` is the same. Whole rows can follow a space as the right operand of an
+intersection, `=30:32 31:33`. R1C1 text, which FORMULA and the other macro commands read, compiles whole rows or
+columns with a relative end differently ([Excel bugs and quirks](ExcelBugs.md#getformulas-whole-row-text-does-not-compile-back-the-same-excel-100-103)).
 
 **Ranges.** Two cell references with `:` between them are one area token, and Excel pairs them before it
 applies `:` to anything else: `=B$2:$C3:B2:C3` is the areas `B$2:$C3` and `B2:C3` joined by `11`, and
@@ -1577,6 +1581,19 @@ error, so Excel 1.00 never writes it: `=A1:""`, `=SUM(A1):B2`, `=(A1+0):B2`, `=A
 `=INDEX(A1:C3,1,1):B2`, `=ROW(IF(TRUE,A1))` and `=ROWS(SUM(A1))` (ROWS also takes an array) compile. A minus
 sign binds less tightly than `:`, so `=-A1:B2` is the negated area; `=A1:-B2` crashes Excel
 ([Excel bugs and quirks](ExcelBugs.md#some-refused-ranges-crash-the-compiler-excel-100)).
+
+**Unions.** Outside a function's argument list, at the top of a formula or in parentheses, a comma is the union
+operator, and it binds more tightly than every operator but range and intersection: Excel 1.00 compiles typed
+`=D30:E31,F32` as a union with no parentheses, `=1+D30,E31` as `1+(D30,E31)`, `=D30,E31=1` as `(D30,E31)=1`,
+`=-D30,E31` as `-(D30,E31)` and `=D30,E31%` as `(D30,E31)%` (`Typed Unions`, `Typed Ranges`). Its operands must be
+references, so `=D30,1`, `=1,D30`, `=D30,-E31` and `=SUM(D30),F32` are refused. Directly in a function's
+arguments the comma separates them. The same holds in a name definition, `=$C$9,$E$9,$C$10` (`INVOICE
+TEMPLATE`).
+
+**Signs on whole rows.** A sign written against digits makes a signed number before `:` is read, so typed
+`=-30:31`, `=+30:31`, `=--30:31` and `=SUM(-30:31)` are refused, while `=- 30:31` (with a space), `=-$30:$31`,
+`=-(30:31)` and `=1-30:31` compile (`Typed Signs`). A reader writes a sign on such an operand with a space
+after it.
 
 **TRUE and FALSE** without parentheses are `1D` constants.
 
@@ -1595,8 +1612,9 @@ again.
 
 * Built only from cell references and areas on this sheet, it is a **memory area**, `26 xx xx xx n`. The
   compiler also works out the areas the expression stands for and puts them in the fix-ups (§12.5): the
-  operands of a union, the overlaps of an intersection, the bounding box of a range. A range with a side
-  that stands for no area, such as an intersection of cells that do not overlap, stands for none. `=SUM((A1,B2),C3)` is `26
+  operands of a union, the overlaps of an intersection, the bounding box of a range. A range or union with a
+  side that stands for no area, such as an intersection of cells that do not overlap, stands for none: typed
+  `=D30 E30,F32` is a #NULL! memory error (`Typed Unions`). `=SUM((A1,B2),C3)` is `26
   … 09 24… 24… 10 15 24… 42 02 04` with areas A1 and B2, and `=A1:B2 B1:C3` is `46 … 0F 25… 25… 0F` with one
   area, B1:B2.
 * Where the expression stands for no area, or a single value is needed (value class) and it stands for more

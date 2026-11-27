@@ -143,7 +143,9 @@ internal static class FormulaDecompiler
                     case 0x12:
                     case 0x13:
                         Require(ref text, starts, ref count, 1);
-                        text.Insert(starts[count - 1], token.Code == 0x12 ? "+" : "-");
+                        // A sign against digits would make a number of them, so a sign on whole rows written with a
+                        // relative first row keeps a space: =- 30:31 (=-30:31 is a syntax error, `Typed Signs`).
+                        text.Insert(starts[count - 1], char.IsAsciiDigit(text.AsSpan()[starts[count - 1]]) ? (token.Code == 0x12 ? "+ " : "- ") : (token.Code == 0x12 ? "+" : "-"));
                         break;
                     case 0x14:
                         Require(ref text, starts, ref count, 1);

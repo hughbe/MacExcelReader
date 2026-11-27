@@ -22,6 +22,11 @@ sealed class SheetSettings : CommandSettings
     [Description("Compile for Excel 1.0 (1.00–1.03, the default), 1.04 (CHANGE.LINK and a third OPEN argument) or 1.5.")]
     public string Excel { get; init; } = "1.0";
 
+    [CommandOption("--type")]
+    [Description("Leave column B empty and write OUTPUT.type, for excel-test to type each formula into it as a person would, in A1 text. " +
+        "Excel's save then holds its own compilation of each formula, or nothing where it refused one.")]
+    public bool Type { get; init; }
+
     [CommandOption("--worksheet")]
     [Description("Write worksheets instead of macro sheets.")]
     public bool Worksheet { get; init; }
@@ -40,7 +45,8 @@ sealed class SheetCommand : Command<SheetSettings>
     {
         var version = settings.Excel switch { "1.5" => ExcelVersion.Excel150, "1.04" => ExcelVersion.Excel104, _ => ExcelVersion.Excel100 };
         var list = FormulaList.Load(settings.List);
-        var parts = new List<(ExcelDocument Document, int Formulas)>();
+        var parts = new List<(ExcelDocument Document, int Formulas, List<string> Typing)>();
+        var typing = new List<string>();
         var skipped = new List<string>();
         ExcelDocument document = null!;
         int row = 0, partFormulas = 0, total = 0;
@@ -72,7 +78,8 @@ sealed class SheetCommand : Command<SheetSettings>
         {
             if (settings.Split > 0 && partFormulas > 0 && partFormulas + needed > settings.Split)
             {
-                parts.Add((document, partFormulas));
+                parts.Add((document, partFormulas, typing));
+                typing = [];
                 StartSheet();
             }
         }
@@ -97,23 +104,31 @@ sealed class SheetCommand : Command<SheetSettings>
 
             int rows = line.ArrayRows;
             MakeRoom(Math.Max(rows, 1));
-            try
+            if (settings.Type && rows == 0)
             {
-                if (rows > 0)
-                {
-                    document.SetArrayFormula(new ExcelRange(row, 1, row + rows - 1, 1), line.Formula!, version);
-                }
-                else
-                {
-                    var formula = ExcelFormula.Parse(line.Formula!, document, version);
-                    formula.SetResult(0);
-                    document.Cells[row, 1].SetFormula(formula);
-                }
+                // Excel types it: only the text goes in.
+                typing.Add($"{new ExcelCellAddress(row, 1)} {line.Formula}");
             }
-            catch (ExcelFormulaSyntaxException exception)
+            else
             {
-                skipped.Add($"{line.Formula}: {exception.Message}");
-                continue;
+                try
+                {
+                    if (rows > 0)
+                    {
+                        document.SetArrayFormula(new ExcelRange(row, 1, row + rows - 1, 1), line.Formula!, version);
+                    }
+                    else
+                    {
+                        var formula = ExcelFormula.Parse(line.Formula!, document, version);
+                        formula.SetResult(0);
+                        document.Cells[row, 1].SetFormula(formula);
+                    }
+                }
+                catch (ExcelFormulaSyntaxException exception)
+                {
+                    skipped.Add($"{line.Formula}: {exception.Message}");
+                    continue;
+                }
             }
 
             document.Cells[row, 0].SetText(rows > 0 ? "{" + line.Formula + "}" : line.Formula!);
@@ -122,11 +137,15 @@ sealed class SheetCommand : Command<SheetSettings>
             total += Math.Max(rows, 1);
         }
 
-        parts.Add((document, partFormulas));
+        parts.Add((document, partFormulas, typing));
         for (int i = 0; i < parts.Count; i++)
         {
             string path = parts.Count == 1 && settings.Split <= 0 ? settings.Output : $"{settings.Output} {i + 1:D2}";
             WriteAndCheck(path, parts[i].Document);
+            if (settings.Type)
+            {
+                File.WriteAllLines(path + ".type", parts[i].Typing);
+            }
         }
 
         AnsiConsole.MarkupLine($"{total} formulas in {parts.Count} sheet(s).");
