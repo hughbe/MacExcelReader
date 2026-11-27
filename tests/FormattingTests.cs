@@ -110,6 +110,39 @@ public class FormattingTests
         Assert.Equal(expected, ExcelNumberFormat.Parse(format).Format(value));
     }
 
+    [Theory]
+    [InlineData(0, "0.0.0", "0.0.0")]
+    [InlineData(0, "0.00.0", "0.00.0")]
+    [InlineData(999.995, "0.000.0:", "999.995.0:")]
+    [InlineData(999.995, "0.000.00E+00", "9.999.95E+02")]
+    [InlineData(-0.5, "#.##0.000,0$", "-.50.000,0$")]
+    [InlineData(10000000000, ".000$#.##", "10000000000.000$.")]
+    [InlineData(-1E-05, "0.0% #.##", "-0.0% 0.1")]
+    [InlineData(-1, "0.0\" kg\"#,##0.000", "-1.0 kg,0.000")]
+    [InlineData(0.001234, "#,##0.000#.##/0.00", "0.0012.34/0.00")]
+    [InlineData(29220.75, "0E-0000.0%", "3E00004.0%")]
+    [InlineData(12.345, "##0.0E+0#,##0/#.##", "123.5E-0,0/1.")]
+    [InlineData(-1, "", "-")]
+    [InlineData(1, "h:mmh:mm $A/P", "0:0012:00 $A")]
+    [InlineData(999.995, "AM/PMh:mm/h:mm:ss", "PM23:52/23:52:48")]
+    public void Format_FollowsExcelsDisplayRoutineTokenByToken(double value, string format, string excel)
+    {
+        // TEXT in Excel 1.00 for random formats the library showed differently before it followed 19.0d: a second
+        // '.' prints and the decimals go on, each decimal run pads on its own, integer digits no run took come out at
+        // the point, percent signs do not scale a scientific number, an empty section still shows the sign, and only
+        // the hour just before AM/PM is 12-hour (docs/Display.md).
+        Assert.Equal(excel, ExcelNumberFormat.Parse(format).Format(value));
+    }
+
+    [Fact]
+    public void Parse_PutsTheExponentCountWhereExcelsCompilerDoes()
+    {
+        // Padding a thousands format to four integer positions inserts a run before a 0 run; Excel then writes the
+        // exponent's count two bytes early, on the E (spec §7).
+        var format = ExcelNumberFormat.Parse("0,00E-00");
+        Assert.Equal("1C040000070401060302021E000602", Convert.ToHexString(format.Body).Substring(0, 30));
+    }
+
     [Fact]
     public void Format_PercentOfTheLargestNumberIsDigits()
     {
@@ -273,7 +306,8 @@ public class FormattingTests
             Assert.NotNull(ExcelValueFormatter.FormatCell(cell, document));
         }
 
-        Assert.All(document.NumberFormats, f => Assert.False(string.IsNullOrEmpty(f.ToText())));
+        // An empty format is one Excel stores (FORMAT.NUMBER("") in `TEXT Formats`), so only check there is text.
+        Assert.All(document.NumberFormats, f => Assert.NotNull(f.ToText()));
     }
 
     [Theory]

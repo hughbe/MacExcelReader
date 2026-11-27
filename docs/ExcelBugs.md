@@ -126,6 +126,14 @@ operand of `:` or intersection (spec §15.4) with a syntax error, but these cras
   Excel gives the syntax error;
 * a minus sign on the right of `:`: `=R1C1:-R2C2`.
 
+## A padded thousands format loses its exponent (Excel 1.00)
+
+Seen in Excel 1.00. The format compiler (`07.09`) pads a thousands format with fewer than four integer positions
+by inserting a `#` run before the first integer run when that run is `0`, and then writes the exponent's digit
+count where its byte was before the insertion: on the character of the `E` literal (spec §7). So `0,00E-00`
+shows a control character where the `E` should be, and the exponent takes a count left over from memory, which
+need not be the same when TEXT compiles the format again: 1E10 shows as `1,000` and the exponent's digits.
+
 ## A format with two exponents crashes TEXT (Excel 1.00)
 
 Seen in Excel 1.00 under MAME. TEXT with the format `;\###0.0E+00.00E+00$`, which has a second exponent, stops

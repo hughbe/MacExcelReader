@@ -25,27 +25,44 @@ values, shows how a format shows a number (`TEXT Formats 1`, `TEXT Formats 2`, `
 * Strings and literals show without their quotes, and digits fill the placeholders around literals:
   1234.5 in `00-00-000` is `00-01-235`.
 
-Excel 1.00's display routine (`19.0d`, native code) works through the section's tokens one by one, which
-gives the rest:
+Excel 1.00's display routine (`19.0d`, native code) works through the section's tokens one by one, in the order
+they are stored, which gives the rest. It keeps the number as a string of decimal digits with a count of how
+many come before the decimal point (negative when zeros follow the point first), and a count of the integer
+placeholders still to come, which starts at the header's `a`.
 
+* A negative number shown by the positive section starts with `-`, before any token, so even an empty format
+  shows `-` (`TEXT(-1,"")`).
 * Number header `03`: the value goes through Excel's decimal conversion (at most 14 significant digits, a tie at
   the 14th rounding down), `c − b` is added to its decimal exponent (two per `%`, minus three per trailing
   comma), and those decimal digits are rounded half up to the positions there are: 1.005 in `0.00` is `1.01` and
   12345678901234.5 in `0.0` is `12345678901234.0`, since the conversion has already rounded it (`TEXT Digits`).
-* Integer digit runs: digits that do not fit go before the first placeholder; a position with no digit shows
-  `0` for `06` and nothing for `04`; with `07`, a comma follows every third position from the right that shows
-  something.
-* Decimal digit runs: leading zeros always show, even for `04`; after them the significant digits, then `0`s
-  for `06` only, so `04` drops trailing zeros.
-* Exponent `1D`/`1E`: `+` (for `1D`) or `-`, then the exponent's digits, as many as there are placeholders after
-  the `E` at least (the token's width), placed in the digit runs after it up to a `.` the way integer digits are,
-  with any that do not fit before the first. Digit runs after that `.` show only their `0` placeholders, and the
-  `.` prints: 1234.5678 in `0E+00 0` is `1E+00 3`, in `0E+00.0` `1E+003.0`, and 1.5E+123 in `0E+00000` is
-  `2E+00123` (`TEXT` in Excel 1.00).
+* Scientific header `1C`: the digits are rounded to `a + b` and their trailing zeros dropped; the exponent is the
+  decimal exponent minus `a`, and `a` digits come before the point. Percent signs do not move the point here:
+  29220.75 in `0E-0000.0%` is `3E00004.0%`.
+* Integer digit runs (`04`, `06`) before any `.`: while there are more placeholders to come than digits before
+  the point, each placeholder shows `0` for `06` and nothing for `04`. The run that reaches the digits shows all
+  of them that the placeholders after it cannot hold, so digits that do not fit go there, and a placeholder with
+  no digit left shows `0`. Once `07` has been met, a comma follows every digit or `0` that leaves a multiple of
+  three placeholders to come.
+* `05`: integer digits that no run has shown come out first (`.000` shows 10000000000 as `10000000000.000`),
+  then `.`. A second `05` only prints another `.`: the decimal places carry on across it.
+* Decimal digit runs (after a `05`): leading zeros first, even for `04`, then the digits that are left, then
+  `0`s for the rest of the run for `06` only. Each run pads on its own, so `#.##0.000,0` shows -0.5 as
+  `-.50.000,0` and `0.0.0` shows 0 as `0.0.0`.
+* Exponent `1D`/`1E`: `+` (for `1D`) or `-`, then the exponent's digits take the place of the number's, as an
+  integer with the token's width (the placeholders after the `E`) as its placeholders, and the comma flag off.
+  So they spread over the runs after the `E` like integer digits, and a `.` after them prints and starts decimal
+  runs that have no digits left: 1234.5678 in `0E+00 0` is `1E+00 3`, in `0E+00.0` `1E+003.0`, and 1.5E+123 in
+  `0E+00000` is `2E+00123`.
 * `22` writes `$`; `0A` repeats its character to fill what the column has left; `01` inside a section gets
   General with the width the rest of the section leaves.
 * Date and time tokens go to `09.1a`, through the date conversion of `09.1b`, which fails past 2^32 − 1 seconds.
-  `mmm` and `ddd` are the first three letters of the name, and 12-hour times show 0 as 12.
+  `mmm` and `ddd` are the first three letters of the name. The 12-hour hours `1F` and `20` show 0 as 12; `13`
+  and `14` are 24-hour even in a section with AM/PM, since the compiler makes only the hour just before an AM/PM
+  12-hour (spec §7): `h:mm h:mm A/P` shows 1 as `0:00 12:00 A`.
+
+Checked against TEXT in Excel 1.00 for 1,042 random formats: all agree except five whose exponent count Excel's
+compiler misplaced (spec §7), where the count byte holds a value left over from memory.
 
 A cell whose formatted text is wider than its column shows as many `#` as fit instead (`19.0e`). Drawing cells,
 below, gives the widths in pixels.

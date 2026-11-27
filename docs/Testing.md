@@ -140,7 +140,7 @@ The same format works for any new experiment: write a list and build it.
 ## Running an experiment in one go
 
 ```bash
-dotnet run --project dumper -- excel-test experiment out/Sheet1 out/Sheet2 ... -o results/ [--no-probe] [--each FORMULA]...
+dotnet run --project dumper -- excel-test experiment out/Sheet1 out/Sheet2 ... -o results/ [--no-probe] [--recompile] [--each FORMULA]... [--batch N] [--disk-size 400|800]
 ```
 
 `experiment` does `pack`, `run` and `check` for a whole experiment in Excel 1.00 under MAME (below), however many
@@ -154,8 +154,11 @@ files it has, and is the quickest way to ask Excel something:
   shows the ones that gave an error. Wrap a command in `ISERROR(…)` to turn its failure into TRUE.
 - **Saves.** Excel's saves are collected in `results/saved/`, each disk's files as Excel left them in
   `results/DISK/`, with `check`'s report in `results/DISK/check.txt` (`--verbose` shows it as it runs). Under
-  MAME about one save in twenty reaches the disk without its data, or with one 512-byte sector of it as zeros
-  (a formula then cannot be read). `check` treats a save as readable only if every formula and name in it
+  MAME a save sometimes reaches the disk without its data, or with one 512-byte sector of it as zeros (a formula
+  then cannot be read): 2 of 76 disks of about 20 KB saves, on 400K and 800K disks alike, at unrelated places
+  (track 3 sector 11, track 20 sector 5). The test disk is ejected, which flushes it, before MAME stops, so the
+  cause is **(unknown)**; MAME's conversion of a sector it cannot decode back to the raw image is one candidate,
+  and checking it needs MAME's `floptool`, which Homebrew's MAME does not include. `check` treats a save as readable only if every formula and name in it
   decodes, names any zeroed sectors, and `experiment` runs those files again on a disk of their own. A check
   that fails on one disk is reported with the rest instead of ending the experiment.
 - **Crashes.** A disk that does not finish is split in halves until the file that stops Excel is found; its
@@ -335,6 +338,7 @@ window, so they differ from the renderer where it lies.
 | Nov 2026 | 1.00 | `Referenced Cells` (seven formulas referring to cells, whole rows and columns, areas to the last row and column, a name and another document) and its macro-sheet twin, opened and saved; then names defined with R1C1 offsets and used from other cells, typed by FORMULA in new sheets (`Name Relative Down`, `Off`, `Wrap Row`, `Wrap Column`) | Open grows a worksheet's table to every cell its formulas refer to, names' definitions included, plus the margin; areas reaching the last row or column don't count in that direction, other documents and macro sheets don't count at all. A relative name counts from the cell that uses it and wraps round the sheet; a formula whose table would not fit in memory gives `#VALUE!`. Typing a formula grows a new sheet's table in the count form, without a margin. The library sizes the tables it writes the same way (spec §6.1, §11) |
 | Nov 2026 | 1.00 | TEXT of three values in ten scientific formats, among them a run after the exponent with and without a `.` before it (`0E+00 0`, `0E+00.0`) | The exponent fills the digit runs after the `E` up to a `.`, padded to the placeholders after the `E`; runs after the `.` show only their 0s. The library showed `0E+00.0` as `1E+03.0` and `0E+00 0` as `1E+003 0` before; all ten now match ([Display](Display.md)) |
 | Nov 2026 | 1.00 | 960 random formulas on 12 sheets, recompiled by Excel (`--recompile`); then the refused and crashing ones narrowed down with FORMULA in R1C1, one per sheet | Excel's compiler takes only references (or IF, CHOOSE, INDEX and other functions that can return one) as operands of `:`, intersection and union, and as arguments typed R alone; 62 formulas the library compiled were refused, and the library now refuses them too. Excel pairs `cell:cell` into an area before other ranges (`=B$2:$C3:B2:C3`), which the library now does. FORMULA reads R1C1 only, and R1C1 text turns relative whole rows and columns into two areas, so those differences were not real. Two refused shapes crash Excel instead (spec §15.4, [Excel bugs](ExcelBugs.md)) |
+| Nov 2026 | 1.00 | The 1,042 TEXT results of the earlier random formats again, with Excel's display routine (`19.0d`) and format compiler (`07.09`) read from their code; then 1,200 new random formats (`TEXT Formats 01`–`23`; seven sheets crashed Excel) | The library's display now follows `19.0d` token by token: a second `.` prints and the decimals go on, each decimal run pads on its own, integer digits no run took come out at the point, the exponent's digits spread over the runs after the `E`, percent signs do not scale a scientific number, an empty section still shows `-`, and only the hour just before AM/PM is 12-hour. 237 differences became 5, and on the new formats 810 of 815 agree; every remaining one is a format whose exponent count Excel's compiler writes onto the `E` when it pads a thousands format, which the library now does too, leaving a count byte Excel fills from memory (spec §7, [Display](Display.md)) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

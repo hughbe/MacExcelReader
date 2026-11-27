@@ -35,6 +35,5 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="MacExcelReader.Tests" />
-    <InternalsVisibleTo Include="MacExcelDumper" />
   </ItemGroup>
 </Project>

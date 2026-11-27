@@ -54,6 +54,10 @@ sealed class PackSettings : CommandSettings
     [CommandOption("--end <FORMULA>")]
     [Description("A macro command to run after Driver has saved itself, such as =FULL(TRUE). Repeatable.")]
     public string[] End { get; init; } = [];
+
+    [CommandOption("--disk-size <K>")]
+    [Description("The floppy's size, 400 or 800. By default 400 when the files fit and 800 otherwise.")]
+    public int? DiskSize { get; init; }
 }
 
 sealed class CheckSettings : CommandSettings
@@ -122,7 +126,7 @@ sealed class PackCommand : Command<PackSettings>
                 // sheet whose table would not fit in memory: one formula referring to IV16384 is enough.
                 if (sheet.Kind == ExcelDocumentKind.Worksheet)
                 {
-                    var (rows, columns) = sheet.ReferencedExtent();
+                    var (rows, columns) = sheet.GetReferencedExtent();
                     long bytes = (long)Math.Max(rows + 1, sheet.Cells.RowCount) * Math.Max(columns + 1, sheet.Cells.ColumnCount) * 6;
                     if (bytes > 1 << 20)
                     {
@@ -147,7 +151,12 @@ sealed class PackCommand : Command<PackSettings>
         var (driver, probes) = BuildDriver(settings, version, targets, commands);
         files.Insert(0, new MfsFile(ExcelTest.DriverName, "XLPG", "XCEL", driver.ToArray(), []));
 
-        int size = files.Sum(f => (f.Data.Length + 1023) / 1024 + 1) <= 380 ? 400 : 800;
+        if (settings.DiskSize is { } chosen && chosen is not (400 or 800))
+        {
+            throw new InvalidOperationException("--disk-size is 400 or 800.");
+        }
+
+        int size = settings.DiskSize ?? (files.Sum(f => (f.Data.Length + 1023) / 1024 + 1) <= 380 ? 400 : 800);
         File.WriteAllBytes(settings.Disk, MfsImage.Write(settings.Volume, files, size));
         AnsiConsole.MarkupLine($"Wrote [bold]{Markup.Escape(settings.Disk)}[/] ({size}K, volume \"{Markup.Escape(settings.Volume)}\"): Driver and {targets.Count} file(s), {probes} formula cells to probe.");
         // Excel 1.03 ran out of memory opening a small file after a 345-row Driver had recompiled a 100-formula sheet.

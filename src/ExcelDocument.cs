@@ -751,7 +751,7 @@ public sealed class ExcelDocument
         // a sheet whose formulas need one, so such a sheet is written at the size of its cells.
         if (rows > 0 && Kind == ExcelDocumentKind.Worksheet && !State.HoldsCountForm(rows, columns))
         {
-            var (referencedRows, referencedColumns) = ReferencedExtent();
+            var (referencedRows, referencedColumns) = GetReferencedExtent();
             int grownRows = Math.Max(rows, Math.Min(referencedRows + 1, ExcelCellGrid.MaxRows + 1));
             int grownColumns = Math.Max(columns, Math.Min(referencedColumns + 1, ExcelCellGrid.MaxColumns + 1));
             if ((grownRows > rows || grownColumns > columns) && (long)grownRows * grownColumns * 6 <= 4 << 20)
@@ -765,9 +765,14 @@ public sealed class ExcelDocument
         State.SetExtent(rows, columns);
     }
 
-    // The rows and columns (as counts) the cells' formulas refer to, by the rules in UpdateExtent, including through the
-    // names they use.
-    internal (int Rows, int Columns) ReferencedExtent()
+    /// <summary>
+    /// Gets how many rows and columns the cells' formulas refer to, as Excel counts them when Open grows a worksheet's
+    /// cell table (spec §6.1): through the names they use, with a relative name counted from the cell that uses it,
+    /// and leaving out other documents' cells and the rows (or columns) of an area that runs to the last row (or
+    /// column). Saving a worksheet makes its table at least this size, plus the blank margin.
+    /// </summary>
+    /// <returns>The row and column counts: 21 and 5 for a sheet whose only formula is <c>=D20</c>.</returns>
+    public (int Rows, int Columns) GetReferencedExtent()
     {
         int rows = 0, columns = 0;
         var following = new HashSet<int>();

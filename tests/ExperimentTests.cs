@@ -1543,6 +1543,52 @@ public class ExperimentTests
         Assert.Equal(text, document.Cells[address].Formula!.ToText(document));
     }
 
+    public static TheoryData<string> TextFormatSheets()
+    {
+        var data = new TheoryData<string>();
+        for (int i = 1; i <= 23; i++)
+        {
+            data.Add($"TEXT Formats {i:00}");
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(TextFormatSheets))]
+    public void TextFormats_LibraryShowsEachValueAsExcelsTextDid(string sample)
+    {
+        // Random formats in column A, a value in B and =TEXT(B,A) in C, recalculated by Excel 1.00; the formats were
+        // not the ones the display engine was written from. The library agrees on every one except formats whose
+        // exponent count Excel's compiler misplaced (spec §7), where Excel shows a count left over from memory.
+        string[] misplacedCount = ["-0,0+0E+0#.##", "0,0\"N\"0E-000", "0,00.00E+00+", "0,0:.##0.00.00E+00", "0E+0#.#;)0,00E+0#.#0%;)#.##0.000,00%"];
+        var document = Load(sample);
+        int compared = 0;
+        for (int row = 0; row < 40 && document.Cells.Find(row, 0) is { Type: ExcelCellType.Text } formatCell; row++)
+        {
+            string text = formatCell.TextValue;
+            if (document.Cells[row, 2].Value is not { Kind: ExcelValueKind.Text } excel || misplacedCount.Contains(text))
+            {
+                continue;
+            }
+
+            ExcelNumberFormat format;
+            try
+            {
+                format = ExcelNumberFormat.Parse(text);
+            }
+            catch (FormatException)
+            {
+                continue;
+            }
+
+            Assert.Equal(excel.Text, format.Format(document.Cells[row, 1].NumberValue));
+            compared++;
+        }
+
+        Assert.True(compared > 20);
+    }
+
     public static TheoryData<string, string, string> NameCharacters()
     {
         var data = new TheoryData<string, string, string>();

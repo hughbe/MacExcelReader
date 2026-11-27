@@ -18,6 +18,10 @@ sealed class ExperimentSettings : CommandSettings
     [Description("The disks' name (default: X). With more than one disk they are X1, X2 and so on; Driver opens files by Volume:Name.")]
     public string Volume { get; init; } = "X";
 
+    [CommandOption("--disk-size <K>")]
+    [Description("The floppies' size, 400 or 800. By default each is 400 when its files fit and 800 otherwise.")]
+    public int? DiskSize { get; init; }
+
     [CommandOption("--batch <N>")]
     [Description("At most this many files on a disk (default 30). A batch that does not fit a floppy is halved until it does.")]
     public int Batch { get; init; } = 30;
@@ -322,6 +326,7 @@ sealed class ExperimentCommand : Command<ExperimentSettings>
             Recompile = settings.Recompile,
             SaveAsType = settings.SaveAsType,
             Each = settings.Each,
+            DiskSize = settings.DiskSize,
         };
         // pack's own advice (how to run Driver) does not apply here.
         var console = AnsiConsole.Console;

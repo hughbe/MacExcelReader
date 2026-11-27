@@ -663,13 +663,18 @@ wherever they print: `0.0" S"` is `03 01 01 01 | 06 01 | 05 | 06 01 | 09 02 " S"
 | `d` to `dddd`, `m` to `mmmm` | `0B`–`0E`, `0F`–`12`; `m` is minutes (`15`, `16`) while an hour is waiting for its minutes |
 | `h`, `hh`, `s`, `ss` | `13`, `14`, `17`, `18` |
 | `yy`, `yyyy` | `19`, `1A`; a lone `y` is an error |
-| `AM/PM`, `A/P` | `21` with the letters as typed; an hour token before it gets 12 added (`1F`, `20`) |
+| `AM/PM`, `A/P` | `21` with the letters as typed; the last hour token before it gets 12 added (`1F`, `20`), and other hours stay 24-hour |
 | `General` | `01`, before any number or date |
 
 Letters are matched in either case. Any other character is an error, and so is mixing digits with dates or
 General. At the end of the section the header gets the integer positions, the decimals, and decimals plus two
 per `%`. A format with thousands and fewer than four integer positions is padded with `#` to four, so `#,0`
-compiles as `#,##0`. A comma after the digits only turns thousands on. The assembler (`07.10`) stores the
+compiles as `#,##0`: the first integer run grows if it is `#`, and otherwise a `04` run is inserted before it.
+The exponent's digit count is written after that, where its byte was before the insertion, so in a scientific
+format whose first run is `0` it lands two bytes early, on the `E` literal's character, and the count byte keeps
+what was in the buffer: `0,00E-00` is `1C 04 00 00 07 04 01 06 03 02 02 1E 00 06 02`, a literal character 2
+and a count of 0 (`07.09` in 1.00; 0 in five of six formats Excel 1.00 compiled, 1 in the sixth). A comma after
+the digits only turns thousands on. The assembler (`07.10`) stores the
 positive section, then the negative, then the zero: with one section the others share its bytes and the
 single-section byte is 1, with two the zero section shares the positive one's, and a fourth section is an
 error. A format compiles to at most 255 bytes.

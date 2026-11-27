@@ -277,6 +277,26 @@ public class ExcelDocumentTests
     }
 
     [Fact]
+    public void GetReferencedExtent_CountsTheCellsFormulasReferTo()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.Cells[0, 0].SetFormula(ExcelFormula.Parse("=D20+SUM(B2:B16384)", document));
+        Assert.Equal((20, 4), document.GetReferencedExtent());
+    }
+
+    [Fact]
+    public void TryGetRawData_GivesAnUnchangedFormulasRecord()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        var formula = ExcelFormula.Parse("=A1+1", document);
+        document.Cells[2, 3].SetFormula(formula);
+        var read = ExcelDocument.Read(document.ToArray());
+        Assert.True(read.Cells.TryGetRawData(2, 3, out var record));
+        Assert.Equal(Convert.ToHexString(formula.Expression), Convert.ToHexString(record.Slice(15, record[14])));
+        Assert.False(read.Cells.TryGetRawData(0, 0, out _));
+    }
+
+    [Fact]
     public void Save_LeavesAMacroSheetsTableAtItsCells()
     {
         var document = ExcelDocument.CreateMacroSheet();
