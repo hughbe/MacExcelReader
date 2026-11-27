@@ -5,14 +5,17 @@
 --   timeout      seconds of emulated time before giving up
 --   auto_open    true when Excel runs Driver by itself as it opens it (Excel 1.5's Auto_Open)
 --   captures     window titles to bring to the front and capture, in order
--- It works through the Mac's own memory only: it posts key events into the Event Manager's queue (the keyboard's
--- microcontroller is not emulated), reads the window list and volume list from the low-memory globals, and copies
+--   typing       formulas to type once Driver has finished, in order: { window = title, cell = "B2", text = "=A:B" }
+-- It works through the Mac's own memory only: it posts key and mouse events into the Event Manager's queue (the
+-- keyboard's microcontroller is not emulated), reads the window list and volume list from the low-memory globals, and copies
 -- the screen buffer. Everything it does goes to result.txt in the working folder.
 
 local cpu = manager.machine.devices[":maincpu"]
 local mem = cpu.spaces["program"]
 
 local log = io.open("result.txt", "w")
+-- Whether Excel took each typed formula: "typed" or "refused", a tab, and the formula's number in CONFIG.typing.
+local typed = io.open("typed.txt", "w")
 local function say(text)
   log:write(text, "\n")
   log:flush()
@@ -24,7 +27,7 @@ local function now() return manager.machine.time:as_double() end
 local SysEvtMask, SysEvtBuf, EventQueue, SysEvtCnt = 0x144, 0x146, 0x14A, 0x154
 local Ticks, SFSaveDisk, VCBQHdr, ScrnBase, Mouse = 0x16A, 0x214, 0x356, 0x824, 0x830
 local CurApName, WindowList, DAStrings = 0x910, 0x9D6, 0xAA0
-local MTemp, RawMouse, CrsrNew = 0x828, 0x82C, 0x8CE
+local MTemp, RawMouse, CrsrNew, MBState = 0x828, 0x82C, 0x8CE, 0x172
 
 local function r8(a) return mem:read_u8(a) end
 local function r16(a) return mem:read_u16(a) end
@@ -178,6 +181,16 @@ local function key(ch, modifiers, char)
   local code = codes[base] or 0
   pending[#pending + 1] = { what = 3, message = (code << 8) | string.byte(char or ch), modifiers = modifiers }
 end
+-- Moves the pointer (its three copies in low memory, and CrsrNew to have the cursor redrawn).
+local function point(x, y)
+  for _, a in ipairs({ MTemp, RawMouse, Mouse }) do mem:write_u32(a, (y << 16) | x) end
+  mem:write_u8(CrsrNew, 1)
+end
+-- Queues a click: mouse down and up (MBState 0 while the button is down).
+local function click()
+  pending[#pending + 1] = { what = 1, message = 0, modifiers = 0, button = 0 }
+  pending[#pending + 1] = { what = 2, message = 0, modifiers = 0, button = 0x80 }
+end
 local function type_text(text)
   for i = 1, #text do key(text:sub(i, i)) end
 end
@@ -195,8 +208,21 @@ local function click_item(w, item)
   local v = (s16(p + 4) + s16(p + 8)) // 2 - s16(w + 8)
   local h = (s16(p + 6) + s16(p + 10)) // 2 - s16(w + 10)
   local where = ((v & 0xFFFF) << 16) | (h & 0xFFFF)
-  pending[#pending + 1] = { what = 1, message = 0, modifiers = 0, where = where }
-  pending[#pending + 1] = { what = 2, message = 0, modifiers = 0, where = where }
+  pending[#pending + 1] = { what = 1, message = 0, modifiers = 0, where = where, button = 0 }
+  pending[#pending + 1] = { what = 2, message = 0, modifiers = 0, where = where, button = 0x80 }
+end
+
+-- Whether the formula bar is being edited: its cancel and enter boxes are drawn only then, the cancel box at about
+-- x 99–113 and the enter box at x 117–131, y 21–35 on the screen. The enter box is looked at, clear of the pointer
+-- after a click on the cancel box.
+local function editing()
+  local base, black = r32(ScrnBase) & 0xFFFFFF, 0
+  for y = 21, 35 do
+    for x = 117, 131 do
+      if r8(base + y * 64 + (x >> 3)) & (0x80 >> (x & 7)) ~= 0 then black = black + 1 end
+    end
+  end
+  return black > 20
 end
 
 local function save_screen(path)
@@ -248,6 +274,60 @@ local function wait_for_alert(text, seconds)
   end
 end
 
+-- Brings the window with this title to the front with Driver!Next (Option-Command-W, ACTIVATE.NEXT), at most once
+-- round the windows: false when the first one comes back without it.
+local function bring(title)
+  -- Excel 1.00 puts the volume in the title of a file on another disk ("Render:R Basics saved"); 1.03 and 1.5 do
+  -- not, so a title with a volume also matches the title without it.
+  local bare = title:match("^[^:]+:(.+)$")
+  local first = nil
+  for step = 1, 64 do
+    local w = front()
+    if w and w.kind ~= 2 and (w.title == title or w.title == bare) then return true end
+    if step == 1 then first = w and w.title elseif not w or w.title == first then return false end
+    key("w", CMD | OPTION, "\183")
+    wait(2)
+  end
+  return false
+end
+
+-- Types a formula into a cell of the front window, as a person would: Formula > Goto (Command-G) selects the
+-- cell, then the text and Return. Any alert that follows ("Error in formula", or a circular reference) is logged
+-- and answered with Return. A refused formula leaves its text in the formula bar, which Command-period does not
+-- cancel in Excel 1.00, so the script clicks the formula bar's cancel box.
+local function type_formula(i, entry)
+  key("g", CMD)
+  wait_for("the Goto dialog", 30, function() local w = front() return w and w.kind == 2 end)
+  wait(1)
+  type_text(entry.cell)
+  key("\r")
+  wait_for("Goto to close", 30, function() local w = front() return w and w.kind ~= 2 end)
+  wait(1)
+  type_text(entry.text)
+  key("\r")
+  wait(2)
+  local w, alert = front(), ""
+  if w and w.kind == 2 then
+    alert = dialog_text(w.address)
+    key("\r")
+    wait(2)
+  end
+  if editing() then
+    say("refused " .. entry.cell .. " " .. entry.text .. ": " .. alert)
+    typed:write("refused\t", i, "\n")
+    point(106, 28)
+    wait(0.5)
+    click()
+    wait(2)
+    point(0, 0)
+    wait(1)
+    if editing() then error("the entry in " .. entry.cell .. " could not be cancelled", 0) end
+  else
+    say("typed " .. entry.cell .. " " .. entry.text .. (alert ~= "" and "; alert: " .. alert or ""))
+    typed:write("typed\t", i, "\n")
+  end
+end
+
 local function run()
   say("booting")
   wait_for(CONFIG.application .. " to start", 300, function()
@@ -271,10 +351,8 @@ local function run()
   wait_for("a window in front", 60, function() local w = front() return w and w.kind ~= 2 end)
   say("started; " .. describe(front()))
 
-  -- The pointer to the top left corner, over the Apple menu, out of any window: the mouse position's three
-  -- copies, and CrsrNew to have the cursor redrawn.
-  for _, a in ipairs({ MTemp, RawMouse, Mouse }) do mem:write_u32(a, 0) end
-  mem:write_u8(CrsrNew, 1)
+  -- The pointer to the top left corner, over the Apple menu, out of any window.
+  point(0, 0)
 
   -- File > Open, on the test disk (Standard File opens the volume SFSaveDisk names), typing Driver's name to
   -- select it.
@@ -305,21 +383,29 @@ local function run()
   wait(3)
   say("driver finished; windows " .. windows())
 
-  -- Each capture: Driver!Next (Option-Command-W) brings the next window to the front (ACTIVATE.NEXT), until the one
-  -- wanted is there.
-  for i, title in ipairs(CONFIG.captures) do
-    -- Excel 1.00 puts the volume in the title of a file on another disk ("Render:R Basics saved"); 1.03 and 1.5
-    -- do not, so a title with a volume also matches the title without it.
-    local bare = title:match("^[^:]+:(.+)$")
-    -- At most once round the windows: stop when the first one comes back.
-    local found, first = false, nil
-    for step = 1, 64 do
-      local w = front()
-      if w and w.kind ~= 2 and (w.title == title or w.title == bare) then found = true break end
-      if step == 1 then first = w and w.title elseif not w or w.title == first then break end
-      key("w", CMD | OPTION, "\183")
-      wait(2)
+  -- Each formula to type, after bringing its window to the front; each window is saved in place (Command-S) after
+  -- its last formula. A file whose window is missing (Driver could not open it) is skipped.
+  local missing = nil
+  for i, entry in ipairs(CONFIG.typing) do
+    if i == 1 or CONFIG.typing[i - 1].window ~= entry.window then
+      missing = not bring(entry.window) and entry.window or nil
+      if missing then say("no window \"" .. missing .. "\" to type into; windows " .. windows()) end
+      wait(1)
     end
+    if entry.window ~= missing then
+      type_formula(i, entry)
+      if i == #CONFIG.typing or CONFIG.typing[i + 1].window ~= entry.window then
+        key("s", CMD)
+        wait(3)
+        wait_for("the save of " .. entry.window, 60, function() local f = front() return f and f.kind ~= 2 end)
+        say("saved \"" .. entry.window .. "\"")
+      end
+    end
+  end
+
+  -- Each capture: its window to the front, then the screen buffer.
+  for i, title in ipairs(CONFIG.captures) do
+    local found = bring(title)
     if found then
       wait(3)
       local w = front()
@@ -358,6 +444,8 @@ local finished = false
 emu.register_periodic(function()
   if finished then return end
   if #pending > 0 and interrupts_enabled() then
+    -- A mouse event also sets the button's state, which Button and StillDown read.
+    if pending[1].button ~= nil then mem:write_u8(MBState, pending[1].button) end
     if enqueue(pending[1].what, pending[1].message, pending[1].modifiers, pending[1].where) then
       table.remove(pending, 1)
     end
@@ -369,6 +457,7 @@ emu.register_periodic(function()
     finished = true
     pcall(save_screen, "screen.bin")
     log:close()
+    typed:close()
     manager.machine:exit()
   end
 end)

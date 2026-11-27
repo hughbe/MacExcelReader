@@ -7,7 +7,7 @@ using Spectre.Console.Cli;
 sealed class ExperimentSettings : CommandSettings
 {
     [CommandArgument(0, "<files>")]
-    [Description("Worksheets, macro sheets and charts to run, each with its FILE.commands if it has one, or folders of them.")]
+    [Description("Worksheets, macro sheets and charts to run, each with its FILE.commands and FILE.type if it has them, or folders of them.")]
     public required string[] Files { get; init; }
 
     [CommandOption("-o|--output <DIR>")]
@@ -87,9 +87,9 @@ sealed class ExperimentCommand : Command<ExperimentSettings>
 {
     public override int Execute(CommandContext context, ExperimentSettings settings, CancellationToken cancellationToken)
     {
-        // A folder stands for the files in it, in name order, other than .commands files and hidden ones.
+        // A folder stands for the files in it, in name order, other than .commands and .type files and hidden ones.
         string[] inputs = [.. settings.Files.SelectMany<string, string>(f => Directory.Exists(f)
-            ? Directory.GetFiles(f).Where(p => !p.EndsWith(".commands", StringComparison.Ordinal) && !Path.GetFileName(p).StartsWith('.')).Order(StringComparer.Ordinal)
+            ? Directory.GetFiles(f).Where(p => !p.EndsWith(".commands", StringComparison.Ordinal) && !p.EndsWith(".type", StringComparison.Ordinal) && !Path.GetFileName(p).StartsWith('.')).Order(StringComparer.Ordinal)
             : [f])];
         settings = new ExperimentSettings
         {

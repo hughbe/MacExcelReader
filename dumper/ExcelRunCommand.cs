@@ -112,7 +112,11 @@ sealed class RunCommand : Command<RunSettings>
             WriteRoms(rom, Path.Combine(work, "roms", "macplus"));
             string disk = Path.Combine(work, "test.img");
             File.Copy(settings.Disk, disk, overwrite: true);
-            File.WriteAllText(Path.Combine(work, "excel-test.lua"), Script(application, testVolume, captures, settings));
+            // Each file to type into is open in a window titled with the volume and its saved name.
+            var typing = testFiles.FirstOrDefault(f => f.Name == ExcelTest.TypingName) is { } list
+                ? ExcelTest.ReadTable(list.Data, 3).Select(p => (File: p[0], Window: testVolume + ":" + ExcelTest.SavedName(p[0]), Cell: p[1], Text: p[2])).ToList()
+                : [];
+            File.WriteAllText(Path.Combine(work, "excel-test.lua"), Script(application, testVolume, captures, typing, settings));
 
             int exit = RunMame(settings, work, disk);
             string log = Path.Combine(work, "result.txt");
@@ -138,6 +142,16 @@ sealed class RunCommand : Command<RunSettings>
 
                 keep = true;
                 return 1;
+            }
+
+            // What became of each typed formula, as the script wrote it in typed.txt ("typed" or "refused" and the
+            // formula's number), goes on the disk for check.
+            if (typing.Count > 0)
+            {
+                var outcomes = File.ReadAllLines(Path.Combine(work, "typed.txt")).Select(l => l.Split('\t')).ToDictionary(p => int.Parse(p[1], CultureInfo.InvariantCulture), p => p[0]);
+                string table = string.Concat(typing.Select((t, i) => $"{outcomes.GetValueOrDefault(i + 1, "missing")}\t{t.File}\t{t.Cell}\t{t.Text}\n"));
+                byte[] image = File.ReadAllBytes(disk);
+                File.WriteAllBytes(disk, MfsImage.AddFiles(image, [new MfsFile(ExcelTest.TypedName, "TEXT", "dumr", MacExcelReader.MacRoman.GetBytes(table), [])], image.Length / 1024));
             }
 
             File.Copy(disk, settings.Disk, overwrite: true);
@@ -305,7 +319,7 @@ sealed class RunCommand : Command<RunSettings>
         File.WriteAllBytes(Path.Combine(folder, "341-0332-a.bin"), new byte[1024]);
     }
 
-    private static string Script(string application, string volume, List<(string Title, string File)> captures, RunSettings settings)
+    private static string Script(string application, string volume, List<(string Title, string File)> captures, List<(string File, string Window, string Cell, string Text)> typing, RunSettings settings)
     {
         static string Quote(string text) => "\"" + string.Concat(text.Select(c => c is '\\' or '"' || c < ' ' || c > '~' ? $"\\{(int)c:D3}" : c.ToString())) + "\"";
         var config = new StringBuilder();
@@ -317,6 +331,13 @@ sealed class RunCommand : Command<RunSettings>
         config.AppendLine($"  timeout = {settings.Timeout.ToString(CultureInfo.InvariantCulture)},");
         config.AppendLine($"  auto_open = {(settings.Excel == "1.5" ? "true" : "false")},");
         config.AppendLine($"  captures = {{ {string.Join(", ", captures.Select(c => Quote(MacRoman(c.Title))))} }},");
+        config.AppendLine("  typing = {");
+        foreach (var (_, window, cell, text) in typing)
+        {
+            config.AppendLine($"    {{ window = {Quote(MacRoman(window))}, cell = {Quote(cell)}, text = {Quote(MacRoman(text))} }},");
+        }
+
+        config.AppendLine("  },");
         config.AppendLine("}");
         using var stream = typeof(RunCommand).Assembly.GetManifestResourceStream("excel-test.lua")
             ?? throw new InvalidOperationException("excel-test.lua is not embedded in the dumper.");

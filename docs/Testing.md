@@ -169,6 +169,20 @@ files it has, and is the quickest way to ask Excel something:
 - **Recompiling.** With `--recompile`, Driver enters each formula again with FORMULA, from the text GET.FORMULA
   gave. `check` lists the ones Excel refused (FORMULA gave an error, so the cell kept the library's tokens and
   would otherwise pass as a match) under "not recompiled", and `commands.tsv` has a row for each.
+- **Typing.** Give a file a `FILE.type` to have Excel 1.00 compile formulas from A1 text, as a person types them:
+  one formula per line, the cell, then spaces and the text (`B2 =D:E`), in UTF-8; `#` lines are comments. Driver
+  saves and leaves that file open, and once Driver has finished `run` types each formula: it brings the window to
+  the front, chooses Formula > Goto (Command-G) and types the cell, then types the text and Return. An alert that
+  follows is answered with Return. A formula Excel refuses ("Error in formula") stays in the formula bar, which
+  Command-period does not cancel in Excel 1.00, so `run` clicks the formula bar's cancel box; it tells a refusal
+  from an entry by whether the formula bar's enter box is still drawn. After the last formula it saves the file
+  with Command-S. `pack` puts the list on the disk as a text file, `Typing`, and `run` writes back `Typed`,
+  saying for each formula whether Excel took it, which `check` reads: a typed formula Excel refused in a cell our
+  copy has a formula for is reported "refused when typed", and in a cell our copy leaves empty `check` compiles
+  the text itself and compares the tokens with Excel's. `sheet LIST OUT --type` builds such a sheet from a formula
+  list: column A holds each text, column B is left empty and `OUT.type` types each formula into it, so Excel's
+  save holds its own compilation of every formula, or nothing where it refused one (the `Typed` samples).
+  Typing takes about two seconds of emulated time a formula. Array formulas are not typed.
 
 Things to keep in mind when designing an experiment:
 
@@ -176,7 +190,10 @@ Things to keep in mind when designing an experiment:
   `=FORMULA("=A1+1")` gives `#VALUE!`. Write `=FORMULA("=R1C1+1")`, or `R[-1]C` for relative references.
 - `--recompile` goes through R1C1 text, which cannot say everything A1 text can: whole rows or columns with a
   relative end compile to two areas joined by `:` ([Excel bugs](ExcelBugs.md#getformulas-whole-row-text-does-not-compile-back-the-same-excel-100-103)),
-  so token differences there are not differences in how Excel compiles typed A1 text.
+  so token differences there are not differences in how Excel compiles typed A1 text. Type such formulas
+  instead (`FILE.type` above).
+- A typed formula that refers to its own cell makes Excel show "Can't resolve circular references"; the formula is
+  still entered. Keep typed formulas' references clear of the cells they are typed into.
 - Open grows a worksheet's table to every cell its formulas refer to (spec §6.1). A sheet referring to both
   row 16384 and column IV (`IV16384`, or `IV2` and `B16384` in different formulas) needs about 25 MB, so Excel
   will not open it, and a far reference can make the save too big for the disk. `pack` warns about a sheet whose
@@ -235,7 +252,10 @@ How it works:
   MAME's autoboot script, posts key and mouse events into the Event Manager's queue itself, as PostEvent does. It
   opens Driver with Command-O, typing its name to select it in the Open dialog; runs it with Option-Command-R
   (Excel 1.5 runs it by itself, Auto_Open); waits for the "Driver finished" alert, answering and logging any
-  other dialog with Return; and finally ejects the test disk with Command-Shift-2, which flushes it.
+  other dialog with Return; types any `FILE.type` formulas ([above](#running-an-experiment-in-one-go)); and
+  finally ejects the test disk with Command-Shift-2, which flushes it. A click is a mouse-down and a mouse-up event
+  posted the same way, at the pointer (its three low-memory copies moved to the spot) or at a dialog item's middle,
+  with the button state (`MBState`, `$172`) set to down and back to up.
 - **Windows.** The script skips Excel's own windows (kind 8): the formula bar, which 1.00 leaves untitled and
   1.5 titles with its font's name (`Times`), and the Clipboard.
 - **Captures.** For each `--capture` title, the script brings windows to the front with Driver's second macro,
@@ -368,6 +388,7 @@ window, so they differ from the renderer where it lies.
 | Nov 2026 | 1.00 | 960 random formulas on 12 sheets, recompiled by Excel (`--recompile`); then the refused and crashing ones narrowed down with FORMULA in R1C1, one per sheet | Excel's compiler takes only references (or IF, CHOOSE, INDEX and other functions that can return one) as operands of `:`, intersection and union, and as arguments typed R alone; 62 formulas the library compiled were refused, and the library now refuses them too. Excel pairs `cell:cell` into an area before other ranges (`=B$2:$C3:B2:C3`), which the library now does. FORMULA reads R1C1 only, and R1C1 text turns relative whole rows and columns into two areas, so those differences were not real. Two refused shapes crash Excel instead (spec §15.4, [Excel bugs](ExcelBugs.md)) |
 | Nov 2026 | 1.00 | The 1,042 TEXT results of the earlier random formats again, with Excel's display routine (`19.0d`) and format compiler (`07.09`) read from their code; then 1,200 new random formats (`TEXT Formats 01`–`23`; seven sheets crashed Excel) | The library's display now follows `19.0d` token by token: a second `.` prints and the decimals go on, each decimal run pads on its own, integer digits no run took come out at the point, the exponent's digits spread over the runs after the `E`, percent signs do not scale a scientific number, an empty section still shows `-`, and only the hour just before AM/PM is 12-hour. 237 differences became 5, and on the new formats 810 of 815 agree; every remaining one is a format whose exponent count Excel's compiler writes onto the `E` when it pads a thousands format, which the library now does too, leaving a count byte Excel fills from memory (spec §7, [Display](Display.md)) |
 | Nov 2026 | 1.01, 1.03, 1.04, 1.06, 1.5 | `excel-test run` and `experiment` in MAME: Render Basics in each release, captured; eight 1.03 samples (`Column Widths`, `Errors`, `Intersections`, `Macro Names`, `Table`, `Combination`, `Pie Exploded`, `Recalculated`) and seven 1.5 samples (`Colour Formats`, `Frozen Panes`, `Format Text Section`, `Functions 256 And Up`, `BEARINGS`, `LOAN1`, `PROFIT CHART`) on two disks each | Every release runs headless from its own disks under System 3.2, about four seconds a disk. Excel's saves match, apart from `Macro Names`' calculation mode (Excel's own setting) and the French built-in names 1.01 adds. 1.03 and 1.5 leave the volume out of a window's title; 1.5 titles its formula bar with its font's name |
+| Nov 2026 | 1.00 | 116 formulas typed in A1 text with `sheet --type`: whole columns and rows with every placing of `$`, ranges, intersections and unions of them, §15.4's range and reference-operand cases, signs before whole rows, and unions without parentheses mixed with other operators | Typed `=D:E`, `=$D:E` and `=30:31` are one area, unlike their R1C1 text. Three parser fixes: a comma outside a function's arguments is a union binding more tightly than every operator but range and intersection (`=1+D30,E31` is `1+(D30,E31)`), whole rows can follow an intersection's space, and a sign against digits makes a number (`=-30:31` is refused); a union with an empty side is a #NULL! memory error. The library now compiles every typed text to Excel's tokens and refuses the 20 Excel refuses (spec §15.4; `Typed Columns`, `Typed Rows`, `Typed Ranges`, `Typed Signs`, `Typed Unions`) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

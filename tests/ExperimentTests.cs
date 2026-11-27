@@ -1365,6 +1365,104 @@ public class ExperimentTests
         Assert.Equal(0x46, document.Cells["A6"].Formula!.Expression[0]);   // ($A$1 $A$1):$C$3 is one area: a memory area
     }
 
+    // Formulas typed into Excel 1.00 as a person would, in A1 text (excel-test run with sheet --type): column A holds
+    // each text and column B Excel's compilation of it, or nothing where Excel refused it ("Error in formula").
+    public static TheoryData<string> TypedSamples() => new("Typed Columns", "Typed Rows", "Typed Ranges", "Typed Signs", "Typed Unions");
+
+    [Theory]
+    [MemberData(nameof(TypedSamples))]
+    public void Typed_CompilesAsExcelDoes(string name)
+    {
+        var document = Load(name);
+        int compiled = 0;
+        for (int row = 1; row < document.Cells.RowCount; row++)
+        {
+            if (document.Cells.GetCellType(row, 0) != ExcelCellType.Text)
+            {
+                continue;
+            }
+
+            string text = document.Cells[row, 0].TextValue;
+            if (document.Cells.Find(row, 1)?.Formula is { } excel)
+            {
+                var ours = ExcelFormula.Parse(text, document);
+                Assert.Equal(Convert.ToHexString(FormulaTokens.ClearStaleBytes(excel.Expression)), Convert.ToHexString(FormulaTokens.ClearStaleBytes(ours.Expression)));
+                Assert.Equal(excel.FixupWords.ToArray(), ours.FixupWords.ToArray());
+                compiled++;
+            }
+            else
+            {
+                Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse(text, document));
+            }
+        }
+
+        Assert.True(compiled >= 10);
+    }
+
+    [Fact]
+    public void Typed_WholeColumnsAndRowsAreOneArea()
+    {
+        // Typed A1 text: =D:E and =30:31 are one area (45), whatever the ends' $ signs, unlike the R1C1 text
+        // GET.FORMULA gives back, C[2]:C[3], which compiles to two areas and ':' (docs/ExcelBugs.md).
+        foreach (var (name, text) in new[] { ("Typed Columns", "=D:E"), ("Typed Columns", "=$D:E"), ("Typed Rows", "=30:31"), ("Typed Rows", "=31:$31") })
+        {
+            var formula = Typed(name, text)!;
+            Assert.Equal(0x45, formula.Expression[0]);
+            Assert.Equal(7, formula.Expression.Length);
+        }
+    }
+
+    [Fact]
+    public void Typed_UnionBindsTighterThanOperators()
+    {
+        // Outside a function's arguments a comma is the union operator, binding more tightly than every operator but
+        // range and intersection: =1+D30,E31 is 1+(D30,E31), a value-class memory error (#VALUE!) after 1E 00 01.
+        var sum = Typed("Typed Unions", "=1+D30,E31")!;
+        Assert.Equal("1E000147000F000924C01D0324C01E041003", Convert.ToHexString(FormulaTokens.ClearStaleBytes(sum.Expression)));
+        Assert.Equal("47000F000924C01D0324C01E04101E00010B", Convert.ToHexString(FormulaTokens.ClearStaleBytes(Typed("Typed Unions", "=D30,E31=1")!.Expression)));
+        Assert.Equal(0x10, Typed("Typed Ranges", "=D30:E31,F32")!.Expression[^1]);
+
+        // A union with a side that stands for no area stands for none: #NULL!.
+        var empty = Typed("Typed Unions", "=D30 E30,F32")!;
+        Assert.Equal(0x47, empty.Expression[0]);
+        Assert.Equal(0x00, empty.Expression[2]);
+
+        // Its operands must still be references.
+        Assert.Null(Typed("Typed Unions", "=D30,1"));
+        Assert.Null(Typed("Typed Unions", "=SUM(D30),F32"));
+    }
+
+    [Fact]
+    public void Typed_SignAgainstDigitsMakesANumber()
+    {
+        // A sign written against the digits makes a signed constant before ':' is read, so Excel refuses =-30:31;
+        // with a space, or with $ rows, it is the negated area.
+        Assert.Null(Typed("Typed Signs", "=-30:31"));
+        Assert.Null(Typed("Typed Signs", "=+30:31"));
+        Assert.Null(Typed("Typed Signs", "=SUM(-30:31)"));
+        Assert.Equal(0x13, Typed("Typed Signs", "=- 30:31")!.Expression[^1]);
+        Assert.Equal(0x13, Typed("Typed Signs", "=-$30:$31")!.Expression[^1]);
+
+        // Whole rows on the right of an intersection.
+        Assert.Equal(0x0F, Typed("Typed Signs", "=$30:$32 $31:$33")!.Expression[^1]);
+        Assert.Equal(0x46, Typed("Typed Rows", "=30:32 31:33")!.Expression[0]);
+    }
+
+    // Excel's compilation of a typed text in a Typed sample, or null where Excel refused it.
+    private static ExcelFormula? Typed(string sample, string text)
+    {
+        var document = Load(sample);
+        for (int row = 0; row < document.Cells.RowCount; row++)
+        {
+            if (document.Cells.GetCellType(row, 0) == ExcelCellType.Text && document.Cells[row, 0].TextValue == text)
+            {
+                return document.Cells.Find(row, 1)?.Formula;
+            }
+        }
+
+        throw new ArgumentException($"{text} is not in {sample}");
+    }
+
     // Excel 1.00's windows captured from the screen (tests/Data/Screens, docs/Testing.md), each with the sample Excel
     // saved it as. The renderer draws every pixel as Excel did.
     public static TheoryData<string> Screens() => new(File.ReadLines(ScreenIndex).Where(l => !l.StartsWith('#')).Select(l => l.Split('\t')[0]));

@@ -110,8 +110,9 @@ gives a different formula: a range of two whole-row areas wrapped in a memory ar
 Excel 1.00 does the same for any whole rows or columns with a relative end: `C[-5]:C[-4]` (A:B from F5),
 `C2:C[-4]` and `R[-9]:R[-7]` each compile to two areas joined by `:`, and only `C1:C2`, absolute at both ends,
 to one area. GET.FORMULA shows `$B:B`, whose ends are the same column, as one column (`C2`), which compiles
-back as `$B:$B`. So `excel-test --recompile`, which enters GET.FORMULA's text, cannot check how Excel
-compiles typed A1 text for these.
+back as `$B:$B`, and `E:$E` in B8 as `C[3]` (`Typed Columns`). Typed A1 text has none of this: `=D:E`, `=$D:E` and `=E:$E` are
+each one area (spec §15.4). So `excel-test --recompile`, which enters GET.FORMULA's text, does not show how Excel
+compiles typed A1 text for these; typing them does (`sheet --type`, docs/Testing.md).
 
 ## Some refused ranges crash the compiler (Excel 1.00)
 
