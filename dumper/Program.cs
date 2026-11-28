@@ -1125,6 +1125,10 @@ sealed class NewChartSettings : CommandSettings
     [Description("Hide the overlay's axes, as Excel does when it makes an overlay.")]
     public bool HideOverlayAxes { get; init; }
 
+    [CommandOption("--axis-font <FONT_SIZE>")]
+    [Description("Both axes' tick-label font, as a Macintosh font number and size: 3:9 for Geneva 9.")]
+    public string? AxisFont { get; init; }
+
     [CommandOption("--hide-value-axis")]
     [Description("Hide the main chart's value axis.")]
     public bool HideValueAxis { get; init; }
@@ -1153,6 +1157,24 @@ sealed class NewChartCommand : Command<NewChartSettings>
 
         var scale = document.MainChart.ValueScale;
         scale.IsLogarithmic = settings.Log;
+        if (settings.AxisFont is { } axisFont)
+        {
+            // The disk's Microsoft Chart codes (spec §16.4), and the real number and size Excel restores from bits 9-2
+            // of the axis line's and major gridlines' words.
+            var parts = axisFont.Split(':');
+            int font = int.Parse(parts[0], CultureInfo.InvariantCulture), size = int.Parse(parts[1], CultureInfo.InvariantCulture);
+            foreach (int axis in new[] { 40, 64 })
+            {
+                var record = document.MainChart.Record;
+                record[axis + 3] = (byte)(font == 2 ? 16 : font == 3 ? 1 : 32);
+                record[axis + 4] = (byte)(font is 2 or 3 ? (size - 9) / 3 : Math.Max(0, (size - 12) / 6));
+                record[axis + 14] = (byte)((record[axis + 14] & 0xFC) | (font >> 6));
+                record[axis + 15] = (byte)((record[axis + 15] & 0x03) | ((font << 2) & 0xFC));
+                record[axis + 18] = (byte)((record[axis + 18] & 0xFC) | (size >> 6));
+                record[axis + 19] = (byte)((record[axis + 19] & 0x03) | ((size << 2) & 0xFC));
+            }
+        }
+
         if (settings.HideValueAxis)
         {
             document.MainChart.ValueAxis.Line.Pattern = ChartPattern.None;

@@ -303,20 +303,34 @@ the data's other end makes the range negative; the unit is the same as for its s
 0 to 10 gives a unit of 2 and a minimum of −22). 0 to 101 over 10
 intervals needs 10.1, so the unit is 20 × 100 ÷ 100 = 20 and the axis runs to 120.
 
-*n* is the number of tick labels that fit along the axis, from 1 to 10:
+*n* is the number of tick labels that fit along the axis, from 1 to 10. `37.08` works it out before the labels
+are laid out: it sets the plot area to the space left after the titles and legend (`37.10`), works out the scales,
+and only then takes the axes' labels and ticks off the plot area (`37.0e`) and sets it again. Measured against
+that provisional plot area:
 
-* Along a vertical axis: the plot area's height, less twice the other axis's label height, divided by the axis's
-  label height (the font's ascent and descent).
-* Along a horizontal axis (a bar chart's value axis, a scatter chart's X axis): the plot area's width divided by
-  three widths of the digit 0 in the axis's label font.
+* Along a vertical axis: the height, less twice the other axis's label height, divided by the axis's label height.
+* Along a horizontal axis (a bar chart's value axis, a scatter chart's X axis): the width divided by three widths
+  of the digit 0 in the axis's label font.
 
-Each division rounds down, and the lengths are in twips: a font's pixels × 20 (`32.01`, which maps the window's
-pixels onto the drawing's twips). On screen Excel 1.00 draws a chart's labels at their own size in every window:
-captures of library charts (whose labels are the System font, Chicago 12, 15 pixels high) at window heights from
-130 to 250 points show the same 9-pixel digits. Their value axes got 1 interval at a plot height of 450 twips, 2 at
-783, 4 at 1276, 6 at 1935 and 9 at 2761 (the `Scale Window` samples), which is the plot height ÷ 300 rounded down,
-as if nothing were taken off for the other axis's labels **(unknown)**. `30.26`, which picks smaller sizes to fit
-a window's share of each font, belongs to another path, perhaps printing **(inferred)**.
+Each division rounds down. The lengths are in twips; `37.0b` takes a label's height from the font's ascent and
+descent and the width of 0, and converts them with `32.01`, which maps the window's pixels onto the drawing's
+twips (20 a pixel). On screen Excel 1.00 draws a chart's labels at their own size in every window: captures at
+window heights from 130 to 250 points show the same digits. `30.26`, which picks smaller sizes to fit a window's
+share of each font, belongs to another path, perhaps printing **(inferred)**.
+
+The saved plot area is the provisional one less the room the labels took. Sweeping a library line chart's window
+from 100 to 260 points high, and a bar chart's from 100 to 340 points wide, with data ranges that each change the
+major unit at one interval count (so every save shows *n*), the counts fit these heights and widths exactly, with
+the room labels took constant for each font **(inferred)**:
+
+| Labels | Label height | Room taken vertically | Width of 0 | Room taken across |
+|--------|-------------:|----------------------:|-----------:|------------------:|
+| System font (Chicago 12, 15 pixels) | 280 | 504–517 | 160 | 518–562 |
+| Geneva 9 (12 pixels) | 220 | 364 | | |
+| New York 9 (11 pixels) | 200 | 304–314 | | |
+
+A label's height is a pixel less than the font's ascent and descent, times 20 **(unknown)** why. The room taken is
+about one category-label height plus half a value-label height, plus a little that grows with the font.
 
 **The other fields.** An automatic minor unit is a fifth of the major unit. Then each unit, fixed or not, is
 limited: one too small to change either end of the scale becomes the whole range, and one that would divide the
@@ -351,7 +365,6 @@ the minimum plus the range moved up to a whole number of major units.
 
 * How the 64K ROM that Excel 1.00 also ran on draws a font size with no bitmap. Running it needs the 64K ROM and
   MAME's `mac512k`, neither of which this project has, and a 400K boot disk, which the 64K ROM needs.
-* Why the value axes of the `Scale Window` samples got the plot height ÷ the label height intervals when `37.0a`
-  first takes off two of the category axis's label heights, and why the bar charts' horizontal value axes
-  (`Scale Bar Window` samples) fit no single width of 0: the plot area `37.0a` reads may be the one before the
-  final layout. `ChartScale.GetLabelSpaces` follows the code.
+* Why a chart label's height counts a pixel less than its font's ascent and descent, and exactly how much room
+  `37.0e` takes for the labels (spec §16.5's layout fields): both are measured above but not derived, so the
+  library takes the provisional plot area as given (`ChartScale.GetLabelSpaces`).

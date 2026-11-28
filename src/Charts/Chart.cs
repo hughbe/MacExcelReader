@@ -629,15 +629,17 @@ public sealed class ChartScale
     /// <summary>
     /// Gets how many tick labels Excel 1.00 reckons fit along an axis when it works out an automatic major unit
     /// (<c>37.0a</c>): along a vertical axis the plot area's height, less two of the other axis's label heights,
-    /// over a label's height; along a horizontal axis the plot area's width over three widths of the digit 0.
-    /// Lengths are in twips (pixels × 20). This follows the code; the value axes of charts Excel 1.00 drew fit the plot
-    /// height over the label height, without the other axis's labels taken off (docs/Display.md, open questions).
+    /// over a label's height; along a horizontal axis the plot area's width over three widths of the digit 0. The
+    /// plot area is the provisional one, before the axis labels are laid out (<c>37.10</c>): the saved plot area plus
+    /// the room the labels took (docs/Display.md, "Automatic axis scales", measures it). Lengths are in twips, 20 a
+    /// pixel.
     /// </summary>
-    /// <param name="plotLength">The plot area's height for a vertical axis, its width for a horizontal one.</param>
+    /// <param name="plotLength">The provisional plot area's height for a vertical axis, its width for a horizontal one.</param>
     /// <param name="horizontal">Whether the axis runs across: a bar chart's value axis or a scatter chart's X axis.</param>
-    /// <param name="labelHeight">The ascent and descent of the axis's label font.</param>
+    /// <param name="labelHeight">The height of the axis's labels (a pixel less than the font's ascent and descent, in the
+    /// charts measured).</param>
     /// <param name="zeroWidth">The width of 0 in the axis's label font.</param>
-    /// <param name="otherLabelHeight">The ascent and descent of the other axis's label font.</param>
+    /// <param name="otherLabelHeight">The height of the other axis's labels.</param>
     public static int GetLabelSpaces(int plotLength, bool horizontal, int labelHeight, int zeroWidth, int otherLabelHeight)
         => horizontal ? plotLength / (3 * zeroWidth) : (plotLength - 2 * otherLabelHeight) / labelHeight;
 }

@@ -1783,6 +1783,9 @@ public class ExperimentTests
         ["Scale Window 250"] = 9,
         ["Scale Bar Window 120"] = 4,
         ["Scale Bar Window 200"] = 7,
+        ["Scale Bar Window 180"] = 6,
+        ["Scale Window Geneva 9"] = 6,
+        ["Scale Window New York 9"] = 5,
     };
 
     public static TheoryData<string> AxisCharts() => new(AllSamples()
