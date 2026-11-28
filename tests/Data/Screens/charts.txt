@@ -1,4 +1,4 @@
-# Excel 1.00's chart windows, captured from MAME's Mac Plus by `dumper excel-test run`: sample (Excel's save of the chart it drew), window title, and the pixels still drawn differently (docs/Display.md "Drawing a chart").
+# Excel 1.00's chart windows, captured from MAME's Mac Plus by `dumper excel-test run`: sample (Excel's save of the chart it drew), window title, and the pixels the renderer draws differently (docs/Display.md "Drawing a chart").
 Draw Library Line	C:C01 saved	0
 Draw Library Column	C:C02 saved	0
 Draw Library Scatter	C:C03 saved	0
@@ -9,7 +9,7 @@ Draw Labels Short	C:C07 saved	0
 Draw Layout Legend Right	C:C08 saved	0
 Draw Layout Bar Titles	C:C09 saved	0
 Draw Scale Stacked Area	C:C10 saved	0
-Draw Scale Log	C:C11 saved	1
+Draw Scale Log	C:C11 saved	0
 Draw Library Pie	C:C12 saved	0
 Draw Legend Column Names	L:L01 saved	0
 Draw Legend Column Three	L:L02 saved	0
@@ -37,17 +37,29 @@ Draw Gallery Column 3	P:P8 saved	0
 Draw Excel Pie Labels	Q:Q1 saved	0
 Draw Excel Pie Percentages	Q:Q2 saved	0
 Draw Excel Pie Percentages 4	Q:Q3 saved	0
-Draw Excel Area Labels	Q:Q4 saved	182
+Draw Excel Area Labels	Q:Q4 saved	0
 Draw Excel Column	Q:Q5 saved	0
 Draw Excel Pie Labels 4	Q:Q6 saved	0
-Draw Excel Area Labels 3	Q:Q7 saved	1
-Draw Excel Line	Q:Q8 saved	1
-Draw Labels Column Negative	R:R1 saved	16
+Draw Excel Area Labels 3	T:T7 saved	0
+Draw Excel Line	T:T8 saved	0
+Draw Labels Column Negative	R:R1 saved	0
 Draw Labels Line	R:R2 saved	0
 Draw Labels Bar	R:R3 saved	0
 Draw Labels Pie Percent	R:R4 saved	0
 Draw Labels Pie Categories	R:R5 saved	0
-Draw Labels Area	R:R6 saved	138
+Draw Labels Area	R:R6 saved	0
 Draw Labels Column Two Series	R:R7 saved	0
 Draw Labels Scatter	R:R8 saved	0
 Draw Labels Pie Values	R:R9 saved	0
+Draw Geneva 9 Window 01	G:G01 saved	0
+Draw Geneva 9 Window 02	G:G02 saved	0
+Draw Geneva 9 Window 03	G:G03 saved	0
+Draw Geneva 9 Window 04	G:G04 saved	0
+Draw Geneva 9 Window 05	G:G05 saved	0
+Draw Geneva 9 Window 06	G:G06 saved	0
+Draw Geneva 9 Window 07	G:G07 saved	0
+Draw Geneva 9 Window 08	G:G08 saved	0
+Draw Geneva 9 Window 09	G:G09 saved	0
+Draw Geneva 9 Window 10	G:G10 saved	0
+Draw Geneva 9 Window 11	G:G11 saved	0
+Draw Geneva 9 Window 12	G:G12 saved	0

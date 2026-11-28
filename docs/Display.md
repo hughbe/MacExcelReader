@@ -436,7 +436,8 @@ coordinate becomes x × (window width − 16) / drawing width, and down, (drawin
 drawing height, both truncated, where the window's size is words 3 and 2 of the chart's window block. A length
 mapped on its own (`32.02`) is truncated the same way, so where Excel draws a line by its length rather than to its
 end, the end can fall a pixel short of the mapped point. The chart's drawing coordinates are the chart area's plus
-the margins (spec §16.5).
+the margins (spec §16.5), its foot standing the top margin up from the drawing's even where the drawing leaves an
+odd twip below it **(inferred: windows sized so show it)**.
 
 **Lines.** Every line is QuickDraw's: a one-pixel pen run from the top end down a scanline at a time, each row a
 slab whose edges start half a pixel in and half the slope along and step by the slope, 16.16 fixed point with the
@@ -452,8 +453,8 @@ slope truncated (the Mac Plus ROM's DrawLine). Excel moves to a point and draws 
   axis's minor then major, then the category axis's. Minor gridlines on a logarithmic scale fall at 2 to 9 times
   each power of ten.
 * **The order**: gridlines, axes and ticks, then the series, then the tick labels, the legend and the text objects.
-  A tick label erases its text's rectangle first, so a marker under a label is cut away (`Draw Log Point Below
-  Axis`) **(inferred: the samples show it)**. The main chart is drawn first and an overlay over it.
+  A tick label erases its box first, as a data label does (below), so a marker or column under a label is cut
+  away (`Draw Log Point Below Axis`, `Draw Labels Column Negative`) **(inferred: the samples show it)**. The main chart is drawn first and an overlay over it.
 * **A line chart's series** (`53.03`) joins its points with segments that each start half a pen from one point and
   run for the distance to the next, its length truncated to pixels. A point is the category's middle (or its edge,
   when the value axis crosses at a category) and the plot area's foot plus the value's share of its height
@@ -474,8 +475,9 @@ one-pixel pen. A bar chart's categories run up from the plot area's foot (`37.24
 running total of the values' sizes below it to the total including its own, as a percentage of the category's
 total in a 100% chart; it still stands a column and the overlap on from the series before it (`39.04`).
 
-**Areas** (`55.00`, `55.01`): each series is a polygon along its tops and back along its base (the series below's
-tops when stacked, which adds the values' sizes; otherwise where the category axis crosses). QuickDraw fills it as
+**Areas** (`55.00`, `55.01`): each series is a polygon along its tops and back along its base: the series below's
+tops when stacked, which adds the values' sizes; otherwise the category axis's line moved half a pen (10 twips)
+toward the series, so the area leaves the axis showing (`55.02`). QuickDraw fills it as
 the region its edges make: each edge that is not upright adds inversion points where its left edge, worked out as
 DrawLine works it out, steps to another pixel (PutLine). The border runs along the tops, up the left side where the
 polygon closes and down the right side a pixel in, but not along the base, clipped to the area's own region, so it
@@ -514,7 +516,7 @@ pixel short of its right and from a pixel below its top **(inferred)**.
   there on the right and ending there on the left. A series label shows each slice's category; a point label its
   value, or with bit 9 its percentage of the total in 0.00% **(inferred)**.
 * An area's series label (`55.03`) is centred halfway up the series between its two middle categories, the
-  middles of the tops and bases averaged, and shows the series' name.
+  middles of the tops and bases averaged (`55.02`'s mode 1), and shows the series' name.
 * A column's point label (`39.01`) stands 2 pixels above the column's end, centred on it, or below a column that
   runs down; a bar's starts 2 pixels beyond its end. A line or scatter point's label (`53.04`) starts 5 pixels
   right of the point, centred on it up and down. They show the value in General **(inferred)**.
@@ -526,11 +528,10 @@ axis. A scatter chart's X labels stand at its X scale's major units, and a logar
 powers of ten. Titles are drawn in their saved boxes, each line centred a pixel inside; the automatic title is
 centred over the plot area at the top of the chart area.
 
-Drawn this way, 47 of 53 chart windows captured from Excel 1.00's screen match it pixel for pixel, title bar and
+Drawn this way, all 64 chart windows captured from Excel 1.00's screen match it pixel for pixel, title bar and
 frame included: line, column, bar, area, scatter, logarithmic and pie charts, stacked and 100%, with overlays,
-exploded slices, legends in every position, data labels, titles, axis titles and smaller windows, among them
-charts Excel made itself from a sheet (`ChartRenderer`, `tests/Data/Screens/charts.txt`). The rest differ by a
-pixel in a label's place (below).
+exploded slices, legends in every position, data labels, titles, axis titles, Geneva 9 labels and windows of a
+dozen sizes, among them charts Excel made itself from a sheet (`ChartRenderer`, `tests/Data/Screens/charts.txt`).
 
 ## Open questions
 
@@ -539,11 +540,6 @@ pixel in a label's place (below).
 * Where Excel 1.03 and 1.5 lay a chart out differently from 1.00: a pixel more for 1.03's value labels of fractions,
   its scatter X labels, and 1.5's automatic titles and axis titles (`Area Drop Lines`, `Scatter`, `BREAK CHART`,
   `Chart 102 Categories`).
-* Where a few labels fall a pixel off. The bottom series' label of a stacked area chart lies a pixel lower than
-  Excel's in two windows (`Draw Excel Area Labels`, `Draw Labels Area`) and right in a third (`Draw Excel Area
-  Labels 3`); a negative column's label erases a pixel more on the left (`Draw Labels Column Negative`); and a
-  gridline pixel under a tick label is left (`Draw Scale Log`). Rounding in twips the samples do not pin down is
-  the likely cause.
 * How Excel draws what no capture has yet: drop and hi-lo lines, arrows, free text, stacked columns' and lines'
   data labels, minor ticks, thicker lines and borders, shadows, borders and backgrounds of the chart area and
   legend, and charts in Excel 1.03 and 1.5.

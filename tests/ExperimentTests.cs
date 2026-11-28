@@ -1514,8 +1514,7 @@ public class ExperimentTests
     }
 
     // Excel 1.00's chart windows captured from the screen (tests/Data/Screens/charts.txt), each with the chart Excel
-    // saved after drawing it, and the pixels the renderer still draws differently: legends and a marker on the
-    // value axis (docs/Display.md "Drawing a chart").
+    // saved after drawing it; the renderer draws every pixel as Excel did (docs/Display.md "Drawing a chart").
     public static TheoryData<string> ChartScreens() => new(File.ReadLines(ChartScreenIndex).Where(l => !l.StartsWith('#')).Select(l => l.Split('\t')[0]));
 
     private static string ChartScreenIndex => Path.Combine(AppContext.BaseDirectory, "Data", "Screens", "charts.txt");
@@ -1545,9 +1544,7 @@ public class ExperimentTests
             }
         }
 
-        // A window that ran off the foot of the screen is captured shorter; the rows it has are compared.
-        Assert.Equal(expected.Width, actual.Width);
-        Assert.True(expected.Height <= actual.Height, $"{actual.Height} rows drawn, {expected.Height} captured");
+        Assert.Equal((expected.Width, expected.Height), (actual.Width, actual.Height));
         Assert.Equal(int.Parse(fields[2], System.Globalization.CultureInfo.InvariantCulture), differ);
     }
 
@@ -1830,6 +1827,9 @@ public class ExperimentTests
     // The label spaces of the samples saved from windows too small for 10 intervals (Display.md).
     private static readonly Dictionary<string, int> s_scaleLabelSpaces = new()
     {
+        // The five smallest Geneva 9 windows captured on screen (SIZE heights 161 to 205; the library's own count agrees).
+        ["Draw Geneva 9 Window 01"] = 6, ["Draw Geneva 9 Window 02"] = 6, ["Draw Geneva 9 Window 03"] = 7,
+        ["Draw Geneva 9 Window 04"] = 8, ["Draw Geneva 9 Window 05"] = 9,
         ["Scale Window 70"] = 1,
         ["Scale Window 130"] = 2,
         ["Scale Window 160"] = 4,

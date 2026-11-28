@@ -53,8 +53,8 @@ The library targets .NET 9 and has no dependencies.
   ROM stretches them. It matches all 27 windows captured from Excel 1.00's screen pixel for pixel, and draws a
   window in about 0.2 ms whatever the sheet's size. `ChartRenderer` draws a chart's window the same way: axes,
   ticks, gridlines, labels, titles, legends, data labels, markers, columns, bars, areas, pies and overlays, with
-  QuickDraw's lines, polygons and arcs. It matches 47 of 53 chart windows captured from Excel 1.00 pixel for
-  pixel, and the rest to a pixel in a label's place.
+  QuickDraw's lines, polygons and arcs. It matches all 64 chart windows captured from Excel 1.00 pixel for
+  pixel.
 - **Workspaces.** Read and write "Resume Excel" files: the settings and the windows Excel reopens.
 - **SYLK export.** `ExportSylk` writes a sheet as SYLK, byte for byte as Excel 1.00's or 1.5's Save As does,
   checked against 178 files the two exported. It allocates nothing per cell.

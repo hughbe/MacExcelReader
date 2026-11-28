@@ -541,7 +541,9 @@ public static class ChartRenderer
     {
         // Chart coordinates are the chart area's, inside the drawing's margins.
         private readonly int _left = chart.DrawingMargins.Left;
-        private readonly int _bottom = document.ChartHeight - chart.DrawingMargins.Top - chart.ChartArea.Box.Height;
+        // The chart area's foot stands the top margin up from the drawing's: the margins are taken as equal (inferred
+        // from windows whose drawing leaves an odd number of twips).
+        private readonly int _bottom = chart.DrawingMargins.Top;
 
         public void Paint()
         {
@@ -740,8 +742,9 @@ public static class ChartRenderer
             var (_, top) = TextPoint(0, axis.LineAt - 2 * axis.TickLength);
             int width = font.MeasureText(label, bold);
             var (boxLeft, _) = TextPoint(x - (width + 2) * TwipsPerPixel / 2, 0);
-            // The text's own rectangle, a pixel inside the box, is erased first (inferred from the samples).
-            canvas.Fill(boxLeft + 1, top + 1, boxLeft + 1 + width, top + 1 + font.Ascent + font.Descent + font.Leading, false);
+            // The box is erased first, as a data label's is, from its left edge to a pixel short of its right and from a
+            // pixel below its top (inferred from the samples).
+            canvas.Fill(boxLeft, top + 1, boxLeft + width + 1, top + 1 + font.Ascent + font.Descent + font.Leading, false);
 
             canvas.Text(font, boxLeft + 1, top + 1 + font.Ascent, label, bold);
         }
@@ -935,6 +938,25 @@ public static class ChartRenderer
             canvas.Clip((left, top, right, bottom));
         }
 
+        // An area's base at a category (55.02): the tops of the series below it when stacked; otherwise the category
+        // axis's line, moved half a pen (10 twips) toward the area's top, so the area leaves the axis's line showing.
+        private int AreaBase(int series, int top, int? below)
+        {
+            if (below is { } stackedBase)
+            {
+                return stackedBase;
+            }
+
+            int axis = chart.CategoryAxis.LineAt;
+            bool upward = top - axis >= 0;
+            if (chart.ValueScale.ValuesInReverseOrder)
+            {
+                upward = !upward;
+            }
+
+            return axis + (upward ? TwipsPerPixel / 2 : -TwipsPerPixel / 2);
+        }
+
         // Where a value falls along the value axis, in twips from the chart area's foot or left (37.23).
         private int ValueAt(double value)
         {
@@ -971,7 +993,6 @@ public static class ChartRenderer
                 }
 
                 points.Clear();
-                double baseValue = Math.Clamp(scale.CrossesAt, scale.Minimum, scale.Maximum);
                 for (int i = 0; i < count; i++)
                 {
                     points.Add(TextPoint(CategoryAt(i, categories), ValueAt(tops[i])));
@@ -979,7 +1000,7 @@ public static class ChartRenderer
 
                 for (int i = count - 1; i >= 0; i--)
                 {
-                    points.Add(TextPoint(CategoryAt(i, categories), ValueAt(chart.IsStacked && s > 0 ? below[i] : baseValue)));
+                    points.Add(TextPoint(CategoryAt(i, categories), AreaBase(s, ValueAt(tops[i]), chart.IsStacked && s > 0 ? ValueAt(below[i]) : null)));
                 }
 
                 var pattern = AreaPattern(s);
@@ -1008,8 +1029,8 @@ public static class ChartRenderer
                     // Halfway between the middles of the two middle categories (55.03): one category when there is
                     // an odd number.
                     int a = (count - 1) / 2, b = count / 2;
-                    int middleA = (ValueAt(tops[a]) + ValueAt(chart.IsStacked && s > 0 ? below[a] : baseValue)) / 2;
-                    int middleB = (ValueAt(tops[b]) + ValueAt(chart.IsStacked && s > 0 ? below[b] : baseValue)) / 2;
+                    int middleA = (ValueAt(tops[a]) + AreaBase(s, ValueAt(tops[a]), chart.IsStacked && s > 0 ? ValueAt(below[a]) : null)) / 2;
+                    int middleB = (ValueAt(tops[b]) + AreaBase(s, ValueAt(tops[b]), chart.IsStacked && s > 0 ? ValueAt(below[b]) : null)) / 2;
                     labels.Add((s, (CategoryAt(a, categories) + CategoryAt(b, categories)) / 2, (middleA + middleB) / 2));
                 }
 
