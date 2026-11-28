@@ -1785,7 +1785,7 @@ Area format word at offset 6:
 |-----:|---------|
 | 15 | Set when a chart is loaded |
 | 14 | Automatic size (text boxes); also set on load |
-| 11–8 | Shadow when non-zero |
+| 11–8 | Shadow: 4 for a drop shadow, which is the only value Excel 1.00 draws or lays out (`31.07`, `38.02`) |
 
 Pattern bytes index Excel's 15 patterns, in the order the Patterns dialogs show them, with 0 meaning
 invisible. "Automatic" is a separate flag where the object supports it. The patterns are 8-byte QuickDraw

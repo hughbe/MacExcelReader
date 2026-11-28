@@ -557,8 +557,11 @@ public sealed class ChartAreaFormat
     /// <summary>Gets or sets the background pattern; <see cref="ChartPattern.None"/> means none.</summary>
     public ChartPattern BackgroundPattern { get => (ChartPattern)_data[_offset + 5]; set => _data[_offset + 5] = (byte)value; }
 
-    /// <summary>Gets or sets whether the box has a shadow (bits 11–8 of the word at offset 6).</summary>
-    public bool HasShadow { get => (GetWord(6) & 0x0F00) != 0; set => SetWord(6, (ushort)(value ? GetWord(6) | 0x0100 : GetWord(6) & ~0x0F00)); }
+    /// <summary>
+    /// Gets or sets whether the area has a drop shadow: the value 4 in bits 11–8 of the word at offset 6, which is
+    /// what Excel 1.00 tests for when it draws and lays out an area (<c>31.07</c>, <c>38.02</c>).
+    /// </summary>
+    public bool HasShadow { get => ((GetWord(6) >> 8) & 0xF) == 4; set => SetWord(6, (ushort)((GetWord(6) & ~0x0F00) | (value ? 0x0400 : 0))); }
 
     /// <summary>Gets or sets whether a text box sizes itself automatically (bit 14 of the word at offset 6).</summary>
     public bool AutomaticSize { get => (GetWord(6) & 0x4000) != 0; set => SetWord(6, (ushort)(value ? GetWord(6) | 0x4000 : GetWord(6) & ~0x4000)); }

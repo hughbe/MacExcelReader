@@ -550,6 +550,7 @@ public static class ChartRenderer
             if (chart.Type == ChartType.Pie)
             {
                 _engine = new ChartLayoutEngine(document, chart, fonts);
+                DrawAreas31();
                 DrawPie();
                 DrawLegend();
                 DrawTexts();
@@ -557,6 +558,7 @@ public static class ChartRenderer
             }
 
             _engine = new ChartLayoutEngine(document, chart, fonts);
+            DrawAreas31();
             DrawGridlines();
             DrawAxes();
             DrawColumns();
@@ -576,10 +578,17 @@ public static class ChartRenderer
             bool titled = false;
             foreach (var text in chart.Texts)
             {
-                if (text.Kind is ChartTextKind.ChartTitle or ChartTextKind.ValueAxisTitle or ChartTextKind.CategoryAxisTitle
-                    && !text.IsAutomaticText && text.Text is { Length: > 0 } content && !text.IsVertical)
+                if (text.Kind == ChartTextKind.FreeText && text.IsArrow)
                 {
-                    DrawTextBox(content, text.Area.Box, _engine.TextFont(text), text.HorizontalAlignment);
+                    DrawArrow(text);
+                }
+                else if (text.Kind is ChartTextKind.ChartTitle or ChartTextKind.ValueAxisTitle or ChartTextKind.CategoryAxisTitle or ChartTextKind.FreeText
+                    && !text.IsAutomaticText && text.Text is { Length: > 0 } content)
+                {
+                    DrawArea(text.Area, text.Area.Box);
+                    DrawTextBox(content, text.Area.Box, _engine.TextFont(text), text.HorizontalAlignment, text.IsVertical,
+                        text.Kind == ChartTextKind.FreeText ? text.VerticalAlignment : ChartVerticalAlignment.Top,
+                        text.Area.Border.Pattern != ChartPattern.None ? 1 : 0);
                 }
 
                 titled |= text.Kind == ChartTextKind.ChartTitle;
@@ -599,14 +608,106 @@ public static class ChartRenderer
             }
         }
 
-        private void DrawTextBox(string content, ChartBox box, (MacBitmapFont Font, bool Bold) textFont, ChartHorizontalAlignment alignment)
+        // The chart area (the main chart's) and the plot area, before anything else (31.03).
+        private void DrawAreas31()
+        {
+            if (chart == document.MainChart)
+            {
+                DrawArea(chart.ChartArea, chart.ChartArea.Box);
+            }
+
+            DrawArea(chart.PlotArea, chart.PlotArea.Box);
+        }
+
+        // An area (31.07–31.09): its box mapped as 38.04 maps it; a shadow (bits 11–8 = 4) a fortieth of the chart
+        // area's smaller side down and right in black; the box filled with its background, or white under a shadow;
+        // then framed with its border's pen.
+        private void DrawArea(ChartAreaFormat format, ChartBox box)
+        {
+            bool shadow = format.HasShadow;
+            if (format.BackgroundPattern == ChartPattern.None && format.Border.Pattern == ChartPattern.None && !shadow)
+            {
+                return;
+            }
+
+            var (left, top, right, bottom) = AreaRectangle(box);
+            if (shadow)
+            {
+                var (areaLeft, areaTop, areaRight, areaBottom) = AreaRectangle(document.MainChart.ChartArea.Box);
+                int offset = Math.Min((areaRight - areaLeft) / 40, (areaBottom - areaTop) / 40);
+                canvas.Pattern(left + offset, top + offset, right + offset, bottom + offset, Patterns[0]);
+            }
+
+            if (shadow || format.BackgroundPattern != ChartPattern.None)
+            {
+                var background = format.BackgroundPattern == ChartPattern.None ? ChartPattern.White : format.BackgroundPattern;
+                canvas.Pattern(left, top, right, bottom, Patterns[(int)background - 1]);
+            }
+
+            if (format.Border.Pattern != ChartPattern.None)
+            {
+                var pen = Patterns[(int)format.Border.Pattern - 1];
+                canvas.Line(left, top, right - 1, top, pen);
+                canvas.Line(left, bottom - 1, right - 1, bottom - 1, pen);
+                canvas.Line(left, top, left, bottom - 1, pen);
+                canvas.Line(right - 1, top, right - 1, bottom - 1, pen);
+            }
+        }
+
+        // A box as a pixel rectangle (38.04): its lower left corner mapped, and its size and 19 twips more mapped as
+        // lengths up and across.
+        private (int Left, int Top, int Right, int Bottom) AreaRectangle(ChartBox box)
+        {
+            var (left, bottom) = TextPoint(box.Left, box.Top);
+            return (left, bottom - canvas.Down(box.Height + 19), left + canvas.Across(box.Width + 19), bottom);
+        }
+
+        // A text object (33.1b): its box erased, from its left edge to a pixel short of its right and from a pixel
+        // below its top (inferred from the samples), then each line aligned a pixel inside, the first baseline a
+        // pixel and an ascent below the top. Vertical text stacks its characters a line apart in a column an M
+        // wide (33.09).
+        private void DrawTextBox(string content, ChartBox box, (MacBitmapFont Font, bool Bold) textFont, ChartHorizontalAlignment alignment, bool vertical = false, ChartVerticalAlignment verticalAlignment = ChartVerticalAlignment.Top, int pen = 0)
         {
             var (font, bold) = textFont;
             var (left, top) = TextPoint(box.Left, box.Top + box.Height);
-            int inner = box.Width / TwipsPerPixel - 2;
-            Span<Range> lines = stackalloc Range[64];
-            var (count, _) = ChartLayoutEngine.Wrap(content, inner, font, bold, lines);
+            if (pen == 0)
+            {
+                canvas.Fill(left, top + 1, left + box.Width / TwipsPerPixel - 1, top + box.Height / TwipsPerPixel, false);
+            }
+
+            // A border moves the text in by its pen and narrows its room (33.1b).
+            left += pen;
+            top += pen;
+            int inner = box.Width / TwipsPerPixel - 2 - 2 * pen;
             int lineHeight = font.Ascent + font.Descent + font.Leading;
+            Span<Range> lines = stackalloc Range[64];
+            int count = vertical ? content.Length : ChartLayoutEngine.Wrap(content, inner, font, bold, lines).Lines;
+            // Free text is aligned up and down in its room, the box less a pixel and the border (33.03).
+            int room = canvas.Down(box.Height) - 1 - 2 * pen, textHeight = count * lineHeight;
+            top += verticalAlignment switch
+            {
+                ChartVerticalAlignment.Center => (room - textHeight + 1) / 2,
+                ChartVerticalAlignment.Bottom => room - textHeight,
+                _ => 0,
+            };
+            if (vertical)
+            {
+                int column = font.MeasureText("M", bold);
+                int x = alignment switch
+                {
+                    ChartHorizontalAlignment.Left => left + 1,
+                    ChartHorizontalAlignment.Right => left + 1 + inner - column,
+                    _ => left + 1 + (inner - column) / 2,
+                };
+
+                for (int i = 0; i < content.Length; i++)
+                {
+                    canvas.Text(font, x, top + 2 + font.Ascent + i * lineHeight, content.AsSpan(i, 1), bold);
+                }
+
+                return;
+            }
+
             for (int i = 0; i < Math.Min(count, lines.Length); i++)
             {
                 var line = content.AsSpan()[lines[i]].TrimEnd(' ');
@@ -615,10 +716,87 @@ public static class ChartRenderer
                 {
                     ChartHorizontalAlignment.Left => left + 1,
                     ChartHorizontalAlignment.Right => left + 1 + inner - width,
-                    _ => left + 1 + (inner - width) / 2,
+                    _ => left + 1 + (inner + 1 - width) / 2,
                 };
 
                 canvas.Text(font, x, top + 1 + font.Ascent + i * lineHeight, line, bold);
+            }
+        }
+
+        // An arrow (52.00–52.04): its head at its tip (record offsets 42 and 44, mem 46 and 48) and its tail at the
+        // point of its box nearest the tip. The head's barbs stand (length + 1) × 100 twips back along the arrow and
+        // (width + 1) × 50 either side, worked out in pixels over the arrow's length (an integer Newton square root).
+        // The shaft runs from the tail to the middle of the barbs, or to the tip when the head is open or there is
+        // none; a filled head is a polygon filled with the arrow's pattern, an open one two lines.
+        private void DrawArrow(ChartText arrow)
+        {
+            var line = arrow.ArrowLine;
+            if (line.Pattern == ChartPattern.None)
+            {
+                return;
+            }
+
+            var pen = Patterns[(int)line.Pattern - 1];
+            var record = arrow.Record;
+            int tipV = (short)System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(record.AsSpan(42));
+            int tipH = (short)System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(record.AsSpan(44));
+            var box = arrow.Area.Box;
+            int tailH = tipH > box.Left + box.Width ? box.Left + box.Width : tipH < box.Left ? box.Left : box.Width / 2 + box.Left;
+            int tailV = tipV > box.Top + box.Height ? box.Top + box.Height : tipV < box.Top ? box.Top : box.Height / 2 + box.Top;
+            int head = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(record.AsSpan(18));
+            int back = canvas.Across((((head >> 8) & 15) + 1) * 100);
+            int side = -canvas.Down((((head >> 12) & 15) + 1) * 50);
+            var tip = TextPoint(tipH, tipV);
+            var tail = TextPoint(tailH, tailV);
+            int dx = tip.X - tail.X, dy = tip.Y - tail.Y;
+            int length = ArrowLength(dx, dy);
+            if (length == 0)
+            {
+                length = 1;
+            }
+
+            long alongX = (long)back * dx, alongY = (long)back * dy, acrossX = (long)side * -dy, acrossY = (long)side * dx;
+            var barb1 = ((int)(tip.X - (acrossX + alongX) / length), (int)(tip.Y - (acrossY + alongY) / length));
+            var barb2 = ((int)(tip.X - (alongX - acrossX) / length), (int)(tip.Y - (alongY - acrossY) / length));
+            bool hasHead = ((head >> 8) & 15) != 0, open = (head & 0x80) != 0;
+            var end = hasHead && !open ? ((barb1.Item1 + barb2.Item1) / 2, (barb1.Item2 + barb2.Item2) / 2) : (tip.X, tip.Y);
+            int weight = (System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(record.AsSpan(16)) >> 12) & 3;
+            int offsetX = canvas.Across(-(TwipsPerPixel * (weight + 1) >> 1)), offsetY = -canvas.Down(TwipsPerPixel * (weight + 1) >> 1);
+            canvas.Line(tail.X + offsetX, tail.Y + offsetY, end.Item1 + offsetX, end.Item2 + offsetY, pen);
+            if (!hasHead)
+            {
+                return;
+            }
+
+            if (open)
+            {
+                canvas.Line(barb1.Item1 + offsetX, barb1.Item2 + offsetY, tip.X + offsetX, tip.Y + offsetY, pen);
+                canvas.Line(barb2.Item1 + offsetX, barb2.Item2 + offsetY, tip.X + offsetX, tip.Y + offsetY, pen);
+            }
+            else
+            {
+                canvas.FillPolygon([(tip.X, tip.Y), barb2, barb1], pen);
+            }
+        }
+
+        // 52.02: a length by Newton's method in integers, from the larger side up.
+        private static int ArrowLength(int dx, int dy)
+        {
+            if (dx == 0 && dy == 0)
+            {
+                return 0;
+            }
+
+            int estimate = Math.Max(Math.Abs(dy), Math.Abs(dx));
+            while (true)
+            {
+                int next = (int)((long)dy * dy / estimate) / 2 + (int)((long)dx * dx / estimate) / 2 + estimate / 2;
+                if (next <= estimate)
+                {
+                    return next;
+                }
+
+                estimate = next;
             }
         }
 
@@ -706,17 +884,17 @@ public static class ChartRenderer
             }
 
             int categories = Math.Max(1, (int)chart.CategoryCount);
-            var first = series[0];
-            for (int i = 0; i < categories; i++)
+            int step = Math.Max(1, (int)chart.CategoriesBetweenTickLabels);
+            for (int i = 0; i < categories; i += step)
             {
-                string label = first.SeriesType == 3 && i < first.CategoryTexts.Count ? first.CategoryTexts[i] : (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                string label = _engine.CategoryTickLabel(i, chart.PlotArea.Box.Width, chart.ChartArea.Box, out int slot);
                 if (chart.IsBar)
                 {
                     DrawLabelBeside(label, CategoryAt(i, categories), ChartAxisKind.Category, font, bold);
                 }
                 else
                 {
-                    DrawLabelBelow(label, CategoryAt(i, categories), chart.CategoryAxis, font, bold);
+                    DrawLabelBelow(label, CategoryAt(i, categories), chart.CategoryAxis, font, bold, slot);
                 }
             }
         }
@@ -737,16 +915,33 @@ public static class ChartRenderer
 
         // A label along an axis across: its box (the text and a pixel's margin) centred on its place, the text a pixel
         // inside, the box's top two tick lengths below the axis.
-        private void DrawLabelBelow(ReadOnlySpan<char> label, int x, ChartAxis axis, MacBitmapFont font, bool bold)
+        private void DrawLabelBelow(ReadOnlySpan<char> label, int x, ChartAxis axis, MacBitmapFont font, bool bold, int slot = int.MaxValue / 2)
         {
-            var (_, top) = TextPoint(0, axis.LineAt - 2 * axis.TickLength);
-            int width = font.MeasureText(label, bold);
+            // Next to the axis, the box's top stands two tick lengths below its line; low, below the plot area; high,
+            // its foot two tick lengths above the plot area.
+            var plot = chart.PlotArea.Box;
+            Span<Range> lines = stackalloc Range[16];
+            var (count, width) = ChartLayoutEngine.Wrap(label, slot, font, bold, lines);
+            count = Math.Max(1, Math.Min(count, lines.Length));
+            int lineHeight = font.Ascent + font.Descent + font.Leading;
+            int boxHeight = (count * lineHeight + 2) * TwipsPerPixel;
+            int topAt = axis.TickLabelPosition switch
+            {
+                TickLabelPosition.Low => plot.Top - 2 * axis.TickLength,
+                TickLabelPosition.High => plot.Top + plot.Height + 2 * axis.TickLength + boxHeight,
+                _ => axis.LineAt - 2 * axis.TickLength,
+            };
+            var (_, top) = TextPoint(0, topAt);
             var (boxLeft, _) = TextPoint(x - (width + 2) * TwipsPerPixel / 2, 0);
             // The box is erased first, as a data label's is, from its left edge to a pixel short of its right and from a
             // pixel below its top (inferred from the samples).
-            canvas.Fill(boxLeft, top + 1, boxLeft + width + 1, top + 1 + font.Ascent + font.Descent + font.Leading, false);
-
-            canvas.Text(font, boxLeft + 1, top + 1 + font.Ascent, label, bold);
+            canvas.Fill(boxLeft, top + 1, boxLeft + width + 1, top + 1 + count * lineHeight, false);
+            for (int i = 0; i < count; i++)
+            {
+                var line = label[lines[i]].TrimEnd(' ');
+                int lineWidth = font.MeasureText(line, bold);
+                canvas.Text(font, boxLeft + 1 + (width - lineWidth + 1) / 2, top + 1 + font.Ascent + i * lineHeight, line, bold);
+            }
         }
 
         // The middle of a category along the category axis: centred in its share when the value axis crosses between
@@ -789,11 +984,17 @@ public static class ChartRenderer
         private int AutomaticIndex(Chart owner, int series)
             => owner == document.MainChart && document.OverlayChart is { } overlay ? series + document.GetSeries(overlay).Count : series;
 
+        // A column or area chart with drop lines starts its automatic patterns 2 on, or 4 with 50% grey drop lines
+        // (3c.03).
+        private static int PatternStart(Chart owner)
+            => owner.Type is ChartType.ColumnOrBar or ChartType.Area && owner.DropLines.Pattern != ChartPattern.None
+                ? (owner.DropLines.Pattern == (ChartPattern)3 ? 4 : 2) : 0;
+
         // An automatic area takes the patterns in turn, series by series (3c.03).
         private ChartPattern AreaPattern(int series)
         {
             var format = SeriesFormat(series);
-            return format.AutomaticArea ? (ChartPattern)(AutomaticIndex(chart, series) % 15 + 1) : format.AreaPattern;
+            return format.AutomaticArea ? (ChartPattern)((PatternStart(chart) + AutomaticIndex(chart, series)) % 15 + 1) : format.AreaPattern;
         }
 
         // Column charts (39.03, 39.04, 39.00): each category's share of the plot area holds its series' columns, a
@@ -930,13 +1131,7 @@ public static class ChartRenderer
         }
 
         // Columns and areas are clipped to the plot area; a line chart's lines and markers, and data labels, are not.
-        private void ClipToPlotArea()
-        {
-            var plot = chart.PlotArea.Box;
-            var (left, top) = TextPoint(plot.Left, plot.Top + plot.Height);
-            var (right, bottom) = TextPoint(plot.Left + plot.Width, plot.Top);
-            canvas.Clip((left, top, right, bottom));
-        }
+        private void ClipToPlotArea() => canvas.Clip(PlotRectangle());
 
         // An area's base at a category (55.02): the tops of the series below it when stacked; otherwise the category
         // axis's line, moved half a pen (10 twips) toward the area's top, so the area leaves the axis's line showing.
@@ -981,6 +1176,7 @@ public static class ChartRenderer
             ClipToPlotArea();
             var points = new List<(int X, int Y)>();
             var labels = new List<(int Series, int X, int Y)>();
+            double[] topsOfLast = [];
             for (int s = 0; s < all.Count; s++)
             {
                 var values = all[s].Values;
@@ -1038,11 +1234,22 @@ public static class ChartRenderer
                 {
                     Array.Copy(tops, below, count);
                 }
+
+                topsOfLast = tops;
+            }
+
+            // Drop lines from the top series' points, once every area is drawn (55.00).
+            canvas.Clip(null);
+            if (all.Count > 0)
+            {
+                for (int i = 0; i < Math.Min(all[^1].Values.Count, categories); i++)
+                {
+                    DrawDropLine(CategoryAt(i, categories), ValueAt(topsOfLast[i]));
+                }
             }
 
             // A series' label (55.03) is centred halfway up the series between its two middle categories, once every
             // area is drawn.
-            canvas.Clip(null);
             foreach (var (s, x, y) in labels)
             {
                 DrawLabel(chart.SeriesLabelTemplate, all[s].Name, x, y, 0);
@@ -1251,9 +1458,6 @@ public static class ChartRenderer
             int bottom = vertical switch { 0 => y, 1 => y - (boxHeight >> 1), _ => y - boxHeight };
             var box = new ChartBox((short)bottom, (short)left, (short)boxHeight, (short)boxWidth);
             var (boxLeft, boxTop) = TextPoint(left, bottom + boxHeight);
-            // The box is erased first, from its left edge to a pixel short of its right and from a pixel below its top
-            // (inferred from the samples).
-            canvas.Fill(boxLeft, boxTop + 1, boxLeft + boxWidth / TwipsPerPixel - 1, boxTop + boxHeight / TwipsPerPixel, false);
             DrawTextBox(text, box, (font, bold), template.HorizontalAlignment);
         }
 
@@ -1301,6 +1505,7 @@ public static class ChartRenderer
             }
 
             var box = chart.LegendArea.Box;
+            DrawArea(chart.LegendArea, box);
             bool stacked = chart.LegendPosition is LegendPosition.Vertical or LegendPosition.Corner;
             var layout = _engine.GetLegendLayout(chart.ChartArea.Box, stacked);
             var (font, bold) = _engine.LegendFont;
@@ -1370,7 +1575,7 @@ public static class ChartRenderer
                 {
                     var pattern = owner.Type == ChartType.Pie || categories
                         ? (!format.AutomaticArea ? format.AreaPattern : owner.VaryByCategory || owner.Type != ChartType.Pie ? (ChartPattern)((owner.VaryByCategory ? entry : 0) % 15 + 1) : ChartPattern.None)
-                        : (format.AutomaticArea ? (ChartPattern)(AutomaticIndex(owner, series) % 15 + 1) : format.AreaPattern);
+                        : (format.AutomaticArea ? (ChartPattern)((PatternStart(owner) + AutomaticIndex(owner, series)) % 15 + 1) : format.AreaPattern);
                     if (pattern != ChartPattern.None)
                     {
                         canvas.Pattern(left, baseline - ascent, left + width, baseline, Patterns[(int)pattern - 1]);
@@ -1391,38 +1596,61 @@ public static class ChartRenderer
                 return;
             }
 
+            // 53.00: each series' lines, with a drop line from each point as it goes; then the hi-lo lines (53.01);
+            // then every series' markers (53.03).
             int categories = Math.Max(1, (int)chart.CategoryCount);
             var all = document.GetSeries(chart);
-            var points = new List<(int X, int Y)>();
+            bool single = all.Count == 1;
+            for (int s = 0; s < all.Count; s++)
+            {
+                var series = all[s];
+                var values = series.Values;
+                int count = scatter ? values.Count : Math.Min(values.Count, categories);
+                (int X, int Y)? previous = null;
+                for (int i = 0; i < count; i++)
+                {
+                    int x = scatter ? XAt(i < series.CategoryValues.Count ? series.CategoryValues[i].ToDouble() : i + 1) : CategoryAt(i, categories);
+                    var twips = (X: x, Y: ValueAt(values[i].ToDouble()));
+                    // The segment to a point takes that point's format (its own, with one series); a scatter chart
+                    // draws lines only where the line is not automatic.
+                    var format = SeriesFormat(single ? i : s);
+                    bool drawn = format.Line.Pattern != ChartPattern.None && (!scatter || !format.AutomaticLine);
+                    if (previous is { } p && drawn)
+                    {
+                        // Each segment starts half a pen from its point and runs for its length in pixels (32.07).
+                        var start = LinePoint(p.X, p.Y);
+                        int dx = canvas.Across(twips.X - p.X), dy = -canvas.Down(twips.Y - p.Y);
+                        canvas.Line(start.X, start.Y, start.X + dx, start.Y + dy, Patterns[(int)format.Line.Pattern - 1]);
+                    }
+
+                    if (!scatter)
+                    {
+                        DrawDropLine(twips.X, twips.Y);
+                    }
+
+                    previous = twips;
+                }
+            }
+
+            if (!scatter)
+            {
+                DrawHiLoLines(all, categories);
+            }
+
             for (int s = 0; s < all.Count; s++)
             {
                 var series = all[s];
                 var values = series.Values;
                 var format = SeriesFormat(s);
-                (int X, int Y)? previous = null;
-                points.Clear();
                 int count = scatter ? values.Count : Math.Min(values.Count, categories);
                 for (int i = 0; i < count; i++)
                 {
                     // A scatter chart's points stand at their X values; a line chart's at their categories.
+                    var pointFormat = single ? SeriesFormat(i) : format;
+                    var marker = pointFormat.AutomaticMarker ? (ChartMarker)(AutomaticIndex(chart, s) % 8 + 1) : pointFormat.Marker;
                     int x = scatter ? XAt(i < series.CategoryValues.Count ? series.CategoryValues[i].ToDouble() : i + 1) : CategoryAt(i, categories);
-                    var twips = (X: x, Y: ValueAt(values[i].ToDouble()));
-                    if (!scatter && previous is { } p)
-                    {
-                        // Each segment starts half a pen from its point and runs for its length in pixels (32.07).
-                        var start = LinePoint(p.X, p.Y);
-                        int dx = canvas.Across(twips.X - p.X), dy = -canvas.Down(twips.Y - p.Y);
-                        canvas.Line(start.X, start.Y, start.X + dx, start.Y + dy);
-                    }
-
-                    previous = twips;
-                    points.Add(TextPoint(twips.X, twips.Y));
-                }
-
-                var marker = format.AutomaticMarker ? (ChartMarker)(AutomaticIndex(chart, s) % 8 + 1) : format.Marker;
-                foreach (var (x, y) in points)
-                {
-                    DrawMarker(x, y, marker);
+                    var (px, py) = TextPoint(x, ValueAt(values[i].ToDouble()));
+                    DrawMarker(px, py, marker);
                 }
 
                 // Point labels (53.04) start 5 pixels right of their point, centred on it up and down.
@@ -1435,6 +1663,72 @@ public static class ChartRenderer
                     }
                 }
             }
+        }
+
+        // Drop and hi-lo lines are clipped to the plot area widened by 4 pixels each side (3c.06).
+        private void ClipToWidenedPlotArea()
+        {
+            var (left, top, right, bottom) = PlotRectangle();
+            canvas.Clip((left - 4, top, right + 4, bottom));
+        }
+
+        // The plot area as a pixel rectangle (38.04): its lower left corner mapped, and its size and 19 twips more
+        // mapped as lengths up and across.
+        private (int Left, int Top, int Right, int Bottom) PlotRectangle() => AreaRectangle(chart.PlotArea.Box);
+
+        // A drop line (3c.04) runs from half a pen off a point down (or up) to the category axis, its length truncated
+        // to pixels; none is drawn where the value axis stands (3c.05).
+        private void DrawDropLine(int x, int y)
+        {
+            var line = chart.DropLines;
+            if (line.Pattern == ChartPattern.None || (chart.ValueAxis.Line.Pattern != ChartPattern.None && chart.ValueAxis.LineAt == x))
+            {
+                return;
+            }
+
+            int axis = chart.CategoryAxis.LineAt;
+            if (axis == y)
+            {
+                return;
+            }
+
+            ClipToWidenedPlotArea();
+            var (px, py) = LinePoint(x, y);
+            canvas.Line(px, py, px, py + canvas.Down(y - axis), Patterns[(int)line.Pattern - 1]);
+            canvas.Clip(null);
+        }
+
+        // Hi-lo lines (53.01): at each category, from half a pen off the lowest point up to the highest.
+        private void DrawHiLoLines(IReadOnlyList<ChartSeries> all, int categories)
+        {
+            var line = chart.HiLoLines;
+            if (line.Pattern == ChartPattern.None)
+            {
+                return;
+            }
+
+            ClipToWidenedPlotArea();
+            for (int i = 0; i < categories; i++)
+            {
+                int low = int.MaxValue, high = int.MinValue;
+                foreach (var series in all)
+                {
+                    if (i < series.Values.Count)
+                    {
+                        int y = ValueAt(series.Values[i].ToDouble());
+                        low = Math.Min(low, y);
+                        high = Math.Max(high, y);
+                    }
+                }
+
+                if (low <= high)
+                {
+                    var (px, py) = LinePoint(CategoryAt(i, categories), low);
+                    canvas.Line(px, py, px, py - canvas.Down(high - low), Patterns[(int)line.Pattern - 1]);
+                }
+            }
+
+            canvas.Clip(null);
         }
 
         // Where an X value falls across a scatter chart's plot area.
@@ -1623,11 +1917,12 @@ public static class ChartRenderer
             {
                 int x = upright.LineAt;
                 var (px, py) = LinePoint(x, bottom);
-                canvas.Line(px, py, px, py - canvas.Down(top - bottom));
+                var pen = Patterns[(int)upright.Line.Pattern - 1];
+                canvas.Line(px, py, px, py - canvas.Down(top - bottom), pen);
                 int count = TickCount(!chart.IsBar);
                 for (int i = 0; i <= count && count > 0; i++)
                 {
-                    TickAcross(x, bottom + (int)((long)(top - bottom) * i / count), upright.MajorTickMarks);
+                    TickAcross(x, bottom + (int)((long)(top - bottom) * i / count), upright.MajorTickMarks, pen);
                 }
             }
 
@@ -1635,11 +1930,12 @@ public static class ChartRenderer
             {
                 int y = across.LineAt;
                 var (px, py) = LinePoint(left, y);
-                canvas.Line(px, py, px + canvas.Across(right - left), py);
+                var pen = Patterns[(int)across.Line.Pattern - 1];
+                canvas.Line(px, py, px + canvas.Across(right - left), py, pen);
                 int count = TickCount(chart.IsBar);
                 for (int i = 0; i <= count && count > 0; i++)
                 {
-                    TickUp(left + (int)((long)(right - left) * i / count), y, across.MajorTickMarks);
+                    TickUp(left + (int)((long)(right - left) * i / count), y, across.MajorTickMarks, pen);
                 }
             }
         }
@@ -1676,7 +1972,7 @@ public static class ChartRenderer
 
         // A tick on an upright axis (3a.04, 3a.05): from its start, half a pen off, for its length in pixels; a tick
         // outside or across starts its length left of the axis.
-        private void TickAcross(int x, int y, TickMarkType marks)
+        private void TickAcross(int x, int y, TickMarkType marks, ulong pen)
         {
             if (marks == TickMarkType.Invisible)
             {
@@ -1686,11 +1982,11 @@ public static class ChartRenderer
             int length = MajorTickLength;
             int start = marks is TickMarkType.Outside or TickMarkType.Cross ? x - length : x;
             var (px, py) = LinePoint(start, y);
-            canvas.Line(px, py, px + canvas.Across(marks == TickMarkType.Cross ? 2 * length : length), py);
+            canvas.Line(px, py, px + canvas.Across(marks == TickMarkType.Cross ? 2 * length : length), py, pen);
         }
 
         // A tick on an axis across: one outside or across starts its length below the axis and runs up.
-        private void TickUp(int x, int y, TickMarkType marks)
+        private void TickUp(int x, int y, TickMarkType marks, ulong pen)
         {
             if (marks == TickMarkType.Invisible)
             {
@@ -1700,7 +1996,7 @@ public static class ChartRenderer
             int length = MajorTickLength;
             int start = marks is TickMarkType.Outside or TickMarkType.Cross ? y - length : y;
             var (px, py) = LinePoint(x, start);
-            canvas.Line(px, py, px, py - canvas.Down(marks == TickMarkType.Cross ? 2 * length : length));
+            canvas.Line(px, py, px, py - canvas.Down(marks == TickMarkType.Cross ? 2 * length : length), pen);
         }
     }
 }

@@ -763,6 +763,37 @@ internal sealed class ChartLayoutEngine
         return Box(lines, widest, _categoryFont);
     }
 
+    /// <summary>
+    /// A category's tick label as the layout measures it (37.2b): its number when the categories have no reference,
+    /// its text, or its value in the series' format for them (General in the slot's room), and the slot, in
+    /// pixels, it wraps in.
+    /// </summary>
+    internal string CategoryTickLabel(int index, int plotWidth, ChartBox area, out int slot)
+    {
+        var first = _document.SeriesOf(_chart)[0];
+        int step = Math.Max(1, (int)_chart.CategoriesBetweenTickLabels);
+        int categoriesWord = BinaryPrimitives.ReadUInt16BigEndian(first.Header.AsSpan(14));
+        Span<char> number = stackalloc char[ExcelValueFormatter.GeneralSize(64)];
+        if (first.SeriesType != 3 && categoriesWord >> 14 == 0)
+        {
+            int labels = Math.Max(1, ((_chart.ValueAxisCrossesBetweenCategories ? 1 : 0) + CategoryCount() - 1) / step);
+            slot = (_chart.IsBar ? area.Width / 3 : Math.Max(plotWidth / labels, 210)) / TwipsPerPixel;
+            return (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        slot = SlotWidth(plotWidth, area, step) / TwipsPerPixel;
+        if (first.SeriesType == 3)
+        {
+            return index < first.CategoryTexts.Count ? first.CategoryTexts[index] : string.Empty;
+        }
+
+        int format = (categoriesWord >> 8) & 0x3F;
+        double value = index < first.CategoryValues.Count ? first.CategoryValues[index].ToDouble() : index + 1;
+        return format == 0
+            ? number[..FormatInRoom(value, Math.Max(slot, 4 * _categoryFont.Measure("0")), _categoryFont, number)].ToString()
+            : ExcelValueFormatter.Format(value, format).ToString();
+    }
+
     // The width a category label wraps to: a third of the chart area's width in a bar chart; otherwise the plot
     // area's width shared among the labels, but never less than a 0.
     private int SlotWidth(int plotWidth, ChartBox area, int step)
@@ -907,7 +938,7 @@ internal sealed class ChartLayoutEngine
 
     // A text object's font: the Macintosh font number and size at record bytes 18 and 19 (mem 20 and 21, spec §16.7);
     // 0 and 0, as the library writes, are the System font at 12.
-    private LabelFont GetTextFont(ChartText text) => GetFont(text.Record[18], text.Record[19] == 0 ? 12 : text.Record[19], bold: false);
+    private LabelFont GetTextFont(ChartText text) => GetFont(text.Record[18], text.Record[19] == 0 ? 12 : text.Record[19], bold: (text.Record[13] & 0x10) != 0);
 
     /// <summary>A text object's font, or the automatic title's (Geneva 9).</summary>
     internal (MacBitmapFont Font, bool Bold) TextFont(ChartText? text)

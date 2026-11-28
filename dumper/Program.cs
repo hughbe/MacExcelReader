@@ -1200,6 +1200,14 @@ sealed class NewChartSettings : CommandSettings
     [Description("Pull one pie slice (counted from 0) out, as 1=25. Repeatable.")]
     public string[] ExplodePoints { get; init; } = [];
 
+    [CommandOption("--drop-lines")]
+    [Description("Drop lines from each point to the category axis (line and area charts).")]
+    public bool DropLines { get; init; }
+
+    [CommandOption("--hilo-lines")]
+    [Description("Hi-lo lines joining each category's highest and lowest points (line charts).")]
+    public bool HiLoLines { get; init; }
+
     [CommandOption("--labels <KIND>")]
     [Description("Data labels on every point: values, or percent (pies).")]
     public string? Labels { get; init; }
@@ -1232,6 +1240,15 @@ sealed class NewChartCommand : Command<NewChartSettings>
         document.MainChart.IsStacked = settings.Stacked || settings.Percent;
         document.MainChart.IsPercent = settings.Percent;
         document.MainChart.VaryByCategory = settings.Vary;
+        if (settings.DropLines)
+        {
+            document.MainChart.DropLines.Pattern = ChartPattern.Solid;
+        }
+
+        if (settings.HiLoLines)
+        {
+            document.MainChart.HiLoLines.Pattern = ChartPattern.Solid;
+        }
         var defaultFormat = document.MainChart.DefaultSeriesFormat;
         if (settings.Explode is { } explode)
         {
