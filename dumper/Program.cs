@@ -47,6 +47,12 @@ public sealed class Program
                 branch.AddCommand<RunCommand>("run")
                     .WithDescription("Run Driver in Excel 1.00 under MAME, headless, optionally capturing windows, and write Excel's saves back to the disk.")
                     .WithExample("excel-test", "run", "Test.dsk", "--capture", "Test:Sheet saved");
+                branch.AddCommand<ExperimentCommand>("experiment")
+                    .WithDescription("Pack, run (Excel 1.00 in MAME) and check files in one go, over as many disks as they need, reporting what each command returned.")
+                    .WithExample("excel-test", "experiment", "out/Sheet1", "out/Sheet2", "-o", "results");
+                branch.AddCommand<DiskFilesCommand>("files")
+                    .WithDescription("List the files on a floppy image (MFS or HFS), or copy them out with -o")
+                    .WithExample("excel-test", "files", "Test.dsk", "-o", "out");
                 branch.AddCommand<CheckCommand>("check")
                     .WithDescription("After Driver has run in Excel, compare Excel's results and re-saved copies with the originals.")
                     .WithExample("excel-test", "check", "Test.dsk");
@@ -73,7 +79,7 @@ public sealed class Program
                 .WithDescription("Export the sheet as SYLK, byte for byte as Excel 1.00's Save As does.")
                 .WithExample("sylk", "Expenses", "-o", "Expenses.slk");
             config.AddCommand<RenderCommand>("render")
-                .WithDescription("Draw a sheet's window as Excel 1.00 shows it, as a PNG, with the fonts of a System file.")
+                .WithDescription("Draw a sheet's or chart's window as Excel 1.00 shows it, as a PNG, with the fonts of a System file.")
                 .WithExample("render", "Expenses", "--system", "Excel-Data.img", "-o", "Expenses.png");
         });
 
@@ -326,11 +332,11 @@ sealed class CellCommand : Command<CellSettings>
             return 0;
         }
 
-        Describe(document, address, cell);
+        Describe(document, address, cell, settings.Input);
         return 0;
     }
 
-    internal static void Describe(ExcelDocument document, ExcelCellAddress address, ExcelCell cell)
+    internal static void Describe(ExcelDocument document, ExcelCellAddress address, ExcelCell cell, string? path = null)
     {
         var table = new Table().Title($"[bold]{address}[/]").AddColumn("Field").AddColumn("Value");
         table.AddRow("Type", cell.Type.ToString());
@@ -349,7 +355,24 @@ sealed class CellCommand : Command<CellSettings>
         table.AddRow("Protection", $"locked {Program.YesNo(cell.IsLocked)}, hidden {Program.YesNo(cell.IsHidden)}");
         table.AddRow("Attribute word", $"0x{cell.RawAttributes:X4}");
 
-        if (cell.Formula is { } formula)
+        ExcelFormula? decoded = null;
+        try
+        {
+            decoded = cell.Formula;
+        }
+        catch (ExcelFormatException e)
+        {
+            // Show what the file holds, so a formula the library cannot read can still be looked at.
+            table.AddRow("Formula", $"[red]cannot be read: {Program.Escape(e.Message)}[/]");
+            if (path is not null && ExcelDocument.Load(path).Cells.TryGetRawData(address.Row, address.Column, out var record) && record.Length > 15)
+            {
+                int length = Math.Min(record.Length, 15 + record[14] + 32);
+                table.AddRow("Record", Program.Hex(record[..length]) + "  (value 8, reserved 3, column, row word, length, expression, then fix-ups)");
+                table.AddRow("Expression", Program.Hex(record.Slice(15, Math.Min(record[14], record.Length - 15))));
+            }
+        }
+
+        if (decoded is { } formula)
         {
             var result = formula.Result;
             table.AddRow("Formula", Program.Escape(formula.ToText(document)));
@@ -363,7 +386,7 @@ sealed class CellCommand : Command<CellSettings>
 
         AnsiConsole.Write(table);
 
-        if (cell.Formula is { } f)
+        if (decoded is { } f)
         {
             AnsiConsole.Write(TokenTable(f.Expression.ToArray()));
         }
@@ -672,12 +695,23 @@ sealed class DumpCommand : Command<FileSettings>
     }
 }
 
-sealed class ChartCommand : Command<FileSettings>
+sealed class ChartSettings : FileSettings
 {
-    public override int Execute(CommandContext context, FileSettings settings, CancellationToken cancellationToken)
-        => Dump(ChartDocument.Load(settings.Input));
+    [CommandOption("-s|--system <FILE>")]
+    [Description("Excel 1.00's Data disk image or a System file's resource fork (default: $MACEXCEL_SYSTEM), to measure the tick labels in the System's fonts and show how many fit along each axis.")]
+    public string? System { get; init; }
+}
 
-    internal static int Dump(ChartDocument document)
+sealed class ChartCommand : Command<ChartSettings>
+{
+    public override int Execute(CommandContext context, ChartSettings settings, CancellationToken cancellationToken)
+    {
+        string? system = settings.System ?? Environment.GetEnvironmentVariable("MACEXCEL_SYSTEM");
+        var fonts = string.IsNullOrEmpty(system) || !File.Exists(system) ? null : RenderCommand.LoadFonts(system);
+        return Dump(ChartDocument.Load(settings.Input), fonts);
+    }
+
+    internal static int Dump(ChartDocument document, MacExcelReader.Rendering.MacFontSet? fonts = null)
     {
         AnsiConsole.MarkupLine($"[bold]Chart file[/] version {document.Version}, signature 0x{document.Signature:X4}, {document.Charts.Count} chart(s), {document.Series.Count} series, page setup {Program.YesNo(document.PageSetup is not null)}");
         foreach (var chart in document.Charts)
@@ -703,10 +737,31 @@ sealed class ChartCommand : Command<FileSettings>
             if (chart != document.MainChart)
             {
                 table.AddRow("Shares main chart's scale", $"value axis {Program.YesNo(chart.SharesValueAxisScale)}, X axis {Program.YesNo(chart.SharesXAxisScale)}");
+                table.AddRow("First series", chart.FirstOverlaySeries.ToString(CultureInfo.InvariantCulture));
             }
 
             var (top, left) = chart.DrawingMargins;
             table.AddRow("Layout (twips)", $"margins top {top}, left {left}; chart area {Box(chart.ChartArea.Box)}; plot area {Box(chart.PlotArea.Box)}; tick length {chart.ValueAxis.TickLength}");
+            if (fonts is not null && chart.Type != ChartType.Pie)
+            {
+                // The label boxes Excel lays out and how many labels it reckons fit (37.09, 37.0a; docs/Display.md).
+                string Labels(ChartAxisKind axis)
+                {
+                    var (height, width) = document.GetTickLabelSize(chart, fonts, axis);
+                    return $"{height} × {width}";
+                }
+
+                table.AddRow("Tick labels (twips)", $"value {Labels(ChartAxisKind.Value)}, category {Labels(ChartAxisKind.Category)}; "
+                    + $"{document.GetLabelSpaces(chart, fonts)} fit up the value axis"
+                    + (chart.XScale is null ? string.Empty : $", {document.GetLabelSpaces(chart, fonts, ChartAxisKind.Category)} along the X axis"));
+                if (document.GetSeries(chart).Count > 0)
+                {
+                    var layout = document.LayOut(chart, fonts);
+                    table.AddRow("Laid out (twips)", $"chart area {Box(layout.ChartArea)}; plot area {Box(layout.PlotArea)}; tick length {layout.TickLength}; "
+                        + $"{layout.ValueLabelSpaces} labels fit up the value axis");
+                }
+            }
+
             table.AddRow("Default series format", PointFormat(chart.DefaultSeriesFormat));
             for (int i = 0; i < chart.PointFormats.Count; i++)
             {
@@ -767,10 +822,13 @@ sealed class ChartCommand : Command<FileSettings>
             + (format.Explosion != 0 ? $"; pulled out {format.Explosion}%" : string.Empty);
 
     private static string Axis(ChartAxis axis)
-        => $"ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition} (drawn at {axis.TickLabelsAt}); line {(axis.Line.Pattern == ChartPattern.None ? "hidden" : $"{axis.Line.Pattern} {axis.Line.Weight} at {axis.LineAt}")}; gridlines major {axis.MajorGridlines.Pattern}, minor {axis.MinorGridlines.Pattern}";
+        => $"font {axis.SavedFontNumber} size {axis.SavedFontSize}{(axis.IsBold ? " bold" : string.Empty)}; ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition} (drawn at {axis.TickLabelsAt}); line {(axis.Line.Pattern == ChartPattern.None ? "hidden" : $"{axis.Line.Pattern} {axis.Line.Weight} at {axis.LineAt}")}; gridlines major {axis.MajorGridlines.Pattern}, minor {axis.MinorGridlines.Pattern}";
 
+    // Automatic values show what the record holds too: what Excel last worked out when it drew the chart.
     private static string Scale(ChartScale scale)
-        => $"min {(scale.AutomaticMinimum ? "auto" : scale.Minimum)}, max {(scale.AutomaticMaximum ? "auto" : scale.Maximum)}, major {(scale.AutomaticMajorUnit ? "auto" : scale.MajorUnit)}, minor {(scale.AutomaticMinorUnit ? "auto" : scale.MinorUnit)}, crosses {(scale.AutomaticCrossesAt ? "auto" : scale.CrossesAt)}{(scale.IsLogarithmic ? ", log" : string.Empty)}{(scale.ValuesInReverseOrder ? ", reversed" : string.Empty)}";
+        => $"min {Value(scale.AutomaticMinimum, scale.Minimum)}, max {Value(scale.AutomaticMaximum, scale.Maximum)}, major {Value(scale.AutomaticMajorUnit, scale.MajorUnit)}, minor {Value(scale.AutomaticMinorUnit, scale.MinorUnit)}, crosses {Value(scale.AutomaticCrossesAt, scale.CrossesAt)}{(scale.IsLogarithmic ? ", log" : string.Empty)}{(scale.ValuesInReverseOrder ? ", reversed" : string.Empty)}";
+
+    private static string Value(bool automatic, double value) => automatic ? $"auto ({value.ToString("R", CultureInfo.InvariantCulture)})" : value.ToString("R", CultureInfo.InvariantCulture);
 }
 
 static class RangeParser
@@ -1069,6 +1127,90 @@ sealed class NewChartSettings : CommandSettings
     [CommandOption("--bar")]
     [Description("Horizontal bars (with ColumnOrBar).")]
     public bool Bar { get; init; }
+
+    [CommandOption("--scale <FIELD=VALUE>")]
+    [Description("Fix a value-axis scale field instead of leaving it automatic: min, max, major, minor or crosses, as min=2. Repeatable.")]
+    public string[] Scale { get; init; } = [];
+
+    [CommandOption("--log")]
+    [Description("A logarithmic value axis.")]
+    public bool Log { get; init; }
+
+    [CommandOption("--overlay <TYPE>")]
+    [Description("Add an overlay chart of this type, plotting the series from --overlay-from on.")]
+    public ChartType? Overlay { get; init; }
+
+    [CommandOption("--overlay-from <N>")]
+    [Description("The overlay's first series, counted from 1 (default: the last series).")]
+    public int? OverlayFrom { get; init; }
+
+    [CommandOption("--share")]
+    [Description("Scale the overlay's value axis over the data of both charts.")]
+    public bool Share { get; init; }
+
+    [CommandOption("--share-x")]
+    [Description("Scale a scatter overlay's X axis over the data of both charts.")]
+    public bool ShareX { get; init; }
+
+    [CommandOption("--hide-overlay-axes")]
+    [Description("Hide the overlay's axes, as Excel does when it makes an overlay.")]
+    public bool HideOverlayAxes { get; init; }
+
+    [CommandOption("--legend <POSITION>")]
+    [Description("Add a legend, sized automatically: Bottom, Corner, Top or Vertical (right).")]
+    public LegendPosition? Legend { get; init; }
+
+    [CommandOption("--value-title <TEXT>")]
+    [Description("A value-axis title.")]
+    public string? ValueTitle { get; init; }
+
+    [CommandOption("--category-title <TEXT>")]
+    [Description("A category-axis title.")]
+    public string? CategoryTitle { get; init; }
+
+    [CommandOption("--axis-font <FONT_SIZE>")]
+    [Description("Both axes' tick-label font, as a Macintosh font number and size: 3:9 for Geneva 9.")]
+    public string? AxisFont { get; init; }
+
+    [CommandOption("--hide-value-axis")]
+    [Description("Hide the main chart's value axis.")]
+    public bool HideValueAxis { get; init; }
+
+    [CommandOption("--name <TEXT>")]
+    [Description("The next series' name, in order; repeatable. Default: Series 1, Series 2 and so on.")]
+    public string[] Names { get; init; } = [];
+
+    [CommandOption("--stacked")]
+    [Description("Stack the series (column, bar, line and area charts).")]
+    public bool Stacked { get; init; }
+
+    [CommandOption("--percent")]
+    [Description("Stack the series as percentages of each category's total.")]
+    public bool Percent { get; init; }
+
+    [CommandOption("--vary")]
+    [Description("Vary the patterns by category.")]
+    public bool Vary { get; init; }
+
+    [CommandOption("--explode <PERCENT>")]
+    [Description("Pull every pie slice out by this percentage of the radius.")]
+    public ushort? Explode { get; init; }
+
+    [CommandOption("--explode-point <POINT=PERCENT>")]
+    [Description("Pull one pie slice (counted from 0) out, as 1=25. Repeatable.")]
+    public string[] ExplodePoints { get; init; } = [];
+
+    [CommandOption("--drop-lines")]
+    [Description("Drop lines from each point to the category axis (line and area charts).")]
+    public bool DropLines { get; init; }
+
+    [CommandOption("--hilo-lines")]
+    [Description("Hi-lo lines joining each category's highest and lowest points (line charts).")]
+    public bool HiLoLines { get; init; }
+
+    [CommandOption("--labels <KIND>")]
+    [Description("Data labels on every point: values, or percent (pies).")]
+    public string? Labels { get; init; }
 }
 
 /// <summary>
@@ -1089,7 +1231,115 @@ sealed class NewChartCommand : Command<NewChartSettings>
         for (int i = 0; i < series.Length; i++)
         {
             var values = series[i].Split(',').Select(v => double.Parse(v, CultureInfo.InvariantCulture)).ToList();
-            document.Series.Add(ChartSeries.Create($"Series {i + 1}", values, "Data", $"R{i + 1}C1:R{i + 1}C{values.Count}"));
+            string name = i < settings.Names.Length ? settings.Names[i] : $"Series {i + 1}";
+            document.Series.Add(ChartSeries.Create(name, values, "Data", $"R{i + 1}C1:R{i + 1}C{values.Count}"));
+        }
+
+        var scale = document.MainChart.ValueScale;
+        scale.IsLogarithmic = settings.Log;
+        document.MainChart.IsStacked = settings.Stacked || settings.Percent;
+        document.MainChart.IsPercent = settings.Percent;
+        document.MainChart.VaryByCategory = settings.Vary;
+        if (settings.DropLines)
+        {
+            document.MainChart.DropLines.Pattern = ChartPattern.Solid;
+        }
+
+        if (settings.HiLoLines)
+        {
+            document.MainChart.HiLoLines.Pattern = ChartPattern.Solid;
+        }
+        var defaultFormat = document.MainChart.DefaultSeriesFormat;
+        if (settings.Explode is { } explode)
+        {
+            defaultFormat.Explosion = explode;
+        }
+
+        foreach (string point in settings.ExplodePoints)
+        {
+            var parts = point.Split('=', 2);
+            document.MainChart.AddPointFormat(byte.Parse(parts[0], CultureInfo.InvariantCulture)).Explosion = ushort.Parse(parts[1], CultureInfo.InvariantCulture);
+        }
+
+        switch (settings.Labels)
+        {
+            case null:
+                break;
+            case "values":
+                defaultFormat.PointLabels = true;
+                break;
+            case "percent":
+                defaultFormat.PointLabels = defaultFormat.PercentLabels = true;
+                break;
+            default:
+                throw new ArgumentException($"Unknown labels {settings.Labels}: use values or percent.");
+        }
+        if (settings.Legend is { } legend)
+        {
+            document.MainChart.HasLegend = true;
+            document.MainChart.LegendPosition = legend;
+            document.MainChart.LegendArea.AutomaticSize = true;
+        }
+
+        if (settings.ValueTitle is { } valueTitle)
+        {
+            document.MainChart.Texts.Add(ChartText.Create(ChartTextKind.ValueAxisTitle, valueTitle));
+        }
+
+        if (settings.CategoryTitle is { } categoryTitle)
+        {
+            document.MainChart.Texts.Add(ChartText.Create(ChartTextKind.CategoryAxisTitle, categoryTitle));
+        }
+
+        if (settings.AxisFont is { } axisFont)
+        {
+            // The disk's Microsoft Chart codes (spec §16.4), and the real number and size Excel restores from bits 9-2
+            // of the axis line's and major gridlines' words.
+            var parts = axisFont.Split(':');
+            int font = int.Parse(parts[0], CultureInfo.InvariantCulture), size = int.Parse(parts[1], CultureInfo.InvariantCulture);
+            foreach (int axis in new[] { 40, 64 })
+            {
+                var record = document.MainChart.Record;
+                record[axis + 3] = (byte)(font == 2 ? 16 : font == 3 ? 1 : 32);
+                record[axis + 4] = (byte)(font is 2 or 3 ? (size - 9) / 3 : Math.Max(0, (size - 12) / 6));
+                record[axis + 14] = (byte)((record[axis + 14] & 0xFC) | (font >> 6));
+                record[axis + 15] = (byte)((record[axis + 15] & 0x03) | ((font << 2) & 0xFC));
+                record[axis + 18] = (byte)((record[axis + 18] & 0xFC) | (size >> 6));
+                record[axis + 19] = (byte)((record[axis + 19] & 0x03) | ((size << 2) & 0xFC));
+            }
+        }
+
+        if (settings.HideValueAxis)
+        {
+            document.MainChart.ValueAxis.Line.Pattern = ChartPattern.None;
+        }
+
+        foreach (string field in settings.Scale)
+        {
+            var parts = field.Split('=', 2);
+            double value = double.Parse(parts[1], CultureInfo.InvariantCulture);
+            switch (parts[0])
+            {
+                case "min": scale.Minimum = value; scale.AutomaticMinimum = false; break;
+                case "max": scale.Maximum = value; scale.AutomaticMaximum = false; break;
+                case "major": scale.MajorUnit = value; scale.AutomaticMajorUnit = false; break;
+                case "minor": scale.MinorUnit = value; scale.AutomaticMinorUnit = false; break;
+                case "crosses": scale.CrossesAt = value; scale.AutomaticCrossesAt = false; break;
+                default: throw new ArgumentException($"Unknown scale field {parts[0]}: use min, max, major, minor or crosses.");
+            }
+        }
+
+        if (settings.Overlay is { } overlayType)
+        {
+            var overlay = Chart.Create(overlayType);
+            overlay.FirstOverlaySeries = settings.OverlayFrom ?? series.Length;
+            overlay.SharesValueAxisScale = settings.Share;
+            overlay.SharesXAxisScale = settings.ShareX;
+            if (settings.HideOverlayAxes)
+            {
+                overlay.CategoryAxis.Line.Pattern = overlay.ValueAxis.Line.Pattern = ChartPattern.None;
+            }
+            document.Charts.Insert(0, overlay);
         }
 
         File.WriteAllBytes(settings.Output, document.ToArray());

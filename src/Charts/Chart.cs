@@ -24,6 +24,24 @@ public enum ChartType : ushort
 }
 
 /// <summary>
+/// An axis of a chart, as the scale methods of <see cref="ChartDocument"/> choose one.
+/// </summary>
+public enum ChartAxisKind
+{
+    /// <summary>The value axis.</summary>
+    Value,
+
+    /// <summary>The category axis: a scatter chart's X axis, which has a scale of its own.</summary>
+    Category,
+}
+
+/// <summary>
+/// A chart text's font as Excel opens it (spec §16.4): a Macintosh font number (0 the System font, 1 the application
+/// font, Geneva), a point size, and the style.
+/// </summary>
+public readonly record struct ChartFont(int Family, int Size, bool Bold, bool Italic);
+
+/// <summary>
 /// The legend position (bits 15–13 of chart-structure word 156).
 /// </summary>
 public enum LegendPosition
@@ -120,6 +138,18 @@ public sealed class Chart
     /// <summary>Gets the text objects: titles first, then attached and free text.</summary>
     public List<ChartText> Texts { get; } = [];
 
+    /// <summary>
+    /// Gets a copy of built-in text object −2, the template for a series' data label (record offset 266, spec §16.5,
+    /// §16.8): its font, alignment and box. Changing the copy does not change the chart.
+    /// </summary>
+    public ChartText SeriesLabelTemplate => new(Record.AsSpan(266, ChartText.RecordSize).ToArray());
+
+    /// <summary>
+    /// Gets a copy of built-in text object −1, the template for each data point's label (record offset 312).
+    /// Changing the copy does not change the chart.
+    /// </summary>
+    public ChartText PointLabelTemplate => new(Record.AsSpan(312, ChartText.RecordSize).ToArray());
+
     /// <summary>Gets the per-series word list (ignored by Excel on load).</summary>
     public List<ushort> SeriesWords { get; } = [];
 
@@ -193,6 +223,17 @@ public sealed class Chart
 
     /// <summary>Gets a view of one of the <see cref="PointFormats"/>.</summary>
     public ChartPointFormat GetPointFormat(int index) => new(PointFormats[index], 0);
+
+    /// <summary>
+    /// Adds a data-point format record for one series (or one point of a chart with one series), starting as a copy
+    /// of the default series format.
+    /// </summary>
+    public ChartPointFormat AddPointFormat(byte seriesOrPoint)
+    {
+        var record = Record.AsSpan(366, 12).ToArray();
+        PointFormats.Add(record);
+        return new ChartPointFormat(record, 0) { SeriesOrPoint = seriesOrPoint };
+    }
 
     private ushort GetWord(int offset) => BinaryPrimitives.ReadUInt16BigEndian(Record.AsSpan(offset));
 
@@ -335,6 +376,11 @@ public sealed class Chart
         // The default series format Excel writes: solid automatic line, hollow diamonds, automatic marker and area.
         // Without it the series are invisible (spec §16.8).
         Convert.FromHexString("00010C00000000" + "02B0000000").CopyTo(chart.Record, 366);
+        // The data-label templates, built-in text objects -2 and -1, as a chart Excel 1.00 makes has them: data labels
+        // in Geneva 9 with automatic text, the point labels showing their values (spec §16.5). Without them Excel
+        // labels a series or point with the series' name.
+        Convert.FromHexString("00054004000000006040000100C000000C00030900000C000000F000000000000000000000054004000000000000").CopyTo(chart.Record, 266);
+        Convert.FromHexString("00054004000000006050000100C000000C00030900000C000000F000000000000000000000054004000000000000").CopyTo(chart.Record, 312);
         var scale = chart.ValueScale;
         scale.AutomaticMinimum = scale.AutomaticMaximum = scale.AutomaticMajorUnit = scale.AutomaticMinorUnit = scale.AutomaticCrossesAt = true;
         if (type == ChartType.Scatter)
@@ -408,6 +454,51 @@ public sealed class ChartAxis
 
     /// <summary>Gets the tick-label font descriptor bytes (on disk, Microsoft Chart codes).</summary>
     public ReadOnlySpan<byte> Font => _data.AsSpan(_offset + 2, 4);
+
+    /// <summary>
+    /// Gets or sets the tick labels' Macintosh font number that Excel hides in bits 9–2 of the axis line's word, and
+    /// restores on load when the chart version has bit 2 set (spec §16.4). 0 is the System font.
+    /// </summary>
+    public int SavedFontNumber { get => GetHidden(14); set => SetHidden(14, value); }
+
+    /// <summary>
+    /// Gets or sets the tick labels' point size that Excel hides in bits 9–2 of the major gridlines' word (spec §16.4);
+    /// 0 is the System font's size, 12.
+    /// </summary>
+    public int SavedFontSize { get => GetHidden(18); set => SetHidden(18, value); }
+
+    /// <summary>Gets whether the tick labels are bold (font code bit 0x40, spec §16.4).</summary>
+    public bool IsBold => (_data[_offset + 3] & 0x40) != 0;
+
+    /// <summary>Gets whether the tick labels are italic (font code bit 0x80, spec §16.4).</summary>
+    public bool IsItalic => (_data[_offset + 3] & 0x80) != 0;
+
+    // The font as Excel 1.00 opens it: the hidden number and size when the chart version has bit 2 set, otherwise
+    // converted back from the Microsoft Chart codes (anything but New York and Geneva taken as the System font).
+    internal ChartFont GetFont(int version)
+    {
+        if ((version & 4) != 0)
+        {
+            return new(SavedFontNumber, SavedFontSize == 0 ? 12 : SavedFontSize, IsBold, IsItalic);
+        }
+
+        int code = _data[_offset + 3] & 0x3F, index = _data[_offset + 4];
+        return code switch
+        {
+            16 => new(2, 9 + 3 * index, IsBold, IsItalic),
+            1 => new(3, 9 + 3 * index, IsBold, IsItalic),
+            _ => new(0, 12 + 6 * index, IsBold, IsItalic),
+        };
+    }
+
+    private int GetHidden(int offset) => (BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + offset)) >> 2) & 0xFF;
+
+    private void SetHidden(int offset, int value)
+    {
+        var span = _data.AsSpan(_offset + offset);
+        ushort word = BinaryPrimitives.ReadUInt16BigEndian(span);
+        BinaryPrimitives.WriteUInt16BigEndian(span, (ushort)((word & ~0x3FC) | ((value & 0xFF) << 2)));
+    }
 }
 
 /// <summary>
@@ -466,8 +557,11 @@ public sealed class ChartAreaFormat
     /// <summary>Gets or sets the background pattern; <see cref="ChartPattern.None"/> means none.</summary>
     public ChartPattern BackgroundPattern { get => (ChartPattern)_data[_offset + 5]; set => _data[_offset + 5] = (byte)value; }
 
-    /// <summary>Gets or sets whether the box has a shadow (bits 11–8 of the word at offset 6).</summary>
-    public bool HasShadow { get => (GetWord(6) & 0x0F00) != 0; set => SetWord(6, (ushort)(value ? GetWord(6) | 0x0100 : GetWord(6) & ~0x0F00)); }
+    /// <summary>
+    /// Gets or sets whether the area has a drop shadow: the value 4 in bits 11–8 of the word at offset 6, which is
+    /// what Excel 1.00 tests for when it draws and lays out an area (<c>31.07</c>, <c>38.02</c>).
+    /// </summary>
+    public bool HasShadow { get => ((GetWord(6) >> 8) & 0xF) == 4; set => SetWord(6, (ushort)((GetWord(6) & ~0x0F00) | (value ? 0x0400 : 0))); }
 
     /// <summary>Gets or sets whether a text box sizes itself automatically (bit 14 of the word at offset 6).</summary>
     public bool AutomaticSize { get => (GetWord(6) & 0x4000) != 0; set => SetWord(6, (ushort)(value ? GetWord(6) | 0x4000 : GetWord(6) & ~0x4000)); }
@@ -611,4 +705,18 @@ public sealed class ChartScale
 
     /// <summary>Gets or sets values in reverse order.</summary>
     public bool ValuesInReverseOrder { get => GetFlag(9); set => SetFlag(9, value); }
+
+    /// <summary>
+    /// Sets the fields marked automatic as Excel 1.00 does when it draws the chart, from the data's range: the
+    /// minimum, maximum, units and crossing point it then saves (docs/Display.md, "Automatic axis scales"). Fixed
+    /// fields are left as they are and bound the automatic ones. A logarithmic scale holds exponents.
+    /// </summary>
+    /// <param name="dataMinimum">The smallest value the axis shows (<see cref="ChartDocument.GetDataRange"/>).</param>
+    /// <param name="dataMaximum">The largest value the axis shows.</param>
+    /// <param name="labelSpaces">How many tick labels fit along the axis (<see cref="ChartDocument.GetLabelSpaces"/>).
+    /// A linear scale takes 1 to 10 intervals from it.</param>
+    /// <param name="scatter">Whether the chart is a scatter chart, whose scale never moves to zero and whose single
+    /// value widens both ways.</param>
+    public void SetAutomaticValues(double dataMinimum, double dataMaximum, int labelSpaces, bool scatter = false)
+        => ChartAutomaticScale.Apply(this, dataMinimum, dataMaximum, labelSpaces, scatter);
 }

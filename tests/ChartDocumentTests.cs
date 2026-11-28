@@ -318,4 +318,68 @@ public class ChartDocumentTests
         await reread.WriteAsync(output);
         Assert.Equal(bytes, output.ToArray());
     }
+
+    [Fact]
+    public void SetAutomaticValues_PicksTheMajorUnitFromTheTable()
+    {
+        // 10 intervals over 0 to 101: 10.1% of 100 each, so 20% of it, 20 (37.0a).
+        var scale = Chart.Create(ChartType.Line).ValueScale;
+        scale.SetAutomaticValues(0, 101, 10);
+        Assert.Equal((0.0, 120.0, 20.0, 4.0, 0.0), (scale.Minimum, scale.Maximum, scale.MajorUnit, scale.MinorUnit, scale.CrossesAt));
+
+        // Fewer label spaces, wider units: 2 intervals over 0 to 7 need 350% each, so 500%.
+        scale.SetAutomaticValues(0, 7, 2);
+        Assert.Equal((0.0, 10.0, 5.0), (scale.Minimum, scale.Maximum, scale.MajorUnit));
+    }
+
+    [Fact]
+    public void SetAutomaticValues_KeepsFixedFields()
+    {
+        var scale = Chart.Create(ChartType.Line).ValueScale;
+        scale.AutomaticMinimum = false;
+        scale.Minimum = 2;
+        scale.SetAutomaticValues(0, 10, 10);
+        Assert.Equal((2.0, 10.0, 1.0, 2.0), (scale.Minimum, scale.Maximum, scale.MajorUnit, scale.CrossesAt));
+    }
+
+    [Fact]
+    public void GetSeries_SplitsAtTheOverlaysFirstSeries()
+    {
+        var document = ChartDocument.Create(ChartType.ColumnOrBar);
+        var overlay = Chart.Create(ChartType.Line);
+        overlay.FirstOverlaySeries = 3;
+        document.Charts.Insert(0, overlay);
+        for (int i = 0; i < 4; i++)
+        {
+            document.Series.Add(ChartSeries.Create($"S{i}", [i, i + 1], "Data", $"R{i + 1}C1:R{i + 1}C2"));
+        }
+
+        Assert.Equal(["S0", "S1"], document.GetSeries(document.MainChart).Select(s => s.Name));
+        Assert.Equal(["S2", "S3"], document.GetSeries(overlay).Select(s => s.Name));
+        Assert.Equal((0.0, 2.0), document.GetDataRange(document.MainChart));
+        Assert.Equal((2.0, 4.0), document.GetDataRange(overlay));
+    }
+
+    [Fact]
+    public void AxisFont_ReadsTheHiddenNumberAndSize()
+    {
+        // Geneva 9 on the value axis of a library chart: the codes are 1 and 0, the real number and size hide in the
+        // axis line's and major gridlines' words (spec §16.4).
+        var document = ChartDocument.Load(TestData.SamplePath("Scale Window Geneva 9"));
+        var axis = document.MainChart.ValueAxis;
+        Assert.Equal(3, axis.SavedFontNumber);
+        Assert.Equal(9, axis.SavedFontSize);
+        Assert.Equal(new ChartFont(3, 9, false, false), document.GetLabelFont(axis));
+
+        // A Microsoft Chart file (version without bit 2) is read from the codes: Geneva, size index 0.
+        document.Version = 3;
+        Assert.Equal(new ChartFont(3, 9, false, false), document.GetLabelFont(axis));
+
+        // A library chart's labels are the System font at its size; the saved number and size can be set.
+        var library = ChartDocument.Create(ChartType.Line);
+        Assert.Equal(new ChartFont(0, 12, false, false), library.GetLabelFont(library.MainChart.ValueAxis));
+        library.MainChart.ValueAxis.SavedFontNumber = 4;
+        library.MainChart.ValueAxis.SavedFontSize = 10;
+        Assert.Equal(new ChartFont(4, 10, false, false), library.GetLabelFont(library.MainChart.ValueAxis));
+    }
 }

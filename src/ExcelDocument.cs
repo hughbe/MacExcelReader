@@ -742,8 +742,177 @@ public sealed class ExcelDocument
             }
         }
 
+        // A worksheet's table also covers every cell a formula refers to, with the margin after it, as Open grows it
+        // (spec §6.1): =D20 makes a 21 × 5 table. An area that runs to the sheet's last row does not count for rows
+        // (C:D, B2:B16384), one that runs to the last column not for columns, and other documents' cells not at all;
+        // a name a formula uses counts with the cells of its definition, from the cell that uses it. A macro sheet's
+        // formulas run only as a macro, so they do not grow it, and a table read in the count form is kept as it is.
+        // Excel cannot hold a table larger than the Mac's memory (6 bytes a cell, 4 MB on a Mac Plus) and will not open
+        // a sheet whose formulas need one, so such a sheet is written at the size of its cells.
+        if (rows > 0 && Kind == ExcelDocumentKind.Worksheet && !State.HoldsCountForm(rows, columns))
+        {
+            var (referencedRows, referencedColumns) = GetReferencedExtent();
+            int grownRows = Math.Max(rows, Math.Min(referencedRows + 1, ExcelCellGrid.MaxRows + 1));
+            int grownColumns = Math.Max(columns, Math.Min(referencedColumns + 1, ExcelCellGrid.MaxColumns + 1));
+            if ((grownRows > rows || grownColumns > columns) && (long)grownRows * grownColumns * 6 <= 4 << 20)
+            {
+                rows = grownRows;
+                columns = grownColumns;
+                Cells.Grow(rows, columns);
+            }
+        }
+
         State.SetExtent(rows, columns);
     }
+
+    /// <summary>
+    /// Gets how many rows and columns the cells' formulas refer to, as Excel counts them when Open grows a worksheet's
+    /// cell table (spec §6.1): through the names they use, with a relative name counted from the cell that uses it,
+    /// and leaving out other documents' cells and the rows (or columns) of an area that runs to the last row (or
+    /// column). Saving a worksheet makes its table at least this size, plus the blank margin.
+    /// </summary>
+    /// <returns>The row and column counts: 21 and 5 for a sheet whose only formula is <c>=D20</c>.</returns>
+    public (int Rows, int Columns) GetReferencedExtent()
+    {
+        int rows = 0, columns = 0;
+        var following = new HashSet<int>();
+        foreach (var entry in Cells.NonEmptyCells)
+        {
+            if (entry.Type is not (ExcelCellType.Formula or ExcelCellType.NumericFormula))
+            {
+                continue;
+            }
+
+            var at = (entry.Row, entry.Column);
+            if (Cells.TryGetRawData(entry.Row, entry.Column, out var record) && record.Length > 15 && 15 + record[14] <= record.Length
+                && !UsesName(record.Slice(15, record[14])))
+            {
+                AddReferences(record.Slice(15, record[14]), default, definition: false, at, following, ref rows, ref columns);
+            }
+            else if (entry.GetCell().Formula is { } formula)
+            {
+                AddReferences(formula.Expression, formula.Fixups, definition: false, at, following, ref rows, ref columns);
+                AddReferences(formula.SharedExpression, formula.SharedFixups, definition: false, at, following, ref rows, ref columns);
+            }
+        }
+
+        return (rows, columns);
+    }
+
+    private static bool UsesName(ReadOnlySpan<byte> expression)
+    {
+        try
+        {
+            foreach (var token in FormulaTokens.Enumerate(expression))
+            {
+                if (token.Code == FormulaTokens.Name)
+                {
+                    return true;
+                }
+            }
+        }
+        catch (ExcelFormatException)
+        {
+        }
+
+        return false;
+    }
+
+    // Adds the cells an expression in the cell at `at` refers to. A definition's references are tokens 2C and 2D, laid
+    // out like 24 and 25, whose relative rows and columns are offsets from the cell the name is used in (spec §11). A
+    // cell formula's name tokens take their index from its fix-up words, a definition's from the token itself.
+    // `following` holds the names being followed, so a name that refers to itself through others ends there.
+    private void AddReferences(ReadOnlySpan<byte> expression, ReadOnlySpan<byte> fixups, bool definition, (int Row, int Column) at,
+        HashSet<int> following, ref int rows, ref int columns)
+    {
+        bool external = false;
+        int position = 0;
+        try
+        {
+            foreach (var token in FormulaTokens.Enumerate(expression))
+            {
+                switch (token.Code)
+                {
+                    case FormulaTokens.ExternalSheet:
+                        external = true;
+                        if (!definition)
+                        {
+                            FormulaTokens.Skip(fixups, ref position, 2);
+                        }
+
+                        break;
+                    case 0x1B:
+                        external = false;
+                        break;
+                    case FormulaTokens.Name:
+                        int index;
+                        if (definition)
+                        {
+                            index = token.Offset + 3 <= expression.Length ? BinaryPrimitives.ReadUInt16BigEndian(expression[(token.Offset + 1)..]) : 0;
+                        }
+                        else
+                        {
+                            index = FormulaTokens.ReadWord(fixups, ref position);
+                        }
+
+                        if (!external && index >= 1 && index <= Names.Count && following.Add(index))
+                        {
+                            AddReferences(Names[index - 1].Definition.Span, default, definition: true, at, following, ref rows, ref columns);
+                            following.Remove(index);
+                        }
+
+                        break;
+                    case FormulaTokens.Array when !definition:
+                        // A cell formula's array constants and memory areas sit among its fix-up words.
+                        FormulaTokens.SkipArrayBlock(fixups, ref position);
+                        break;
+                    case FormulaTokens.MemoryArea when !definition:
+                        FormulaTokens.Skip(fixups, ref position, FormulaTokens.ReadWord(fixups, ref position) * 6);
+                        break;
+                    case 0x24 or 0x2C when !external && token.Offset + 4 <= expression.Length:
+                    {
+                        int rowWord = BinaryPrimitives.ReadUInt16BigEndian(expression[(token.Offset + 1)..]);
+                        int row = ResolveRow(rowWord, at.Row, definition);
+                        int column = ResolveColumn(expression[token.Offset + 3], rowWord, at.Column, definition);
+                        rows = Math.Max(rows, row + 1);
+                        columns = Math.Max(columns, column + 1);
+
+                        break;
+                    }
+
+                    case 0x25 or 0x2D when !external && token.Offset + 7 <= expression.Length:
+                    {
+                        int lastWord = BinaryPrimitives.ReadUInt16BigEndian(expression[(token.Offset + 3)..]);
+                        int lastRow = ResolveRow(lastWord, at.Row, definition);
+                        int lastColumn = ResolveColumn(expression[token.Offset + 6], lastWord, at.Column, definition);
+                        if (lastRow < ExcelCellGrid.MaxRows - 1)
+                        {
+                            rows = Math.Max(rows, lastRow + 1);
+                        }
+
+                        if (lastColumn < ExcelCellGrid.MaxColumns - 1)
+                        {
+                            columns = Math.Max(columns, lastColumn + 1);
+                        }
+
+                        break;
+                    }
+                }
+            }
+        }
+        catch (ExcelFormatException)
+        {
+            // A damaged formula refers to nothing Excel could size the table for.
+        }
+    }
+
+    // A reference's row (from its row word) or column as an index. In a definition a relative one is an offset from
+    // the cell the name is used in, and wraps round the sheet: one row up from row 1 is row 16384 (spec §11).
+    private static int ResolveRow(int rowWord, int from, bool definition) =>
+        !definition || (rowWord & 0x8000) == 0 ? rowWord & 0x3FFF : (from + rowWord) & 0x3FFF;
+
+    private static int ResolveColumn(byte column, int rowWord, int from, bool definition) =>
+        !definition || (rowWord & 0x4000) == 0 ? column : (from + column) & 0xFF;
 
     /// <summary>
     /// Serialises the document.
@@ -802,7 +971,7 @@ public sealed class ExcelDocument
 
     private int[] SortedNameOrder()
     {
-        var keys = Names.Select(n => NameSortKey(n.Name)).ToArray();
+        var keys = Names.Select(n => NameKey.Of(n.Name)).ToArray();
         var order = Enumerable.Range(0, Names.Count).ToArray();
         Array.Sort(order, (a, b) =>
         {
@@ -824,23 +993,6 @@ public sealed class ExcelDocument
         }
 
         return true;
-    }
-
-    // Excel's order ignores case and accents: the French 1.01 puts "Critères" before "Criteria". Letters are compared
-    // without their accents and in upper case; everything else by its character code.
-    private static string NameSortKey(string name)
-    {
-        var decomposed = name.Normalize(System.Text.NormalizationForm.FormD);
-        var key = new System.Text.StringBuilder(decomposed.Length);
-        foreach (char c in decomposed)
-        {
-            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
-            {
-                key.Append(char.ToUpperInvariant(c));
-            }
-        }
-
-        return key.ToString();
     }
 
     // The names as read from the file. Excel never reorders the names it reads, so a document whose names are still

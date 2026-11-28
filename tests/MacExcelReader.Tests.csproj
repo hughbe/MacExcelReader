@@ -35,6 +35,12 @@
     <Content Include="Data\Function Names 1.00 Patched">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="Data\name-characters-1.00.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Data\calc-1.00.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="Data\display-1.00.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
@@ -49,6 +55,7 @@
   <ItemGroup>
     <!-- To read Excel's fonts from a disk image named by MACEXCEL_SYSTEM. -->
     <Compile Include="..\dumper\MfsImage.cs" Link="MfsImage.cs" />
+    <Compile Include="..\dumper\CommandLint.cs" Link="CommandLint.cs" />
   </ItemGroup>
 
   <ItemGroup>

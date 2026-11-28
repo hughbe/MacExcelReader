@@ -1365,6 +1365,104 @@ public class ExperimentTests
         Assert.Equal(0x46, document.Cells["A6"].Formula!.Expression[0]);   // ($A$1 $A$1):$C$3 is one area: a memory area
     }
 
+    // Formulas typed into Excel 1.00 as a person would, in A1 text (excel-test run with sheet --type): column A holds
+    // each text and column B Excel's compilation of it, or nothing where Excel refused it ("Error in formula").
+    public static TheoryData<string> TypedSamples() => new("Typed Columns", "Typed Rows", "Typed Ranges", "Typed Signs", "Typed Unions");
+
+    [Theory]
+    [MemberData(nameof(TypedSamples))]
+    public void Typed_CompilesAsExcelDoes(string name)
+    {
+        var document = Load(name);
+        int compiled = 0;
+        for (int row = 1; row < document.Cells.RowCount; row++)
+        {
+            if (document.Cells.GetCellType(row, 0) != ExcelCellType.Text)
+            {
+                continue;
+            }
+
+            string text = document.Cells[row, 0].TextValue;
+            if (document.Cells.Find(row, 1)?.Formula is { } excel)
+            {
+                var ours = ExcelFormula.Parse(text, document);
+                Assert.Equal(Convert.ToHexString(FormulaTokens.ClearStaleBytes(excel.Expression)), Convert.ToHexString(FormulaTokens.ClearStaleBytes(ours.Expression)));
+                Assert.Equal(excel.FixupWords.ToArray(), ours.FixupWords.ToArray());
+                compiled++;
+            }
+            else
+            {
+                Assert.Throws<ExcelFormulaSyntaxException>(() => ExcelFormula.Parse(text, document));
+            }
+        }
+
+        Assert.True(compiled >= 10);
+    }
+
+    [Fact]
+    public void Typed_WholeColumnsAndRowsAreOneArea()
+    {
+        // Typed A1 text: =D:E and =30:31 are one area (45), whatever the ends' $ signs, unlike the R1C1 text
+        // GET.FORMULA gives back, C[2]:C[3], which compiles to two areas and ':' (docs/ExcelBugs.md).
+        foreach (var (name, text) in new[] { ("Typed Columns", "=D:E"), ("Typed Columns", "=$D:E"), ("Typed Rows", "=30:31"), ("Typed Rows", "=31:$31") })
+        {
+            var formula = Typed(name, text)!;
+            Assert.Equal(0x45, formula.Expression[0]);
+            Assert.Equal(7, formula.Expression.Length);
+        }
+    }
+
+    [Fact]
+    public void Typed_UnionBindsTighterThanOperators()
+    {
+        // Outside a function's arguments a comma is the union operator, binding more tightly than every operator but
+        // range and intersection: =1+D30,E31 is 1+(D30,E31), a value-class memory error (#VALUE!) after 1E 00 01.
+        var sum = Typed("Typed Unions", "=1+D30,E31")!;
+        Assert.Equal("1E000147000F000924C01D0324C01E041003", Convert.ToHexString(FormulaTokens.ClearStaleBytes(sum.Expression)));
+        Assert.Equal("47000F000924C01D0324C01E04101E00010B", Convert.ToHexString(FormulaTokens.ClearStaleBytes(Typed("Typed Unions", "=D30,E31=1")!.Expression)));
+        Assert.Equal(0x10, Typed("Typed Ranges", "=D30:E31,F32")!.Expression[^1]);
+
+        // A union with a side that stands for no area stands for none: #NULL!.
+        var empty = Typed("Typed Unions", "=D30 E30,F32")!;
+        Assert.Equal(0x47, empty.Expression[0]);
+        Assert.Equal(0x00, empty.Expression[2]);
+
+        // Its operands must still be references.
+        Assert.Null(Typed("Typed Unions", "=D30,1"));
+        Assert.Null(Typed("Typed Unions", "=SUM(D30),F32"));
+    }
+
+    [Fact]
+    public void Typed_SignAgainstDigitsMakesANumber()
+    {
+        // A sign written against the digits makes a signed constant before ':' is read, so Excel refuses =-30:31;
+        // with a space, or with $ rows, it is the negated area.
+        Assert.Null(Typed("Typed Signs", "=-30:31"));
+        Assert.Null(Typed("Typed Signs", "=+30:31"));
+        Assert.Null(Typed("Typed Signs", "=SUM(-30:31)"));
+        Assert.Equal(0x13, Typed("Typed Signs", "=- 30:31")!.Expression[^1]);
+        Assert.Equal(0x13, Typed("Typed Signs", "=-$30:$31")!.Expression[^1]);
+
+        // Whole rows on the right of an intersection.
+        Assert.Equal(0x0F, Typed("Typed Signs", "=$30:$32 $31:$33")!.Expression[^1]);
+        Assert.Equal(0x46, Typed("Typed Rows", "=30:32 31:33")!.Expression[0]);
+    }
+
+    // Excel's compilation of a typed text in a Typed sample, or null where Excel refused it.
+    private static ExcelFormula? Typed(string sample, string text)
+    {
+        var document = Load(sample);
+        for (int row = 0; row < document.Cells.RowCount; row++)
+        {
+            if (document.Cells.GetCellType(row, 0) == ExcelCellType.Text && document.Cells[row, 0].TextValue == text)
+            {
+                return document.Cells.Find(row, 1)?.Formula;
+            }
+        }
+
+        throw new ArgumentException($"{text} is not in {sample}");
+    }
+
     // Excel 1.00's windows captured from the screen (tests/Data/Screens, docs/Testing.md), each with the sample Excel
     // saved it as. The renderer draws every pixel as Excel did.
     public static TheoryData<string> Screens() => new(File.ReadLines(ScreenIndex).Where(l => !l.StartsWith('#')).Select(l => l.Split('\t')[0]));
@@ -1399,6 +1497,57 @@ public class ExperimentTests
         Assert.True(differ == 0 && (expected.Width, expected.Height) == (actual.Width, actual.Height), $"{differ} pixels differ from Excel's screen; {actual.Width} × {actual.Height} drawn, {expected.Width} × {expected.Height} captured");
     }
 
+    [Theory]
+    [InlineData("Draw Excel Pie Labels")]
+    [InlineData("Draw Excel Area Labels")]
+    [InlineData("Draw Excel Column")]
+    public void NewChart_HasExcelsLabelTemplates(string name)
+    {
+        // A chart Excel 1.00 made itself (NEW(2) from a sheet) has data-label templates in Geneva 9 with automatic
+        // text; the library writes the same, without which Excel labels a series or point with the series' name.
+        var excel = ChartDocument.Load(SamplePath(name)).MainChart;
+        var library = Chart.Create(ChartType.ColumnOrBar);
+        Assert.Equal(excel.SeriesLabelTemplate.Record, library.SeriesLabelTemplate.Record);
+        Assert.Equal(excel.PointLabelTemplate.Record, library.PointLabelTemplate.Record);
+        Assert.Equal(ChartTextKind.DataLabel, library.PointLabelTemplate.Kind);
+        Assert.True(library.PointLabelTemplate.IsAutomaticText);
+    }
+
+    // Excel 1.00's chart windows captured from the screen (tests/Data/Screens/charts.txt), each with the chart Excel
+    // saved after drawing it; the renderer draws every pixel as Excel did (docs/Display.md "Drawing a chart").
+    public static TheoryData<string> ChartScreens() => new(File.ReadLines(ChartScreenIndex).Where(l => !l.StartsWith('#')).Select(l => l.Split('\t')[0]));
+
+    private static string ChartScreenIndex => Path.Combine(AppContext.BaseDirectory, "Data", "Screens", "charts.txt");
+
+    [Theory]
+    [MemberData(nameof(ChartScreens))]
+    public void ChartRendering_MatchesExcelsScreen(string name)
+    {
+        // Needs Excel's fonts: MACEXCEL_SYSTEM names Excel 1.00's Data disk image or a System file's resource fork.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var fields = File.ReadLines(ChartScreenIndex).First(l => l.Split('\t')[0] == name).Split('\t');
+        var expected = RenderTests.ReadPng(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", "Screens", name + ".png")));
+        var actual = Rendering.ChartRenderer.Render(ChartDocument.Load(TestData.SamplePath(name)), fonts, title: fields[1]);
+        int differ = 0;
+        for (int y = 0; y < expected.Height; y++)
+        {
+            for (int x = 0; x < expected.Width; x++)
+            {
+                if (expected[x, y] != actual[x, y])
+                {
+                    differ++;
+                }
+            }
+        }
+
+        Assert.Equal((expected.Width, expected.Height), (actual.Width, actual.Height));
+        Assert.Equal(int.Parse(fields[2], System.Globalization.CultureInfo.InvariantCulture), differ);
+    }
+
     private static readonly Lazy<Rendering.MacFontSet?> SystemFonts = new(() =>
     {
         string? path = Environment.GetEnvironmentVariable("MACEXCEL_SYSTEM");
@@ -1427,5 +1576,491 @@ public class ExperimentTests
         var window = Load(name).Windows[0];
         Assert.Equal(headingWidth, window.RowHeadingWidth);
         Assert.Equal(phase, window.State[19]);
+    }
+
+    [Fact]
+    public void NameEquivalents_ExcelMatchesNamesIgnoringCaseAccentsAndLigatures()
+    {
+        // DEFINE.NAME in Excel 1.00: twelve names, then twelve more each equal to one of them but for case, accents or
+        // a ligature. Each later name replaced the earlier one's spelling in place, and Excel keeps them in the order of
+        // their keys, Æ as AE coming before Ä as A (spec §11).
+        var document = Load("Name Equivalents");
+        Assert.Equal(
+            ["aæx", "AÄX", "aÇx", "aéx", "aîx", "aÑx", "aŒx", "aøx", "aüx", "aÿx", "AZX", "Bx", "Criteria", "Database", "Print_Area", "Print_Titles", "Recorder"],
+            document.Names.Select(n => n.Name));
+        Assert.True(document.NamesAreSorted);
+    }
+
+    // The formulas of Referenced Cells, one to a row of column A. Each would size the table differently if Excel's rule
+    // (spec §6.1) were not as found: D20 (21 x 5), rows 50:51 (52 rows), columns F:G (8 columns), B2:B16384 and B2:IV2
+    // (an area reaching the last row or column, which does not count), a name for $Z$90 (91 x 27) and another
+    // document's cell (which does not count).
+    private static readonly string[] ReferencedFormulas = ["=D20", "=SUM(50:51)", "=SUM(F:G)", "=SUM(B2:B16384)", "=SUM(B2:IV2)", "=Far", "=Other!K99"];
+
+    private static ExcelDocument BuildReferencedCells(bool macro)
+    {
+        var document = macro ? ExcelDocument.CreateMacroSheet() : ExcelDocument.CreateWorksheet();
+        document.ExternalDocuments.Add(new ExcelExternalDocument("Other"));
+        var far = new ExcelDefinedName("Far");
+        far.SetDefinition("=$Z$90", document);
+        document.Names.Add(far);
+        for (int i = 0; i < ReferencedFormulas.Length; i++)
+        {
+            var formula = ExcelFormula.Parse(ReferencedFormulas[i], document);
+            formula.SetResult(0);
+            document.Cells[i, 0].SetFormula(formula);
+        }
+
+        return document;
+    }
+
+    [Theory]
+    [InlineData("Referenced Cells", false, 91, 27)]
+    [InlineData("Referenced Cells Macro", true, 8, 2)]
+    public void ReferencedCells_ExcelGrowsAWorksheetsTableToCoverTheCellsItsFormulasReferTo(string name, bool macro, int rows, int columns)
+    {
+        // Excel opened the library's sheet (a 7 x 1 table with its margin, 8 x 2) and grew the worksheet's table to
+        // cover $Z$90 through the name Far, plus the margin; the macro sheet's stayed as it was. The library sizes a
+        // sheet it writes the same way.
+        var excel = Load(name);
+        Assert.Equal((rows, columns), (excel.Cells.RowCount, excel.Cells.ColumnCount));
+        var library = ExcelDocument.Read(BuildReferencedCells(macro).ToArray());
+        Assert.Equal((rows, columns), (library.Cells.RowCount, library.Cells.ColumnCount));
+    }
+
+    [Theory]
+    [InlineData("Name Relative Down", "Down", "C5", "2CC01403", 25, 6)]
+    [InlineData("Name Relative Wrap Row", "Up", "A1", "2CBFFF00", 16384, 1)]
+    [InlineData("Name Relative Wrap Column", "Left", "A1", "2C4000FF", 1, 256)]
+    public void NameRelative_ExcelGrowsTheTableToTheCellsTheNameRefersToFromWhereItIsUsed(string sample, string name, string usedAt, string definition, int rows, int columns)
+    {
+        // Each sheet started empty; a macro defined the name with R1C1 offsets from one cell and typed =name into
+        // another. Down is R[20]C[3] from C5, F25: the table is 25 x 6, still in the count form, with no margin. Up is
+        // R[-1]C1 and Left R1C[-1], defined from A2 and B1 and used in A1: they wrap round to A16384 and IV1.
+        var document = Load(sample);
+        Assert.Equal(definition, Convert.ToHexString(document.Names.Single(n => n.Name == name).Definition.Span));
+        Assert.Equal("=" + name, document.Cells[usedAt].Formula!.ToText(document));
+        Assert.Equal((rows, columns), (document.Cells.RowCount, document.Cells.ColumnCount));
+    }
+
+    [Fact]
+    public void NameRelativeOff_ExcelRefusesAFormulaWhoseTableWouldNotFitInMemory()
+    {
+        // Up3 is R[-3]C[-2], defined from E10. Typed in A1 it would refer to IU16382, a 16382 x 255 table of about
+        // 25 MB: FORMULA gave #VALUE! and the sheet stayed empty.
+        var document = Load("Name Relative Off");
+        Assert.Equal("2CFFFDFE", Convert.ToHexString(document.Names.Single(n => n.Name == "Up3").Definition.Span));
+        Assert.Empty(document.Cells.NonEmptyCells);
+    }
+
+    [Theory]
+    [InlineData("F6", "=B$2:$C3:B2:C3")]
+    [InlineData("F7", "=(A1:B2,C3):B2:C3")]
+    [InlineData("F8", "=A1:B2:C3")]
+    [InlineData("F9", "=A1:B2:C3:D4")]
+    [InlineData("F10", "=IF(TRUE,A1):B2")]
+    [InlineData("F11", "=INDEX(A1:C3,1,1):B2:C3")]
+    [InlineData("F12", "=-A1:B2")]
+    [InlineData("F13", "=A1 IF(TRUE,B2)")]
+    public void RangePairs_ExcelPairsCellsIntoAnAreaBeforeOtherRanges(string address, string text)
+    {
+        // Excel 1.00 entered each formula again from GET.FORMULA's text (--recompile), so these are its own tokens:
+        // B2:C3 after another range is one area, and functions that can return a reference are range operands
+        // (spec §15.4). The library compiles the same text to the same tokens.
+        var document = Load("Range Pairs");
+        var excel = document.Cells[address].Formula!;
+        Assert.Equal(text, excel.ToText(document));
+        var library = ExcelFormula.Parse(text, document);
+        Assert.Equal(Convert.ToHexString(FormulaTokens.ClearStaleBytes(excel.Expression)), Convert.ToHexString(FormulaTokens.ClearStaleBytes(library.Expression)));
+    }
+
+    [Theory]
+    [InlineData("F7", "=A:A:B:B")]
+    [InlineData("F8", "=$B:$B:B:B")]
+    [InlineData("F9", "=$A:$B")]
+    [InlineData("F10", "=1:1:3:3")]
+    [InlineData("F11", "=B:B:$B:$B")]
+    [InlineData("F12", "=A$1:B$2")]
+    public void R1C1WholeColumns_FormulaCompilesRelativeWholeColumnsAsTwoAreas(string address, string text)
+    {
+        // FORMULA, which reads R1C1 whatever A1.R1C1 says, in F5:F12: =A:B and =$B:B in A1 were refused, and
+        // C[-5]:C[-4], C2:C[-4], C1:C2, R[-9]:R[-7], C[-4]:C2 and R1C[-5]:R2C[-4] gave these. Only whole columns
+        // absolute at both ends are one area (docs/ExcelBugs.md).
+        var document = Load("R1C1 Whole Columns");
+        Assert.Null(document.Cells.Find(4, 5)?.Formula);
+        Assert.Null(document.Cells.Find(5, 5)?.Formula);
+        Assert.Equal(text, document.Cells[address].Formula!.ToText(document));
+    }
+
+    [Theory]
+    [InlineData("Calc 1")]
+    [InlineData("Calc 2")]
+    [InlineData("Calc 3")]
+    public void Calc_SamplesHoldTheResultsTheReferenceRecords(string sample)
+    {
+        // tests/Data/calc-1.00.txt records, section by section, each formula of the Calc samples with the result
+        // Excel 1.00 stored for it (docs/Calculation.md): the double in hex and as General shows it, text in quotes,
+        // or a logical value or error.
+        var expected = new List<string>();
+        bool inSection = false;
+        foreach (string line in File.ReadLines(Path.Combine(AppContext.BaseDirectory, "Data", "calc-1.00.txt")))
+        {
+            if (line.StartsWith("## ", StringComparison.Ordinal))
+            {
+                inSection = line == "## " + sample;
+            }
+            else if (inSection && line.StartsWith('='))
+            {
+                // The reference writes Calc 1's negative-zero constant as -0, which Excel and the library show as 0.
+                expected.Add(line.Replace("(-0)", "(0)", StringComparison.Ordinal));
+            }
+        }
+
+        var document = Load(sample);
+        var actual = new List<string>();
+        for (int row = 0; row < document.Cells.RowCount; row++)
+        {
+            for (int column = 0; column < document.Cells.ColumnCount; column++)
+            {
+                if (document.Cells.Find(row, column)?.Formula is not { } formula)
+                {
+                    continue;
+                }
+
+                var value = formula.Result;
+                string shown = value.Kind switch
+                {
+                    ExcelValueKind.Number => $"{BitConverter.DoubleToInt64Bits(value.Number):X16}  {ExcelValueFormatter.FormatGeneral(value.Number, 20)}",
+                    ExcelValueKind.Text => $"\"{value.Text}\"",
+                    _ => value.ToString(),
+                };
+                actual.Add($"{formula.ToText(document)}\t{shown}");
+            }
+        }
+
+        Assert.NotEmpty(expected);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void TextTwoExponents_ExcelRefusesTwoExponentsInTheFirstSection()
+    {
+        // TEXT(1234.5678,"0E+00 0:0E+00 0") gave #VALUE!; with the two exponents in a later section TEXT crashes Excel
+        // 1.00 instead (docs/ExcelBugs.md). The library refuses the format, as FORMAT.NUMBER does.
+        var document = Load("TEXT Two Exponents");
+        Assert.Equal("0E+00 0:0E+00 0", document.Cells[0, 0].TextValue);
+        Assert.Equal(ExcelError.Value, document.Cells[0, 2].Value.Error);
+        Assert.Throws<FormatException>(() => ExcelNumberFormat.Parse("0E+00 0:0E+00 0"));
+    }
+
+    public static TheoryData<string> TextFormatSheets()
+    {
+        var data = new TheoryData<string>();
+        for (int i = 1; i <= 23; i++)
+        {
+            data.Add($"TEXT Formats {i:00}");
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(TextFormatSheets))]
+    public void TextFormats_LibraryShowsEachValueAsExcelsTextDid(string sample)
+    {
+        // Random formats in column A, a value in B and =TEXT(B,A) in C, recalculated by Excel 1.00; the formats were
+        // not the ones the display engine was written from. The library agrees on every one except formats whose
+        // exponent count Excel's compiler misplaced (spec §7), where Excel shows a count left over from memory.
+        string[] misplacedCount = ["-0,0+0E+0#.##", "0,0\"N\"0E-000", "0,00.00E+00+", "0,0:.##0.00.00E+00", "0E+0#.#;)0,00E+0#.#0%;)#.##0.000,00%"];
+        var document = Load(sample);
+        int compared = 0;
+        for (int row = 0; row < 40 && document.Cells.Find(row, 0) is { Type: ExcelCellType.Text } formatCell; row++)
+        {
+            string text = formatCell.TextValue;
+            if (document.Cells[row, 2].Value is not { Kind: ExcelValueKind.Text } excel || misplacedCount.Contains(text))
+            {
+                continue;
+            }
+
+            ExcelNumberFormat format;
+            try
+            {
+                format = ExcelNumberFormat.Parse(text);
+            }
+            catch (FormatException)
+            {
+                continue;
+            }
+
+            Assert.Equal(excel.Text, format.Format(document.Cells[row, 1].NumberValue));
+            compared++;
+        }
+
+        Assert.True(compared > 20);
+    }
+
+    public static TheoryData<string, string, string> NameCharacters()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (string line in File.ReadLines(Path.Combine(AppContext.BaseDirectory, "Data", "name-characters-1.00.txt")).Where(l => !l.StartsWith('#')))
+        {
+            var fields = line.Split('\t');
+            data.Add(fields[0], fields[1], fields[2]);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(NameCharacters))]
+    public void NameCharacters_MatchExcelsComparison(string code, string character, string excel)
+    {
+        // Excel 1.00 took each Mac OS Roman character in a name as the letters it equals, or refused it
+        // (tests/Data/name-characters-1.00.txt, spec §11). The library's comparison treats the accepted ones alike.
+        Assert.Equal(code, MacRoman.GetBytes(character)[0].ToString("X2"));
+        if (excel != "refused")
+        {
+            Assert.Equal(Internal.NameKey.Of("a" + excel + "x"), Internal.NameKey.Of("a" + character + "x"));
+        }
+    }
+
+    // The label spaces of the samples saved from windows too small for 10 intervals (Display.md).
+    private static readonly Dictionary<string, int> s_scaleLabelSpaces = new()
+    {
+        // The five smallest Geneva 9 windows captured on screen (SIZE heights 161 to 205; the library's own count agrees).
+        ["Draw Geneva 9 Window 01"] = 6, ["Draw Geneva 9 Window 02"] = 6, ["Draw Geneva 9 Window 03"] = 7,
+        ["Draw Geneva 9 Window 04"] = 8, ["Draw Geneva 9 Window 05"] = 9,
+        ["Scale Window 70"] = 1,
+        ["Scale Window 130"] = 2,
+        ["Scale Window 160"] = 4,
+        ["Scale Window 200"] = 6,
+        ["Scale Window 250"] = 9,
+        ["Scale Bar Window 120"] = 4,
+        ["Scale Bar Window 200"] = 7,
+        ["Scale Bar Window 180"] = 6,
+        ["Scale Window Geneva 9"] = 6,
+        ["Scale Window New York 9"] = 5,
+        ["Labels Small Window"] = 7,
+        ["Layout Legend Corner Categories"] = 6,
+    };
+
+    public static TheoryData<string> AxisCharts() => new(AllSamples()
+        .Where(path => File.ReadAllBytes(SampleFile(path))[0] == 0x01 && ChartDocument.Load(SampleFile(path)).MainChart.Type != ChartType.Pie));
+
+    [Theory]
+    [MemberData(nameof(AxisCharts))]
+    public void Scale_AutomaticValuesAreExcels(string path)
+    {
+        // Every chart Excel saved holds in its scale records the automatic values Excel worked out when it last drew
+        // it (37.0a), and the library works out the same doubles from the series: Excel's own samples from 1.00,
+        // 1.03 and 1.5, and the "Scale" samples, library charts with chosen data, fixed fields and window sizes that
+        // Excel 1.00 drew and saved. Most had room for 10 intervals; s_scaleLabelSpaces lists the others.
+        // With an overlay, Excel first works out whether it shares each axis (37.34) and both charts then plot on the
+        // range of their data together (37.2f).
+        var document = ChartDocument.Load(SampleFile(path));
+        int labelSpaces = s_scaleLabelSpaces.GetValueOrDefault(Path.GetFileName(path), 10);
+        var saved = Scales(document);
+        document.UpdateAutomaticScales(labelSpaces);
+        Assert.Equal(saved, Scales(document));
+
+        static List<object> Scales(ChartDocument document)
+        {
+            var fields = new List<object>();
+            foreach (var chart in document.Charts)
+            {
+                foreach (var scale in chart.XScale is null ? [chart.ValueScale] : new[] { chart.ValueScale, chart.XScale })
+                {
+                    fields.AddRange([scale.Minimum, scale.Maximum, scale.MajorUnit, scale.MinorUnit, scale.CrossesAt, scale.IsLogarithmic, scale.ValuesInReverseOrder]);
+                }
+
+                fields.AddRange([chart.SharesValueAxisScale, chart.SharesXAxisScale, chart.CategoriesInReverseOrder, chart.ValueAxisCrossesBetweenCategories]);
+            }
+
+            return fields;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(AxisCharts))]
+    public void Scale_LabelSpacesAreExcels(string path)
+    {
+        // Needs Excel's fonts (MACEXCEL_SYSTEM). The number of tick labels that fit, worked back from the layout Excel
+        // saved and the axes' fonts (37.0a, 37.09, 37.0e), gives Excel's scales for every chart sample, the windows
+        // too small for 10 intervals and the Geneva 9 and New York 9 labels among them.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var document = ChartDocument.Load(SampleFile(path));
+        var saved = document.Charts.SelectMany(c => c.XScale is null ? [c.ValueScale] : new[] { c.ValueScale, c.XScale })
+            .Select(s => (s.Minimum, s.Maximum, s.MajorUnit, s.MinorUnit, s.CrossesAt)).ToList();
+        document.UpdateAutomaticScales(fonts);
+        Assert.Equal(saved, document.Charts.SelectMany(c => c.XScale is null ? [c.ValueScale] : new[] { c.ValueScale, c.XScale })
+            .Select(s => (s.Minimum, s.Maximum, s.MajorUnit, s.MinorUnit, s.CrossesAt)));
+    }
+
+    [Theory]
+    [InlineData("Scale Window 130", 2)]
+    [InlineData("Scale Window 200", 6)]
+    [InlineData("Scale Window Geneva 9", 6)]
+    [InlineData("Scale Window New York 9", 5)]
+    [InlineData("Scale Bar Window 120", 4)]
+    [InlineData("Scale Bar Window 180", 6)]
+    [InlineData("Library Line", 11)]
+    public void Scale_LabelSpaces(string name, int expected)
+    {
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var document = ChartDocument.Load(SamplePath(name));
+        Assert.Equal(expected, document.GetLabelSpaces(document.MainChart, fonts));
+    }
+
+    public static TheoryData<string> PlainCharts() => new(AllSamples().Where(path => File.ReadAllBytes(SampleFile(path))[0] == 0x01).Where(path =>
+    {
+        var document = ChartDocument.Load(SampleFile(path));
+        var chart = document.MainChart;
+        return chart.Type != ChartType.Pie && document.Series.Count > 0 && document.OverlayChart is null
+            && path.StartsWith("Excel 1.00", StringComparison.Ordinal);
+    }));
+
+    [Theory]
+    [MemberData(nameof(PlainCharts))]
+    public void LayOut_IsExcels(string path)
+    {
+        // Needs Excel's fonts (MACEXCEL_SYSTEM). Laid out from its chart area as Excel 1.00 draws it (37.03-37.10):
+        // the border, the title, the legend, the tick length, the axis titles, and the plot area left when the labels
+        // have taken their room come out as Excel 1.00 saved them, for every chart it saved without an overlay. The
+        // "Layout" samples are library charts with legends in every position and axis titles.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var document = ChartDocument.Load(SampleFile(path));
+        var chart = document.MainChart;
+        var layout = document.LayOut(chart, fonts);
+        Assert.Equal(chart.PlotArea.Box, layout.PlotArea);
+        Assert.Equal(chart.ValueAxis.TickLength, layout.TickLength);
+        Assert.Equal(chart.ChartArea.Box, layout.ChartArea);
+    }
+
+    [Theory]
+    [InlineData("Library Line")]
+    [InlineData("Library Scatter")]
+    [InlineData("Library Column")]
+    [InlineData("Layout Legend Corner Five")]
+    [InlineData("Layout Legend Categories")]
+    [InlineData("Layout Bar Titles")]
+    [InlineData("Layout Title Legend And Value Title")]
+    public void LayOut_OfANewChart_IsExcels(string name)
+    {
+        // A chart the library builds has no layout until Excel draws it. Laid out from the default chart area, 15/16
+        // of the drawing's width by 23/25 of its height, it comes out as Excel drew and saved the same chart, and so
+        // do its automatic scales.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var saved = ChartDocument.Load(SamplePath(name));
+        var built = ChartDocument.Create(saved.MainChart.Type);
+        built.MainChart.IsBar = saved.MainChart.IsBar;
+        built.MainChart.HasLegend = saved.MainChart.HasLegend;
+        built.MainChart.LegendPosition = saved.MainChart.LegendPosition;
+        built.MainChart.LegendArea.AutomaticSize = saved.MainChart.HasLegend;
+        foreach (var series in saved.Series)
+        {
+            built.Series.Add(ChartSeries.Create(series.Name, series.Values.Select(v => v.ToDouble()), series.SourceDocument, series.ValuesReference));
+        }
+
+        foreach (var text in saved.MainChart.Texts)
+        {
+            built.MainChart.Texts.Add(ChartText.Create(text.Kind, text.Text!));
+        }
+
+        built.UpdateAutomaticScales(fonts);
+        var layout = built.LayOut(built.MainChart, fonts);
+        Assert.Equal(saved.MainChart.ChartArea.Box, layout.ChartArea);
+        Assert.Equal(saved.MainChart.DrawingMargins, ((short)layout.TopMargin, (short)layout.LeftMargin));
+        Assert.Equal(saved.MainChart.PlotArea.Box, layout.PlotArea);
+        Assert.Equal(saved.MainChart.ValueAxis.TickLength, layout.TickLength);
+        Assert.Equal(saved.MainChart.ValueScale.MajorUnit, built.MainChart.ValueScale.MajorUnit);
+        Assert.Equal(saved.MainChart.ValueScale.Maximum, built.MainChart.ValueScale.Maximum);
+    }
+
+    [Theory]
+    [InlineData("Labels Short", 1, 280)]
+    [InlineData("Labels Long Word", 2, 520)]
+    [InlineData("Labels Hyphens", 2, 520)]
+    [InlineData("Labels Wrapped 4 Lines", 4, 1000)]
+    [InlineData("Labels Wrapped 5 Lines", 5, 1240)]
+    [InlineData("Labels Narrow Slots", 9, 2200)]
+    public void TickLabels_WrapAsExcelLaysThemOut(string name, int lines, int height)
+    {
+        // Needs Excel's fonts (MACEXCEL_SYSTEM). Column charts Excel 1.00 made with NEW from text categories, in the same
+        // window: each category label wraps to its slot a word at a time (a word runs to the next space or hyphen),
+        // and a word too wide for a line breaks between characters (33.1d). Each line of Geneva 9 is 12 pixels, so the
+        // label box is lines × 240 + 40 twips, and the saved plot area is that much shorter: the plot height and the
+        // label height add up to the same in every chart. "Labels Narrow Slots" has ten categories 24 pixels wide.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var document = ChartDocument.Load(SamplePath(name));
+        var (labelHeight, _) = document.GetTickLabelSize(document.MainChart, fonts, ChartAxisKind.Category);
+        Assert.Equal(height, labelHeight);
+        Assert.Equal((lines * 12 + 2) * 20, labelHeight);
+        Assert.Equal(3053, document.MainChart.PlotArea.Box.Height + labelHeight);
+    }
+
+    [Theory]
+    [InlineData("Labels Bar Short", 140)]
+    [InlineData("Labels Bar Wrapped", 1680)]
+    public void TickLabels_WrapInABarChart(string name, int width)
+    {
+        // Needs Excel's fonts (MACEXCEL_SYSTEM). A bar chart's category labels lie along the left and wrap to a third
+        // of the chart area's width, so the saved plot area is narrower by the label box (37.0e): the plot width and
+        // the label width add up to the same in both charts.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var document = ChartDocument.Load(SamplePath(name));
+        var (_, labelWidth) = document.GetTickLabelSize(document.MainChart, fonts, ChartAxisKind.Category);
+        Assert.Equal(width, labelWidth);
+        Assert.Equal(5051, document.MainChart.PlotArea.Box.Width + labelWidth);
+    }
+
+    [Theory]
+    [InlineData("Scale Fixed Maximum Below Data", -5.5, 0.5)]
+    [InlineData("Scale Fixed Maximum Far Below Data", -22, 2)]
+    [InlineData("Scale Fixed Minimum Above Negative Data", 5, 0.5)]
+    public void Scale_FixedEndBeyondTheData(string name, double minimum, double majorUnit)
+    {
+        // A fixed end beyond the data's other end makes the range negative: the major unit is worked out from its
+        // size, and with data starting at 0 the test for starting at zero, which divides by 0, never does (37.0a).
+        var scale = ChartDocument.Load(SamplePath(name)).MainChart.ValueScale;
+        Assert.Equal(minimum, scale.Minimum);
+        Assert.Equal(majorUnit, scale.MajorUnit);
+    }
+
+    [Theory]
+    [InlineData("Scale Stacked Area", 0, 9)]
+    [InlineData("Scale Stacked Negative", 0, 9)]
+    [InlineData("Scale Stacked 100", 0, 100)]
+    [InlineData("Scale Three Series", -8, 40)]
+    [InlineData("Scale Log Negative", 3000, 3000)]
+    public void Scale_DataRange(string name, double min, double max)
+    {
+        // Stacked charts total each category's values counted positive, from 0; 100% charts run 0 to 100; a
+        // logarithmic axis leaves out values that are not positive (37.16).
+        var document = ChartDocument.Load(SamplePath(name));
+        Assert.Equal((min, max), document.GetDataRange(document.MainChart));
     }
 }

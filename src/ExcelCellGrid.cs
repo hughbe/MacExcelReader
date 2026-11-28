@@ -256,13 +256,18 @@ public sealed class ExcelCellGrid
     }
 
     /// <summary>
-    /// Gets the file bytes starting at an untouched cell's data, or returns false if the cell has been
-    /// created or is not from the file.
+    /// Gets the file's bytes from an unchanged cell's data record on (spec §12; a formula's record is §12.3), to
+    /// look at a record the library cannot decode. Returns false if the cell has been read as an object, changed
+    /// or created since the file was read, or has no data in the file.
     /// </summary>
-    internal bool TryGetRawData(int row, int column, out ReadOnlySpan<byte> data)
+    /// <param name="row">The row, from 0.</param>
+    /// <param name="column">The column, from 0.</param>
+    /// <param name="data">The bytes from the record's start to the end of the file.</param>
+    public bool TryGetRawData(int row, int column, out ReadOnlySpan<byte> data)
     {
         data = default;
-        if (_rows?[row]?[column] is not null || !IsSourcePosition(row, column))
+        if (_rows?[row]?[column] is not null || !IsSourcePosition(row, column)
+            || GetCellType(row, column) is not (ExcelCellType.Number or ExcelCellType.Text or ExcelCellType.NumericFormula or ExcelCellType.Formula))
         {
             return false;
         }

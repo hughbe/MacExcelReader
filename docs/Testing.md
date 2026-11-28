@@ -4,10 +4,10 @@ The unit tests check the library against Excel's own files. This page covers the
 files the library wrote, or any others, into a real Excel 1.x and checking what Excel made of them. It works
 for worksheets, macro sheets and charts.
 
-For Excel 1.00 it runs headless, from the command line or the tests, in [MAME](https://www.mamedev.org/)'s Mac
-Plus (`brew install mame`), with no window and nobody at the keyboard. You need the Mac Plus ROM and Excel 1.00's
-Data and Program disk images; none are included. Other releases run in
-[Mini vMac](https://www.gryphel.com/c/minivmac/) by hand, which also remains a backup for 1.00.
+It runs headless, from the command line or the tests, in [MAME](https://www.mamedev.org/)'s Mac Plus
+(`brew install mame`), with no window and nobody at the keyboard, for Excel 1.00, 1.01, 1.03, 1.04, 1.06 and 1.5.
+You need the Mac Plus ROM and each release's disks; none are included.
+[Mini vMac](https://www.gryphel.com/c/minivmac/), by hand, remains the backup.
 
 ## How it works
 
@@ -26,10 +26,12 @@ For each file, Driver:
 
 Finally Driver saves itself, so its cells keep Excel's answers, and shows the alert "Driver finished".
 
-| Excel | Running Driver |
+`excel-test run Test.dsk --excel VERSION` runs Driver in MAME ([below](#running-it-in-mame)); pack with the same
+`--excel`. By hand:
+
+| Excel | Running Driver by hand |
 |---|---|
-| 1.00 | `excel-test run Test.dsk` ([below](#running-it-in-mame)), or as for 1.01 |
-| 1.01, 1.03, 1.04, 1.06 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R; Macro > Exécuter in the French 1.01). `check` cannot turn the French 1.01's GET.FORMULA text into A1, so read it from Driver. |
+| 1.00, 1.01, 1.03, 1.04, 1.06 | Open Driver, then choose Macro > Run > `Driver!Run` (Option-Command-R; Macro > Exécuter in the French 1.01). `check` cannot turn the French 1.01's GET.FORMULA text into A1, so read it from Driver; it also adds French built-in names (`Base_de_données` and so on) to every sheet it saves. |
 | 1.5 | Open Driver. It runs by itself (Auto_Open). Pack with `--excel 1.5`. |
 
 By hand, start Excel from its own disk, not by opening a document from the Finder, which may pick a newer Excel.
@@ -50,7 +52,7 @@ For each file, `check` reports:
 - the byte counts, and how many bytes differ.
 
 By default it skips the changes Excel is expected to make:
-- automatic chart scale limits, which Excel works out when it draws;
+- automatic chart scale values, which Excel works out when it draws ([Display](Display.md));
 - recalculated formula results;
 - windows;
 - the code signature and chart version, which say which Excel saved the file;
@@ -59,7 +61,7 @@ By default it skips the changes Excel is expected to make:
 
 `--all` shows them too. The exit code is 0 when nothing unexpected differs.
 
-To test charts, `dumper newchart TYPE OUT [--series 1,2,3]... [--title T] [--bar]` builds one with the library.
+To test charts, `dumper newchart TYPE OUT [--series 1,2,3]... [--title T] [--bar] [--log] [--scale min=2]... [--overlay TYPE [--overlay-from N] [--share] [--share-x] [--hide-overlay-axes]] [--hide-value-axis] [--axis-font 3:9] [--legend Bottom] [--value-title T] [--category-title T] [--name N]... [--stacked] [--percent] [--vary] [--explode 20] [--explode-point 1=25]... [--labels values|percent] [--drop-lines] [--hilo-lines]` builds one with the library.
 
 Options for `pack`:
 - `--volume NAME`: the disk's name. Driver opens files as `Volume:Name`, so each mounted test disk needs its
@@ -137,55 +139,158 @@ recalc 1                        state word 0x018 (1 marks the sheet as needing r
 
 The same format works for any new experiment: write a list and build it.
 
+## Running an experiment in one go
+
+```bash
+dotnet run --project dumper -- excel-test experiment out/Sheet1 out/Sheet2 ... -o results/ [--no-probe] [--recompile] [--each FORMULA]... [--batch N] [--disk-size 400|800]
+```
+
+`experiment` does `pack`, `run` and `check` for a whole experiment in Excel 1.00 under MAME (below), however many
+files it has, and is the quickest way to ask Excel something:
+
+- **Disks.** It puts at most `--batch` files (30) on a disk and halves a batch whose disk overflows, so any number
+  of files can go in one command: 128 one-name sheets ran on nine disks in about 40 seconds.
+- **Commands.** Give each file a `FILE.commands`, one macro command per line, in UTF-8 (`pack` refuses anything
+  else rather than mangle accented letters). A command that gives an error does not stop the others.
+  `results/commands.tsv` lists every command with what it returned, by disk, file and Driver row, and the summary
+  shows the ones that gave an error. Wrap a command in `ISERROR(…)` to turn its failure into TRUE.
+- **Saves.** Excel's saves are collected in `results/saved/`, each disk's files as Excel left them in
+  `results/DISK/`, with `check`'s report in `results/DISK/check.txt` (`--verbose` shows it as it runs). Under
+  MAME a save sometimes reaches the disk without its data, or with one 512-byte sector of it as zeros (a formula
+  then cannot be read): 2 of 76 disks of about 20 KB saves, on 400K and 800K disks alike, at unrelated places
+  (track 3 sector 11, track 20 sector 5). The test disk is ejected, which flushes it, before MAME stops, so the
+  cause is **(unknown)**; MAME's conversion of a sector it cannot decode back to the raw image is one candidate,
+  and checking it needs MAME's `floptool`, which Homebrew's MAME does not include. `check` treats a sheet as
+  readable only if every formula and name in it decodes, and a chart only if no sector of its series lists is all
+  zeros (a chart that lost one still reads, its last series cut short; 1 of the 123 scale charts did). It names
+  any zeroed sectors, and `experiment` runs those files again on a disk of their own. A check
+  that fails on one disk is reported with the rest instead of ending the experiment.
+- **Crashes.** A disk that does not finish is split in halves until the file that stops Excel is found; its
+  last screen is in `results/DISK/screen.png`. Excel 1.00 crashes on some formulas it should refuse and on some
+  number formats ([Excel bugs](ExcelBugs.md)), so give a suspect formula or format a sheet of its own.
+- **Recompiling.** With `--recompile`, Driver enters each formula again with FORMULA, from the text GET.FORMULA
+  gave. `check` lists the ones Excel refused (FORMULA gave an error, so the cell kept the library's tokens and
+  would otherwise pass as a match) under "not recompiled", and `commands.tsv` has a row for each.
+- **Typing.** Give a file a `FILE.type` to have Excel 1.00 compile formulas from A1 text, as a person types them:
+  one formula per line, the cell, then spaces and the text (`B2 =D:E`), in UTF-8; `#` lines are comments. Driver
+  saves and leaves that file open, and once Driver has finished `run` types each formula: it brings the window to
+  the front, chooses Formula > Goto (Command-G) and types the cell, then types the text and Return. An alert that
+  follows is answered with Return. A formula Excel refuses ("Error in formula") stays in the formula bar, which
+  Command-period does not cancel in Excel 1.00, so `run` clicks the formula bar's cancel box; it tells a refusal
+  from an entry by whether the formula bar's enter box is still drawn. After the last formula it saves the file
+  with Command-S. `pack` puts the list on the disk as a text file, `Typing`, and `run` writes back `Typed`,
+  saying for each formula whether Excel took it, which `check` reads: a typed formula Excel refused in a cell our
+  copy has a formula for is reported "refused when typed", and in a cell our copy leaves empty `check` compiles
+  the text itself and compares the tokens with Excel's. `sheet LIST OUT --type` builds such a sheet from a formula
+  list: column A holds each text, column B is left empty and `OUT.type` types each formula into it, so Excel's
+  save holds its own compilation of every formula, or nothing where it refused one (the `Typed` samples).
+  Typing takes about two seconds of emulated time a formula. Array formulas are not typed.
+
+Things to keep in mind when designing an experiment. `pack` warns about the ones marked *(warned)*, from each
+`.commands` line and `--each` and `--end`:
+
+- FORMULA and the other macro commands that take formula text read it as R1C1, whatever `A1.R1C1` says:
+  `=FORMULA("=A1+1")` gives `#VALUE!`. Write `=FORMULA("=R1C1+1")`, or `R[-1]C` for relative references
+  *(warned)*.
+- Some formulas and formats crash Excel 1.00 where it should refuse them ([Excel bugs](ExcelBugs.md)): a number
+  format with two exponents in a section after the first, given to TEXT (two in the first section give `#VALUE!`);
+  `:` followed by a minus sign; and a function joined by `:` or a space to a union ending in a relative reference
+  *(warned)*. A crash costs a bisection of its disk, so give anything suspect a sheet of its own.
+- `--recompile` goes through R1C1 text, which cannot say everything A1 text can: whole rows or columns with a
+  relative end compile to two areas joined by `:` ([Excel bugs](ExcelBugs.md#getformulas-whole-row-text-does-not-compile-back-the-same-excel-100-103)),
+  so token differences there are not differences in how Excel compiles typed A1 text. `check` shows those in grey
+  and does not count them; type such formulas instead (`FILE.type` above).
+- A typed formula that refers to its own cell makes Excel show "Can't resolve circular references"; the formula is
+  still entered. Keep typed formulas' references clear of the cells they are typed into.
+- Open grows a worksheet's table to every cell its formulas refer to (spec §6.1). A sheet referring to both
+  row 16384 and column IV (`IV16384`, or `IV2` and `B16384` in different formulas) needs about 25 MB, so Excel
+  will not open it, and a far reference can make the save too big for the disk. `pack` warns about a sheet whose
+  table would pass 1 MB; generated formulas should refer to cells near the top left.
+- Excel keeps one name for names that compare equal (spec §11), so a later `DEFINE.NAME` of an equal name
+  renames the earlier one rather than adding a second.
+- `dumper cell FILE ADDRESS` shows a formula's raw record when the library cannot decode it, to tell a lost
+  sector from a token the library does not know. `excel-test files DISK [-o DIR]` lists the files on a floppy
+  image, MFS or HFS, and copies them out with their resource forks (`NAME.rsrc`), since macOS no longer mounts
+  these disks.
+
 ## Running it in MAME
 
 ```bash
 export MACEXCEL_SYSTEM=~/Excel/Data.img MACEXCEL_PROGRAM=~/Excel/Program.img MACEXCEL_ROM=~/Mac/MacPlus.ROM
-dotnet run --project dumper -- excel-test run Test.dsk [--capture "Volume:Name saved"]... [-o screens/]
+dotnet run --project dumper -- excel-test run Test.dsk [--excel 1.03] [--capture "Volume:Name saved"]... [-o screens/]
 ```
 
-`run` boots Excel 1.00 in MAME's Mac Plus, in the background (no window, no Dock icon, no focus taken: it starts
-MAME with SDL's dummy video and audio drivers and no input providers), runs Driver, writes the disk back with Excel's saves for `check`, and
-exits 0 if Driver finished. MAME runs the Mac about 30 times faster than real time: a disk of three 100-formula
-sheets takes about five seconds. It needs:
+`run` boots Excel in MAME's Mac Plus, in the background (no window, no Dock icon, no focus taken: it starts MAME
+with SDL's dummy video and audio drivers and no input providers), runs Driver, writes the disk back with Excel's
+saves for `check`, and exits 0 if Driver finished. MAME runs the Mac about 30 times faster than real time: a disk
+of three 100-formula sheets takes about five seconds, in any release. It needs:
 
 - `mame` on the `PATH` (or `--mame`);
 - the Mac Plus ROM (128K, checksum `4D1F8172`; Mini vMac's `vMac.ROM` is one, with bytes after it that `run`
   ignores), `--rom` or `MACEXCEL_ROM`. `run` splits it into the even and odd halves MAME's `macplus` set wants.
   MAME also wants the keyboard's microcontroller ROM, which `run` does not need: it writes an empty stand-in, so
   MAME warns that `341-0332-a.bin` has the wrong checksum;
-- Excel 1.00's Data disk, for its System and Finder (`--system` or `MACEXCEL_SYSTEM`, which the renderer also
-  uses for fonts), and its Program disk (`--program` or `MACEXCEL_PROGRAM`). The Program disk must be one whose
-  copy protection passes in an emulator: the archive.org copy.
+- the release's disks, `--program` and `--system` or the variables in the table: the disk (or folder) with Excel
+  on it, and a startup disk for its System and Finder where that disk has none.
+
+| `--excel` | Program (`--program`) | System (`--system`) |
+|---|---|---|
+| `1.0` (default) | `MACEXCEL_PROGRAM`: Excel 1.00's Program disk, the archive.org copy, whose copy protection passes in an emulator | `MACEXCEL_SYSTEM`: Excel 1.00's Data disk (which the renderer also uses for fonts) |
+| `1.01` | `MACEXCEL_PROGRAM_1_01`: the French 800K disk (WinWorld) | `MACEXCEL_SYSTEM_1_01`: any startup disk, such as Excel 1.04's |
+| `1.03` | `MACEXCEL_PROGRAM_1_03`: the 800K Excel Program disk, which has its own System Folder | not needed |
+| `1.04` | `MACEXCEL_PROGRAM_1_04`: the 800K disk (WinWorld), with its own System Folder | not needed |
+| `1.06` | `MACEXCEL_PROGRAM_1_06`: the 800K disk (WinWorld) | `MACEXCEL_SYSTEM_1_06`: as for 1.01 |
+| `1.5` | `MACEXCEL_PROGRAM_1_5`: a folder holding `Microsoft Excel` with its resource fork and Finder info (macOS only), or a disk with it | `MACEXCEL_SYSTEM_1_5`: as for 1.01 |
+
+The 1.03 and 1.04 disks both have System 3.2 and Finder 5.3, so every release after 1.00 runs under that System.
+The Mac Plus has 4MB, MAME's default, which is enough for 1.5.
 
 How it works:
 
-- **Boot disk.** Excel's copy protection checks the disk Excel runs from, so `run` keeps the Program disk as it
-  is, grows it to 800K and adds the System and Finder, then copies in the Data disk's boot blocks with Excel as
-  the startup application. The Mac boots straight into Excel, with the test disk in the second drive.
+- **Boot disk.** Excel 1.00's copy protection checks the disk Excel runs from, so for 1.00 `run` keeps the
+  Program disk as it is, grows it to 800K and adds the System and Finder, then copies in the Data disk's boot
+  blocks with Excel as the startup application (`bbHelloName`). The later releases came on HFS disks, whose
+  System looks for the startup application only in the System Folder, so `run` lifts Excel, its help file, the
+  System and the Finder onto a new 800K MFS disk, which has no folders, with the boot blocks of the disk the
+  System came from. None of them checks for its master disk. The Mac boots straight into Excel, with the test
+  disk in the second drive. Excel 1.01's application, `Microsoft Excel 1.01F`, is renamed `Microsoft Excel` there,
+  since the boot blocks hold 15 characters.
+- **Starting.** Excel 1.04, 1.06 and 1.5 ask for a name to personalize the copy every time, since the boot disk
+  is new each run: the script types one and clicks OK, which Return does not choose. Other dialogs at startup,
+  such as 1.5's opening screen, close by themselves.
 - **Keys.** MAME's Mac Plus keyboard cannot run without its microcontroller's ROM, so `dumper/excel-test.lua`,
-  MAME's autoboot script, posts key events into the Event Manager's queue itself, as PostEvent does. It opens
-  Driver with Command-O, typing its name to select it in the Open dialog; runs it with Option-Command-R; waits
-  for the "Driver finished" alert, answering and logging any other dialog with Return; and finally ejects the
-  test disk with Command-Shift-2, which flushes it.
+  MAME's autoboot script, posts key and mouse events into the Event Manager's queue itself, as PostEvent does. It
+  opens Driver with Command-O, typing its name to select it in the Open dialog; runs it with Option-Command-R
+  (Excel 1.5 runs it by itself, Auto_Open); waits for the "Driver finished" alert, answering and logging any
+  other dialog with Return; types any `FILE.type` formulas ([above](#running-an-experiment-in-one-go)); and
+  finally ejects the test disk with Command-Shift-2, which flushes it. A click is a mouse-down and a mouse-up event
+  posted the same way, at the pointer (its three low-memory copies moved to the spot) or at a dialog item's middle,
+  with the button state (`MBState`, `$172`) set to down and back to up.
+- **Windows.** The script skips Excel's own windows (kind 8): the formula bar, which 1.00 leaves untitled and
+  1.5 titles with its font's name (`Times`), and the Clipboard.
 - **Captures.** For each `--capture` title, the script brings windows to the front with Driver's second macro,
   `Next` (Option-Command-W, `ACTIVATE.NEXT`), until that one is in front, then copies the screen buffer and
   crops it to the window, title bar, frame and shadow, as `tests/Data/Screens` holds them. The pointer stays in
-  the top left corner, over the Apple menu. `TITLE=FILE.png` names the PNG. Pack with `--keep-open`. Driver
-  cannot bring a window to the front with `ACTIVATE`, which gave an error for every saved file's title
-  (`Render:R Basics saved`, `R Basics saved`, `Render:R Basics`, `R Basics`) when run from a second macro.
+  the top left corner, over the Apple menu. `TITLE=FILE.png` names the PNG. Pack with `--keep-open`. Excel 1.00
+  titles the window of a file on another disk with its volume (`Render:R Basics saved`); 1.03 and 1.5 do not
+  (`R Basics saved`), so a title with a volume also matches the window without it. Driver cannot bring a window
+  to the front with `ACTIVATE`, which gave an error for every saved file's title (`Render:R Basics saved`,
+  `R Basics saved`, `Render:R Basics`, `R Basics`) when run from a second macro in 1.00.
 - **Failures.** If Driver does not finish within `--timeout` seconds of emulated time (default 3600), `run`
   leaves the disk unchanged and keeps MAME's working folder, with the last screen as `screen.png`. `--work DIR`
   keeps it anyway, `--screen FILE` saves the last screen, and `--show` opens MAME's window at real speed to
   watch.
 
-`ExcelRunTests` runs Render Basics through `pack`, `run` and `check` and compares the capture with its golden
-when the three variables are set and MAME is installed.
+`excel-test experiment` takes the same `--excel`, `--program` and `--system`. `ExcelRunTests` runs Render Basics
+through `pack`, `run` and `check` and compares the capture with its golden for 1.00, and runs it in each later
+release whose variables are set (only that the run finishes for the French 1.01). Each test passes without
+checking anything when its variables are not set or MAME is not installed.
 
 ## Running it in Mini vMac
 
-For the other releases, `tools/minivmac/start.sh SYSTEM.dsk EXCEL.dsk Test.dsk` restarts the emulator and mounts
-the disks in order. Things to know:
+Mini vMac is the backup, for watching a run by hand or anything the MAME script cannot do.
+`tools/minivmac/start.sh SYSTEM.dsk EXCEL.dsk Test.dsk` restarts the emulator and mounts the disks in order. Things
+to know:
 
 - **Focus:** Mini vMac pauses whenever its window is not in front.
 - **Disk limit:** Mini vMac mounts at most six disk images.
@@ -211,6 +316,14 @@ dotnet run --project dumper -- excel-test pack Render.dsk "out/R Basics" --volum
 dotnet run --project dumper -- excel-test run Render.dsk --capture "Render:R Basics saved=Render Basics.png" -o tests/Data/Screens
 MACEXCEL_SYSTEM=~/Excel/Data.img dotnet test --filter Rendering_MatchesExcelsScreen
 ```
+
+Charts work the same way: `charts.txt` names each chart Excel saved after drawing it (the `Draw` samples), its
+window's title and how many pixels the renderer still draws differently, and
+`ExperimentTests.ChartRendering_MatchesExcelsScreen` checks that count. Charts open as `Volume:Name saved`; the
+window shows the volume in its title. A window that runs off the foot of the screen is captured shorter and with the
+screen's corner in it, so size such windows to fit (`=SIZE(300,170)`). To capture a chart Excel makes itself, pack a sheet whose `.commands` select its data and
+run `=NEW(2)` (and a gallery format, such as `=GALLERY.PIE(5)`): Driver then saves the new chart under the sheet's
+name.
 
 Without MAME, capture them in Mini vMac: pack with `--keep-open`, run Driver, bring each window to the front from
 the Window menu and capture Mini vMac's window at its exact pixels with macOS's `screencapture -o -l<window id>`
@@ -287,6 +400,27 @@ window, so they differ from the renderer where it lies.
 | Nov 2026 | 1.00 | Sheets built to show text, bold, italic, alignments, fills, borders, a selection, scrolling, no gridlines, no headings, formulas shown, odd and hidden column widths, `Expenses`, Geneva 11 and 12, New York 10 and Monaco 9 as the standard font, and 17 scroll positions to row 16383, opened with `--keep-open` and each window captured from the screen | `ExcelRenderer` draws all but Geneva 11 pixel for pixel, apart from the mouse pointer: headings, gridlines and their pattern phase, clearing under spilled text, QuickDraw's italic, the selection and active cell, Excel's split boxes, the thumbs, and the grey past row 16384. The vertical thumb fits the 17 positions but its rule is inferred; Geneva 11, stretched from 12, differs in about 1,000 pixels (spec §13, [Display](Display.md); the `Render` samples, `tests/Data/Screens`) |
 | Nov 2026 | 1.00 | The same captures, with the vertical scroll bar's code decompiled (`18.0c`, `18.12`) and the Mac Plus ROM's text drawing read (`FMSwapFont`, `DrText`, `StretchBits`) | `ExcelRenderer` draws every capture pixel for pixel, Geneva 11 included, apart from the mouse pointer. The vertical scroll bar runs to 17982, with the first and last 20 rows taking 819 each; a scaled size is 234/256 of Geneva 12, not 11/12, which fixes the text widths, and StretchBits ORs together the rows and columns it shrinks ([Display](Display.md)) |
 | Nov 2026 | 1.00 | The headless harness (`excel-test run`, MAME's Mac Plus): the 27 `Render` windows captured again, `TEXT Digits 1`–`3` run again from their sheets and checked with `check` | Every window equals Excel 1.00's screen under Mini vMac outside the pointer, which the old captures held, and `ExcelRenderer` draws every pixel of each, frame and shadow included; the screens are now these captures. The TEXT sheets' saves have the same cells as the Mini vMac run and the samples, and `check` gives the same result. Excel 1.00's copy protection checks the disk Excel runs from |
+| Nov 2026 | 1.00 | `DEFINE.NAME` with every Mac OS Roman character from `0x80` to `0xFF` in a name, one sheet each after 31 plain names, run with `excel-test experiment` (128 sheets on nine disks in about 40 seconds); then twelve names and their equivalents (`Name Equivalents`) | Names compare ignoring case and accents, with `Æ`/`æ` as AE, `Œ`/`œ` as OE and `Ø`/`ø` as O; equal names are one name, which a later definition renames; `ß`, symbols and the capitals `0xE5`–`0xF4` are refused. The library's name order and formula name lookup now follow this (spec §11; `tests/Data/name-characters-1.00.txt`). About one save in twenty under MAME reached the directory without its data; `experiment` runs those again |
+| Nov 2026 | 1.00 | `Referenced Cells` (seven formulas referring to cells, whole rows and columns, areas to the last row and column, a name and another document) and its macro-sheet twin, opened and saved; then names defined with R1C1 offsets and used from other cells, typed by FORMULA in new sheets (`Name Relative Down`, `Off`, `Wrap Row`, `Wrap Column`) | Open grows a worksheet's table to every cell its formulas refer to, names' definitions included, plus the margin; areas reaching the last row or column don't count in that direction, other documents and macro sheets don't count at all. A relative name counts from the cell that uses it and wraps round the sheet; a formula whose table would not fit in memory gives `#VALUE!`. Typing a formula grows a new sheet's table in the count form, without a margin. The library sizes the tables it writes the same way (spec §6.1, §11) |
+| Nov 2026 | 1.00 | TEXT of three values in ten scientific formats, among them a run after the exponent with and without a `.` before it (`0E+00 0`, `0E+00.0`) | The exponent fills the digit runs after the `E` up to a `.`, padded to the placeholders after the `E`; runs after the `.` show only their 0s. The library showed `0E+00.0` as `1E+03.0` and `0E+00 0` as `1E+003 0` before; all ten now match ([Display](Display.md)) |
+| Nov 2026 | 1.00 | 960 random formulas on 12 sheets, recompiled by Excel (`--recompile`); then the refused and crashing ones narrowed down with FORMULA in R1C1, one per sheet | Excel's compiler takes only references (or IF, CHOOSE, INDEX and other functions that can return one) as operands of `:`, intersection and union, and as arguments typed R alone; 62 formulas the library compiled were refused, and the library now refuses them too. Excel pairs `cell:cell` into an area before other ranges (`=B$2:$C3:B2:C3`), which the library now does. FORMULA reads R1C1 only, and R1C1 text turns relative whole rows and columns into two areas, so those differences were not real. Two refused shapes crash Excel instead (spec §15.4, [Excel bugs](ExcelBugs.md)) |
+| Nov 2026 | 1.00 | The 1,042 TEXT results of the earlier random formats again, with Excel's display routine (`19.0d`) and format compiler (`07.09`) read from their code; then 1,200 new random formats (`TEXT Formats 01`–`23`; seven sheets crashed Excel) | The library's display now follows `19.0d` token by token: a second `.` prints and the decimals go on, each decimal run pads on its own, integer digits no run took come out at the point, the exponent's digits spread over the runs after the `E`, percent signs do not scale a scientific number, an empty section still shows `-`, and only the hour just before AM/PM is 12-hour. 237 differences became 5, and on the new formats 810 of 815 agree; every remaining one is a format whose exponent count Excel's compiler writes onto the `E` when it pads a thousands format, which the library now does too, leaving a count byte Excel fills from memory (spec §7, [Display](Display.md)) |
+| Nov 2026 | 1.01, 1.03, 1.04, 1.06, 1.5 | `excel-test run` and `experiment` in MAME: Render Basics in each release, captured; eight 1.03 samples (`Column Widths`, `Errors`, `Intersections`, `Macro Names`, `Table`, `Combination`, `Pie Exploded`, `Recalculated`) and seven 1.5 samples (`Colour Formats`, `Frozen Panes`, `Format Text Section`, `Functions 256 And Up`, `BEARINGS`, `LOAN1`, `PROFIT CHART`) on two disks each | Every release runs headless from its own disks under System 3.2, about four seconds a disk. Excel's saves match, apart from `Macro Names`' calculation mode (Excel's own setting) and the French built-in names 1.01 adds. 1.03 and 1.5 leave the volume out of a window's title; 1.5 titles its formula bar with its font's name |
+| Nov 2026 | 1.00 | 116 formulas typed in A1 text with `sheet --type`: whole columns and rows with every placing of `$`, ranges, intersections and unions of them, §15.4's range and reference-operand cases, signs before whole rows, and unions without parentheses mixed with other operators | Typed `=D:E`, `=$D:E` and `=30:31` are one area, unlike their R1C1 text. Three parser fixes: a comma outside a function's arguments is a union binding more tightly than every operator but range and intersection (`=1+D30,E31` is `1+(D30,E31)`), whole rows can follow an intersection's space, and a sign against digits makes a number (`=-30:31` is refused); a union with an empty side is a #NULL! memory error. The library now compiles every typed text to Excel's tokens and refuses the 20 Excel refuses (spec §15.4; `Typed Columns`, `Typed Rows`, `Typed Ranges`, `Typed Signs`, `Typed Unions`) |
+| Nov 2026 | 1.00 | The seven random-format sheets that crashed Excel, split into 280 formats with TEXT and FORMAT.NUMBER on sheets of their own | Only TEXT crashes, and only for a format with two exponents in a section after the first, whichever section the value uses; with them in the first section TEXT gives `#VALUE!` (`TEXT Two Exponents`), and FORMAT.NUMBER refuses both. `pack` now warns about these and the other crashing shapes ([Excel bugs](ExcelBugs.md)) |
+| Nov 2026 | 1.00 | `Calc 3`: 166 function results, among them square roots, exponentials, logarithms and trigonometry up to 1E9, MOD and ROUND at their limits, financial functions, statistics, dates and text, compared with correctly rounded values | `LN` and `LOG10` were exact, `EXP` and `SQRT` at most a unit out, the trigonometric functions within 2 units up to 3 and up to 189 at 1E8, then #NUM! at 1E9; `MOD` fails for large quotients, `ROUND` works on the 14-digit conversion, times round to the second, and `RATE` without a guess fails over 360 periods ([Calculation](Calculation.md); `tests/Data/calc-1.00.txt`, now checked against all three Calc samples) |
+| Nov 2026 | 1.00, 1.04 | The System files of Excel 1.00's Data disk and of Excel 1.04's disk (System 3.2), read with `excel-test files` | The Data disk's System has no `FOND` resources; System 3.2 has five, and Geneva's gives bold an extra width of 0, which is why a scaled size's bold headings are lighter under it ([Display](Display.md)) |
+| Nov 2026 | 1.00 | 123 library charts with chosen data, fixed scale fields, stacked, 100%, logarithmic and scatter formats, and windows from 70 to 330 points (`newchart --scale`, `--log`, `SIZE`), with the scale code (`37.0a`, `37.16`, `37.2d`) decompiled | Excel saves the automatic scale it drew with; the library now works it out to the bit for every chart sample, Excel's own from 1.03 and 1.5 included: the 8% rule for starting at zero, the major units 10, 20, 50 × a power of ten, stacked totals counted positive, logarithmic scales as exponents, and the label count that fits the plot area (`Scale` samples; [Display](Display.md)) |
+| Nov 2026 | 1.00 | 30 more library charts: fixed ends beyond the data, and overlays with their axes shown and hidden, shared and not (`newchart --overlay`, `--share`, `--hide-overlay-axes`); four chart windows captured at heights from 130 to 250 points | A fixed end beyond the data gives a negative range, whose major unit Excel takes from its size, and the zero test that divides by 0 never starts at zero. Excel works out the overlay's shared-scale flags again at each drawing (`37.34`) and plots both charts on their combined data (`37.2f`); the library now does both, matching all 139 chart saves. On screen the labels keep their size in every window, and the value axes' interval counts fit the plot height ÷ the label height ([Display](Display.md)) |
+| Nov 2026 | 1.00 | 495 library charts in threshold sweeps: line charts at 17 window heights in the System font and 9 each in Geneva 9 and New York 9, line charts at 7 widths, and bar charts at 13 widths, each with 9 data ranges that change the major unit at one interval count (`newchart --axis-font`); `37.08`, `37.10` and `37.0e` decompiled | `37.0a` counts labels against the plot area before the labels are laid out. Each window size gives one interval count, the same for every data range; width makes no difference to a vertical axis. The counts first seemed to fit labels a pixel shorter than their fonts, until the label layout (next row) explained them ([Display](Display.md)) |
+| Nov 2026 | 1.00 | The label layout decompiled (`37.09`, `37.0e`, `37.0f`, `37.2a`, `37.2b`) and checked against the 495 sweep charts | The room the labels take is their extent (text plus a pixel of margin round it; 100 twips more beside the value labels across), half the other axis's labels overhanging, and two tick lengths, on each side; the count divides by the font's ascent and descent. Worked back from the saved layout, it reproduces the scales of all 728 chart saves (`ChartDocument.GetLabelSpaces`; [Display](Display.md)) |
+| Nov 2026 | 1.00 | 21 column and bar charts Excel made with NEW from text categories in a worksheet (`sheet --worksheet` with `cell` lines), long labels, single long words, hyphens, ten narrow categories and small windows; the label layout's line breaker decompiled (`33.1d`, `33.1e`, `33.1f`, `33.21`) | Category labels wrap to their slot a word at a time, a word running to the next space or hyphen, and a word too wide breaks between characters; each line takes 240 twips of Geneva 9 off the plot area, exactly as the library now works out (`Labels` samples, `ChartDocument.GetTickLabelSize`). Charts Excel makes label in font 1, the application font, which is Geneva ([Display](Display.md)) |
+| Nov 2026 | 1.00 | The chart layout decompiled (`37.03`, `37.04`, `37.07`, `37.0f`, `37.2c`, `38.02`) and run forward from each save's chart area | The chart area, border, title (its box plus 5% of the chart's height), tick length (the smaller side ÷ 70) and the labels' room give the plot area Excel saved for all 716 charts without a legend, axis titles or overlay; number labels are formatted as General in their slot's width, only the ends (and ends ± a unit) measured. A library chart never drawn gets Excel's layout and scales ([Display](Display.md), `ChartDocument.LayOut`) |
+| Nov 2026 | 1.00 | 23 library charts with legends in every position (two and five series, categories, bars) and axis titles, a long title and a scatter chart with all three (`newchart --legend`, `--value-title`, `--category-title`); the legend and axis-title layout decompiled (`57.00`–`57.04`, `37.05`, `37.06`, `33.1e` vertical text) | The legend's entries (key, text, margins, 80-twip spacing), columns and rows, the axis titles' widths and vertical text, and text objects' fonts at mem 20 and 21 give the plot area of every chart Excel 1.00 saved without an overlay, 745 in all; library charts with legends and titles laid out before Excel drew them come out the same (`Layout` samples) |
+| Nov 2026 | 1.00 | Twelve charts (line, column, bar, stacked area, scatter, logarithmic, pie, with titles, axis titles, legends and a smaller window) opened with `--keep-open` and each window captured from the screen; the drawing code decompiled (`32.04`–`32.07`, `3a.00`–`3a.0f`, `39.00`–`39.04`, `53.03`, `53.08`, `55.00`, `56.00`–`56.06`) and the Mac Plus ROM's DrawLine disassembled | `ChartRenderer` draws ten of them pixel for pixel, title bar included: lines are QuickDraw's slab lines drawn by length from half a pen off their point, ticks are a 70th of the plot area's smaller side, markers are Excel's 8 × 8 bitmaps with a larger mask, columns follow the overlap and gap, areas are QuickDraw polygons clipped to the plot area, and pies are QuickDraw arcs with radii from Excel's sine table. The two legends differ (592 and 358 pixels) and the logarithmic chart's first point (31) ([Display](Display.md) "Drawing a chart"; the `Draw` samples, `tests/Data/Screens/charts.txt`) |
+| Nov 2026 | 1.00 | 41 more charts opened and captured: legends in every position with entries of different widths, a category legend, scatter and pie legends; logarithmic scales; stacked, 100% and stacked bar columns; overlays; exploded pies; data labels on columns, bars, lines, scatter charts, pies and areas, from library charts and from charts Excel made itself with `NEW(2)` and the gallery; the legend, data label and pie code decompiled (`57.00`, `33.05`, `33.08`, `33.0d`, `33.10`, `39.01`, `53.04`, `55.03`, `56.0b`–`56.0f`) | `ChartRenderer` draws 47 of the 53 captured chart windows pixel for pixel; the rest differ by a pixel in a label's place. Tick labels erase their text's rectangle, area borders run up the left side and down the right a pixel in, clipped to the area, and an overlay's series take the first automatic patterns. Library charts had blank data-label templates, so Excel labelled them with the series' name: `Chart.Create` now writes Excel's ([Display](Display.md) "Drawing a chart", spec §16.5; the `Draw` samples) |
+| Nov 2026 | 1.00 | 12 line charts with Geneva 9 labels at window heights from 161 to 282 points (`=SIZE`), and two Excel-made charts again at a size that fits the screen; `55.02` decoded further | Every one of the 64 captured chart windows now matches pixel for pixel. The chart area's foot stands the top margin up from the drawing's even when the drawing leaves an odd twip; an area's base is the category axis's line moved half a pen toward it; tick labels erase their box as data labels do. Captures of windows running off the screen held its corner ([Display](Display.md) "Drawing a chart"; the `Draw` samples) |
+| Nov 2026 | 1.00 | Library charts with drop lines and hi-lo lines (`newchart --drop-lines`, `--hilo-lines`), free text, a bordered and shadowed plot area, six arrow charts and `CLOCK.CH`, captured; `3c.03`–`3c.06`, `53.01`, `31.07`–`31.09`, `33.03`, `33.1b` and `52.00`–`52.04` decompiled | The drop-line, hi-lo-line, free-text, area and `CLOCK.CH` windows match pixel for pixel; five other arrow charts still differ by 16 to 230 pixels along parts of their shafts and heads. `CLOCK.CH`'s labels draw bold with the style bits the spec's codes give as italic (spec §16.4, §18; [Display](Display.md#drawing-a-chart)). The captures are not yet samples |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

@@ -52,6 +52,15 @@ sealed class RenderCommand : Command<RenderSettings>
         }
 
         var fonts = LoadFonts(system);
+        MonoBitmap bitmap;
+        if (Program.IsChart(settings.Input))
+        {
+            // A chart's window, at the size it was saved.
+            bitmap = MacExcelReader.Rendering.ChartRenderer.Render(MacExcelReader.Charts.ChartDocument.Load(settings.Input), fonts,
+                !settings.NoFrame, settings.Title ?? Path.GetFileName(settings.Input));
+            return Write(bitmap, settings);
+        }
+
         var document = ExcelDocument.Load(settings.Input);
         var options = new ExcelRenderOptions
         {
@@ -68,7 +77,12 @@ sealed class RenderCommand : Command<RenderSettings>
             options.Height = int.Parse(parts[1]);
         }
 
-        var bitmap = ExcelRenderer.Render(document, fonts, options);
+        bitmap = ExcelRenderer.Render(document, fonts, options);
+        return Write(bitmap, settings);
+    }
+
+    private static int Write(MonoBitmap bitmap, RenderSettings settings)
+    {
         if (settings.Scale > 1)
         {
             bitmap = Enlarge(bitmap, settings.Scale);

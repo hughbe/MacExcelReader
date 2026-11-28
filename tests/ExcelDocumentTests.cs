@@ -234,4 +234,73 @@ public class ExcelDocumentTests
         }
     }
 
+    private static (int Rows, int Columns) SavedTable(ExcelDocument document)
+    {
+        var saved = ExcelDocument.Read(document.ToArray());
+        return (saved.Cells.RowCount, saved.Cells.ColumnCount);
+    }
+
+    [Theory]
+    [InlineData("=D20", 21, 5)]
+    [InlineData("=SUM(C3:E9)", 10, 6)]
+    [InlineData("=SUM(B2:B16384)", 2, 3)]
+    [InlineData("=SUM(B2:IV2)", 3, 2)]
+    [InlineData("=Other!K99", 2, 2)]
+    public void Save_GrowsAWorksheetsTableToCoverItsFormulasReferences(string text, int rows, int columns)
+    {
+        // Spec §6.1: a worksheet's table covers every cell its formulas refer to, plus the blank margin, except an
+        // area reaching the last row (for rows) or column (for columns) and other documents' cells.
+        var document = ExcelDocument.CreateWorksheet();
+        document.ExternalDocuments.Add(new ExcelExternalDocument("Other"));
+        document.Cells[0, 0].SetFormula(ExcelFormula.Parse(text, document));
+        Assert.Equal((rows, columns), SavedTable(document));
+    }
+
+    [Theory]
+    [InlineData("C7", "E10", "E10", 11, 6)]
+    [InlineData("A1", "A2", "A1", 16385, 2)]
+    [InlineData("A1", "B1", "A1", 2, 257)]
+    [InlineData("C7", "E10", "A1", 2, 2)]
+    public void Save_FollowsARelativeNameFromTheCellThatUsesIt(string definition, string definedAt, string usedAt, int rows, int columns)
+    {
+        // A relative name refers to cells from the cell that uses it, wrapping round the sheet (spec §11): C7 defined
+        // with E10 active is three rows up and two columns left, so from E10 the table covers E10 (11 x 6); A1
+        // defined from A2 is one row up, which from A1 is A16384. From A1 the first name is IU16382, which would need a
+        // table reaching the last row and column; Excel refuses that formula, and the library keeps the table small.
+        var document = ExcelDocument.CreateWorksheet();
+        var name = new ExcelDefinedName("Near");
+        name.SetDefinition("=" + definition, ExcelCellAddress.Parse(definedAt), document);
+        document.Names.Add(name);
+        var at = ExcelCellAddress.Parse(usedAt);
+        document.Cells[at.Row, at.Column].SetFormula(ExcelFormula.Parse("=Near", document));
+        Assert.Equal((rows, columns), SavedTable(document));
+    }
+
+    [Fact]
+    public void GetReferencedExtent_CountsTheCellsFormulasReferTo()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        document.Cells[0, 0].SetFormula(ExcelFormula.Parse("=D20+SUM(B2:B16384)", document));
+        Assert.Equal((20, 4), document.GetReferencedExtent());
+    }
+
+    [Fact]
+    public void TryGetRawData_GivesAnUnchangedFormulasRecord()
+    {
+        var document = ExcelDocument.CreateWorksheet();
+        var formula = ExcelFormula.Parse("=A1+1", document);
+        document.Cells[2, 3].SetFormula(formula);
+        var read = ExcelDocument.Read(document.ToArray());
+        Assert.True(read.Cells.TryGetRawData(2, 3, out var record));
+        Assert.Equal(Convert.ToHexString(formula.Expression), Convert.ToHexString(record.Slice(15, record[14])));
+        Assert.False(read.Cells.TryGetRawData(0, 0, out _));
+    }
+
+    [Fact]
+    public void Save_LeavesAMacroSheetsTableAtItsCells()
+    {
+        var document = ExcelDocument.CreateMacroSheet();
+        document.Cells[0, 0].SetFormula(ExcelFormula.Parse("=D20", document));
+        Assert.Equal((2, 2), SavedTable(document));
+    }
 }

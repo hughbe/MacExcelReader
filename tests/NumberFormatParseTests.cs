@@ -44,6 +44,13 @@ public class NumberFormatParseTests
         var version = sample.StartsWith("Excel 1.5", StringComparison.Ordinal) ? ExcelVersion.Excel150 : ExcelVersion.Excel100;
         foreach (var format in document.NumberFormats)
         {
+            // A format whose exponent count Excel's compiler wrote onto the E (spec §7) shows a control character
+            // there, which no text compiles to.
+            if (format.ToText().Any(char.IsControl))
+            {
+                continue;
+            }
+
             var target = ExcelDocument.CreateWorksheet();
             target.Version = document.Version;
             int index = target.AddNumberFormat(format.ToText(), version);

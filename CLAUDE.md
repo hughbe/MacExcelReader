@@ -8,8 +8,8 @@ specification it is built from. The library is unreleased, so its API can change
 - `src/`: the library. `dumper/`: the `dumper` command-line tool, including `sheet` (build test sheets) and
   `excel-test` (the harness for running files in a real Excel). `tests/`: xUnit tests over `tests/Samples`.
 - `tools/`: `pcode.py`, the p-code disassembler (`python3 -I tools/pcode.py EXCEL.rsrc 18.12` lists a procedure
-  from the application's resource fork), and `minivmac/` for running the harness by hand in releases other than 1.00
-  (`excel-test run` runs it headless in MAME for 1.00).
+  from the application's resource fork), and `minivmac/` for running the harness by hand, the backup to
+  `excel-test run`, which runs it headless in MAME in every release from 1.00 to 1.5 (`--excel 1.03`).
 - `docs/Spec.md`: the format. `docs/Display.md`: how Excel formats values and draws cells and windows.
   `docs/Calculation.md`: what Excel calculates. `docs/Sylk.md`: Excel's SYLK export. `docs/ExcelBugs.md`: Excel's
   own bugs and quirks. `docs/Testing.md`: the harness and the results of every experiment run.
@@ -30,6 +30,10 @@ specification it is built from. The library is unreleased, so its API can change
   procedure is unless the sentence already does ("FREEZE.PANES, `0f.3e` in 1.5"). Where a fact was read from
   1.03 or 1.5, find the 1.00 counterpart (procedures keep their frame size and opcode sequence across releases,
   only the numbers move) and cite it first: "`47.0b` in 1.00, `45.0c` in 1.03".
+- The spec cites no procedures, global names or offsets into Excel's code: where a reader needs the behaviour behind
+  a field, it links to the document that describes it, and `docs/Code.md` indexes the procedures each spec section
+  was read from. The other documents cite code in place. Name library code for what it does, never after the
+  procedure it ports.
 - The spec states facts plainly. Mark only what is not established: **(inferred)**, **(assumed)** or
   **(unknown)**. Never label things "confirmed".
 - List every set of values a field can take (chart types, tick marks, alignments, arrow heads and so on) as a

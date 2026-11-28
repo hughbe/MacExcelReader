@@ -652,11 +652,6 @@ internal static class NumberFormatCompiler
         {
             if (_header >= 0 && !_at)
             {
-                if (_exponent >= 0)
-                {
-                    _section[_exponent] = (byte)_exponentDigits;
-                }
-
                 if (_thousands && _integers < 4)
                 {
                     if (_section[_firstDigit] == 0x04)
@@ -669,6 +664,14 @@ internal static class NumberFormatCompiler
                     }
 
                     _integers = 4;
+                }
+
+                // Excel writes the exponent's digit count last, where its byte was before the padding: when the
+                // padding inserted a run, that is two bytes early, on the E literal's character, and the count byte
+                // keeps the 0 it was written with (07.09 in 1.00; `0,00E-00` is `… 02 02 1E 00 …`, spec §7).
+                if (_exponent >= 0)
+                {
+                    _section[_exponent] = (byte)_exponentDigits;
                 }
 
                 _section[_header + 1] = (byte)_integers;

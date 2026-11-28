@@ -45,12 +45,16 @@ The library targets .NET 9 and has no dependencies.
   you change are re-encoded. Values are checked as they are set against what a file can hold and what Excel
   itself would store, and defined names are kept in the order Excel searches them.
 - **Charts.** Type and options, axes and scales, legend, titles, data labels, free text and arrows, point
-  formats, overlay charts and the series data, in Microsoft Chart's 8-byte decimal numbers.
+  formats, overlay charts and the series data, in Microsoft Chart's 8-byte decimal numbers. Automatic axis
+  scales are worked out as Excel 1.00 draws them, to the bit.
 - **Drawing.** `ExcelRenderer` draws a sheet's window as Excel 1.00 shows it, as a one-bit picture or PNG, with
   the bitmap fonts of a System file you supply: headings, gridlines, cells laid out as Excel lays them out,
   borders, the selection and the scroll bars, and sizes the System has no bitmap for stretched as the Mac Plus
   ROM stretches them. It matches all 27 windows captured from Excel 1.00's screen pixel for pixel, and draws a
-  window in about 0.2 ms whatever the sheet's size.
+  window in about 0.2 ms whatever the sheet's size. `ChartRenderer` draws a chart's window the same way: axes,
+  ticks, gridlines, labels, titles, legends, data labels, markers, columns, bars, areas, pies and overlays, with
+  QuickDraw's lines, polygons and arcs. It matches all 64 chart windows captured from Excel 1.00 pixel for
+  pixel.
 - **Workspaces.** Read and write "Resume Excel" files: the settings and the windows Excel reopens.
 - **SYLK export.** `ExportSylk` writes a sheet as SYLK, byte for byte as Excel 1.00's or 1.5's Save As does,
   checked against 178 files the two exported. It allocates nothing per cell.
@@ -193,13 +197,13 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `cells <file> [-r A1:D20] [--all]` | Every non-empty cell with its displayed value, format, style and formula |
 | `cell <file> <address>` | Everything about one cell: value, date, formats, flags, formula, result, raw bytes and a token-by-token breakdown |
 | `parse <formula> [-f file] [--name] [--array] [--excel 1.5]` | Compile formula text and show the tokens Excel would store |
-| `sheet <list> <output> [--split N] [--excel 1.5]` | Build sheets from a formula list (`tests/Data`), for testing formulas in Excel |
-| `excel-test pack <disk> <files...>` / `excel-test run <disk>` / `excel-test check <disk>` | Test files in a real Excel under an emulator (`run`: Excel 1.00 in MAME, headless): see [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) |
+| `sheet <list> <output> [--split N] [--excel 1.5] [--type]` | Build sheets from a formula list (`tests/Data`), for testing formulas in Excel; `--type` has Excel 1.00 type each formula in A1 text instead |
+| `excel-test experiment <files...> -o <dir>` / `pack` / `run` / `check` / `files` | Test files in a real Excel under an emulator (`experiment` and `run`: Excel 1.00 to 1.5 in MAME, headless, with `--excel`; `experiment` packs, runs and checks any number of files and reports each command's result; a `FILE.type` has `run` type formulas into a file as a person would; `files` lists or copies out a floppy image's files): see [Testing in a real Excel](https://github.com/hughbe/MacExcelReader/blob/main/docs/Testing.md) |
 | `names <file>` | Defined names, command shortcuts and definitions |
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |
 | `sylk <file> [-o out.slk] [--excel 1.5]` | The sheet as SYLK, as Excel 1.00 (or 1.5) exports it |
-| `render <file> --system <disk or rsrc> [-o out.png] [--no-frame] [--scale N]` | The sheet's window drawn as Excel 1.00 shows it, as a PNG, with the fonts of a System file (Excel 1.00's Data disk image works) |
+| `render <file> --system <disk or rsrc> [-o out.png] [--no-frame] [--scale N]` | The sheet's or chart's window drawn as Excel 1.00 shows it, as a PNG, with the fonts of a System file (Excel 1.00's Data disk image works) |
 | `dump <file>` | Everything: header, settings, column widths, external references, names, windows, page breaks, print setup and cells |
 | `workspace <file>` | A workspace ("Resume Excel", type XLIN) file: settings and the windows it reopens |
 | `layout <file>` | Where each part of the file lies: header, code segments, state block and all eight sections |

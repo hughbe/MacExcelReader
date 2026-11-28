@@ -28,7 +28,7 @@ sealed class PackSettings : CommandSettings
     public string Volume { get; init; } = "Test";
 
     [CommandOption("--excel <VERSION>")]
-    [Description("The Excel that will run Driver: 1.0 (the default), 1.04 or 1.5, where Driver also runs by itself when opened (Auto_Open).")]
+    [Description("The Excel that will run Driver: 1.0 (the default), 1.01, 1.03, 1.04, 1.06 or 1.5, where Driver also runs by itself when opened (Auto_Open).")]
     public string Excel { get; init; } = "1.0";
 
     [CommandOption("--keep-open")]
@@ -48,12 +48,17 @@ sealed class PackSettings : CommandSettings
     public bool Recompile { get; init; }
 
     [CommandOption("--each <FORMULA>")]
-    [Description("A macro command to run on each file after probing, before it is saved, such as =CALCULATION(3). Repeatable. A file can also have its own commands, one per line, in FILE.commands next to it.")]
+    [Description("A macro command to run on each file after probing, before it is saved, such as =CALCULATION(3). Repeatable. A file can also have its own commands, one per line, in FILE.commands next to it, " +
+        "and formulas for excel-test run to type into its cells after Driver has saved it, \"CELL TEXT\" per line, in FILE.type.")]
     public string[] Each { get; init; } = [];
 
     [CommandOption("--end <FORMULA>")]
     [Description("A macro command to run after Driver has saved itself, such as =FULL(TRUE). Repeatable.")]
     public string[] End { get; init; } = [];
+
+    [CommandOption("--disk-size <K>")]
+    [Description("The floppy's size, 400 or 800. By default 400 when the files fit and 800 otherwise.")]
+    public int? DiskSize { get; init; }
 }
 
 sealed class CheckSettings : CommandSettings
@@ -81,6 +86,15 @@ static class ExcelTest
     public const string SavedSuffix = " saved";
     public const string FinishedAlert = "Driver finished";
 
+    // The files on the disk listing what excel-test run types once Driver has finished, one line per formula in
+    // Mac OS Roman: Typing, from pack, "file<TAB>cell<TAB>text"; Typed, from run, the same with Excel's answer in
+    // front, "typed" or "refused". Excel does not list text files in its Open dialog.
+    public const string TypingName = "Typing";
+    public const string TypedName = "Typed";
+
+    public static List<string[]> ReadTable(byte[] data, int columns)
+        => [.. MacRoman.GetString(data).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.Split('\t', columns))];
+
     // The suffix keeps names within the 31 characters Excel's dialogs allow.
     public static string SavedName(string name) => (name.Length + SavedSuffix.Length > 31 ? name[..(31 - SavedSuffix.Length)] : name) + SavedSuffix;
 
@@ -91,10 +105,12 @@ sealed class PackCommand : Command<PackSettings>
 {
     public override int Execute(CommandContext context, PackSettings settings, CancellationToken cancellationToken)
     {
-        var version = settings.Excel switch { "1.5" => ExcelVersion.Excel150, "1.04" => ExcelVersion.Excel104, _ => ExcelVersion.Excel100 };
+        var version = settings.Excel switch { "1.5" => ExcelVersion.Excel150, "1.04" or "1.06" => ExcelVersion.Excel104, _ => ExcelVersion.Excel100 };
         var files = new List<MfsFile>();
         var targets = new List<(string Name, ExcelDocument? Sheet)>();
         var commands = new Dictionary<string, string[]>();
+        var typing = new List<(string File, string Cell, string Text)>();
+        var typed = new HashSet<string>();
         foreach (string path in settings.Files)
         {
             string name = Path.GetFileName(path).Replace(':', '-');
@@ -106,7 +122,24 @@ sealed class PackCommand : Command<PackSettings>
             byte[] data = File.ReadAllBytes(path);
             if (File.Exists(path + ".commands"))
             {
-                commands[name] = File.ReadAllLines(path + ".commands").Where(l => l.TrimStart().StartsWith('=')).ToArray();
+                commands[name] = ReadCommands(path + ".commands");
+                foreach (string command in commands[name])
+                {
+                    foreach (string warning in CommandLint.Check(command))
+                    {
+                        AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(name)}: {Markup.Escape(warning)}[/]");
+                    }
+                }
+            }
+
+            if (File.Exists(path + ".type"))
+            {
+                foreach (var (cell, text) in ReadTyping(path + ".type"))
+                {
+                    typing.Add((name, cell, text));
+                }
+
+                typed.Add(name);
             }
 
             if (ExcelTest.IsChart(data))
@@ -118,6 +151,17 @@ sealed class PackCommand : Command<PackSettings>
             {
                 files.Add(new MfsFile(name, sheet.FinderType, "XCEL", data, []));
                 targets.Add((name, sheet));
+                // Open grows a worksheet's table to every cell its formulas refer to (spec §6.1), and Excel refuses a
+                // sheet whose table would not fit in memory: one formula referring to IV16384 is enough.
+                if (sheet.Kind == ExcelDocumentKind.Worksheet)
+                {
+                    var (rows, columns) = sheet.GetReferencedExtent();
+                    long bytes = (long)Math.Max(rows + 1, sheet.Cells.RowCount) * Math.Max(columns + 1, sheet.Cells.ColumnCount) * 6;
+                    if (bytes > 1 << 20)
+                    {
+                        AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(name)}'s formulas refer to cells up to row {rows} and column {columns}: Open will grow its table to about {bytes >> 20} MB, which Excel 1.00 under MAME (4 MB) refuses or cannot save to a floppy. Refer to nearer cells.[/]");
+                    }
+                }
             }
             else if (settings.NoProbe)
             {
@@ -133,10 +177,27 @@ sealed class PackCommand : Command<PackSettings>
             }
         }
 
-        var (driver, probes) = BuildDriver(settings, version, targets, commands);
-        files.Insert(0, new MfsFile(ExcelTest.DriverName, "XLPG", "XCEL", driver.ToArray(), []));
+        foreach (string command in settings.Each.Concat(settings.End))
+        {
+            foreach (string warning in CommandLint.Check(command))
+            {
+                AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(warning)}[/]");
+            }
+        }
 
-        int size = files.Sum(f => (f.Data.Length + 1023) / 1024 + 1) <= 380 ? 400 : 800;
+        var (driver, probes) = BuildDriver(settings, version, targets, commands, typed);
+        files.Insert(0, new MfsFile(ExcelTest.DriverName, "XLPG", "XCEL", driver.ToArray(), []));
+        if (typing.Count > 0)
+        {
+            files.Add(new MfsFile(ExcelTest.TypingName, "TEXT", "dumr", MacRoman.GetBytes(string.Concat(typing.Select(t => $"{t.File}\t{t.Cell}\t{t.Text}\n"))), []));
+        }
+
+        if (settings.DiskSize is { } chosen && chosen is not (400 or 800))
+        {
+            throw new InvalidOperationException("--disk-size is 400 or 800.");
+        }
+
+        int size = settings.DiskSize ?? (files.Sum(f => (f.Data.Length + 1023) / 1024 + 1) <= 380 ? 400 : 800);
         File.WriteAllBytes(settings.Disk, MfsImage.Write(settings.Volume, files, size));
         AnsiConsole.MarkupLine($"Wrote [bold]{Markup.Escape(settings.Disk)}[/] ({size}K, volume \"{Markup.Escape(settings.Volume)}\"): Driver and {targets.Count} file(s), {probes} formula cells to probe.");
         // Excel 1.03 ran out of memory opening a small file after a 345-row Driver had recompiled a 100-formula sheet.
@@ -147,8 +208,61 @@ sealed class PackCommand : Command<PackSettings>
 
         AnsiConsole.MarkupLine(version == ExcelVersion.Excel150
             ? "In Excel 1.5: open Driver; it runs by itself. Then run [bold]excel-test check[/]."
-            : "Run [bold]excel-test run[/] (Excel 1.00 in MAME), or in Excel open Driver and choose Macro > Run > Driver!Run (Option-Command-R). Then run [bold]excel-test check[/].");
+            : "Run [bold]excel-test run[/] (Excel in MAME), or in Excel open Driver and choose Macro > Run > Driver!Run (Option-Command-R). Then run [bold]excel-test check[/].");
         return 0;
+    }
+
+    // A .commands file is UTF-8, one command per line; Driver stores it as Mac OS Roman. Bytes that are not UTF-8 (a
+    // file written as Latin-1 or Mac OS Roman) would otherwise turn into replacement characters without a word.
+    internal static string[] ReadCommands(string path) => ReadCommandLines(path).Where(l => l.TrimStart().StartsWith('=')).ToArray();
+
+    private static string[] ReadCommandLines(string path)
+    {
+        string[] lines;
+        try
+        {
+            lines = File.ReadAllLines(path, new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true));
+        }
+        catch (System.Text.DecoderFallbackException)
+        {
+            throw new InvalidOperationException($"{path} is not UTF-8: save it as UTF-8.");
+        }
+
+        foreach (string line in lines)
+        {
+            if (line.Any(c => c > 0x7F && MacRoman.GetString(MacRoman.GetBytes(c.ToString())) != c.ToString()))
+            {
+                throw new InvalidOperationException($"{path}: \"{line}\" has a character Mac OS Roman cannot hold.");
+            }
+        }
+
+        return lines;
+    }
+
+    // A .type file is UTF-8, one formula per line: the cell, then after spaces or a tab the text to type, exactly as
+    // a person would type it. Blank lines and lines starting with # are ignored.
+    internal static List<(string Cell, string Text)> ReadTyping(string path)
+    {
+        var entries = new List<(string Cell, string Text)>();
+        int number = 0;
+        foreach (string line in ReadCommandLines(path))
+        {
+            number++;
+            if (line.Trim().Length == 0 || line.TrimStart().StartsWith('#'))
+            {
+                continue;
+            }
+
+            var match = Regex.Match(line, @"^\s*([A-Za-z]{1,2}[0-9]{1,5})[ \t]+(\S.*?)\s*$");
+            if (!match.Success)
+            {
+                throw new InvalidOperationException($"{path} line {number}: not \"CELL TEXT\": {line}");
+            }
+
+            entries.Add((ExcelCellAddress.Parse(match.Groups[1].Value).ToString(), match.Groups[2].Value));
+        }
+
+        return entries;
     }
 
     // Driver: column A holds the commands; column B labels each one, so check can map results back. A probe
@@ -181,7 +295,7 @@ sealed class PackCommand : Command<PackSettings>
         }
     }
 
-    private static (ExcelDocument Driver, int Probes) BuildDriver(PackSettings settings, ExcelVersion version, List<(string Name, ExcelDocument? Sheet)> targets, Dictionary<string, string[]> commands)
+    private static (ExcelDocument Driver, int Probes) BuildDriver(PackSettings settings, ExcelVersion version, List<(string Name, ExcelDocument? Sheet)> targets, Dictionary<string, string[]> commands, HashSet<string> typed)
     {
         var driver = ExcelDocument.CreateMacroSheet();
         driver.State.SetColumnWidth(0, 200);
@@ -267,7 +381,8 @@ sealed class PackCommand : Command<PackSettings>
             block.Add(settings.SaveAsType is { } type
                 ? ($"=SAVE.AS({Quote(settings.Volume + ":" + ExcelTest.SavedName(name))},{type})", "save " + name)
                 : ($"=SAVE.AS({Quote(settings.Volume + ":" + ExcelTest.SavedName(name))})", "save " + name));
-            if (!settings.KeepOpen)
+            // A file to type into stays open for excel-test run, which saves it again when it has typed.
+            if (!settings.KeepOpen && !typed.Contains(name))
             {
                 block.Add(("=CLOSE()", "close " + name));
             }
@@ -363,6 +478,11 @@ sealed class CheckCommand : Command<CheckSettings>
             AnsiConsole.MarkupLine("[yellow]Driver does not seem to have run to the end.[/]");
         }
 
+        // What excel-test run typed into each file, and whether Excel took it, by "file!cell".
+        var typed = byName.TryGetValue(ExcelTest.TypedName, out var typedFile)
+            ? ExcelTest.ReadTable(typedFile.Data, 4).ToDictionary(t => t[1] + "!" + t[2], t => (Typed: t[0] == "typed", Text: t[3]))
+            : [];
+
         int problems = 0;
         var originals = files.Where(f => f.Name != ExcelTest.DriverName && !f.Name.EndsWith(ExcelTest.SavedSuffix, StringComparison.Ordinal) && f.Type is "XLBN" or "XLPG" or "MCBN");
         foreach (var original in originals)
@@ -371,6 +491,15 @@ sealed class CheckCommand : Command<CheckSettings>
             if (!byName.TryGetValue(ExcelTest.SavedName(original.Name), out var saved))
             {
                 AnsiConsole.MarkupLine("[red]Excel did not save it[/] (it could not open it, or Driver did not reach it).");
+                problems++;
+                continue;
+            }
+
+            // Under emulation a save can occasionally reach the directory without its data (zeros where the file
+            // should be). Say so rather than stopping the check.
+            if (Unreadable(saved.Data) is { } reason)
+            {
+                AnsiConsole.MarkupLine($"[red]Excel's save cannot be read[/]: {Markup.Escape(reason)}. Run it again.");
                 problems++;
                 continue;
             }
@@ -390,7 +519,7 @@ sealed class CheckCommand : Command<CheckSettings>
             }
             else
             {
-                problems += CheckSheet(original, saved, results, settings);
+                problems += CheckSheet(original, saved, results, typed, settings);
             }
         }
 
@@ -398,7 +527,117 @@ sealed class CheckCommand : Command<CheckSettings>
         return problems == 0 ? 0 : 1;
     }
 
-    private static int CheckSheet(MfsFile original, MfsFile saved, Dictionary<string, ExcelCell> results, CheckSettings settings)
+    // Whether Excel's save is a file this library can read in full: a chart, or a sheet whose every formula decodes.
+    // Under emulation a save sometimes reaches the disk with its data, or one 512-byte sector of it, as zeros.
+    internal static bool IsReadable(byte[] data) => Unreadable(data) is null;
+
+    // Why Excel's save cannot be read, or null if it can, naming any whole sectors of zeros in it.
+    internal static string? Unreadable(byte[] data)
+    {
+        if (ExcelTest.IsChart(data))
+        {
+            return UnreadableChart(data);
+        }
+
+        try
+        {
+            var document = ExcelDocument.Read(data, copyData: false);
+            foreach (var entry in document.Cells.NonEmptyCells)
+            {
+                _ = entry.GetCell().Formula?.ToText(document);
+            }
+
+            for (int i = 0; i < document.Names.Count; i++)
+            {
+                _ = document.Names[i].GetDefinitionText(document);
+            }
+
+            return null;
+        }
+        catch (Exception e) when (e is ExcelFormatException or ArgumentException or IndexOutOfRangeException)
+        {
+            var zeroed = new List<string>();
+            for (int sector = 0; sector + 512 <= data.Length; sector += 512)
+            {
+                if (!data.AsSpan(sector, 512).ContainsAnyExcept((byte)0))
+                {
+                    zeroed.Add($"0x{sector:X}");
+                }
+            }
+
+            return zeroed.Count == 0
+                ? e.Message.TrimEnd('.')
+                : $"{e.Message.TrimEnd('.')}; the 512-byte sector(s) at {string.Join(", ", zeroed)} are all zeros, so part of the save did not reach the disk";
+        }
+    }
+
+    // A chart that lost a sector usually still reads, its series cut short. The series lists come last, from the
+    // offset in header word 26, and no chart sample has a long run of zeros there, so a sector of them that is all
+    // zeros (whole, or at least 64 bytes of the last one) did not reach the disk. Only a series of 8 or more zero
+    // values in a row could look the same; rerunning it does no harm. Sectors before them can be zeros: the page
+    // setup mostly is.
+    private static string? UnreadableChart(byte[] data)
+    {
+        int seriesLists = data.Length >= 28 ? (data[26] << 8) | data[27] : 0;
+        var zeroed = new List<string>();
+        for (int sector = seriesLists / 512 * 512; sector < data.Length; sector += 512)
+        {
+            int from = Math.Max(sector, seriesLists), length = Math.Min(sector + 512, data.Length) - from;
+            if (length >= 64 && !data.AsSpan(from, length).ContainsAnyExcept((byte)0))
+            {
+                zeroed.Add($"0x{sector:X}");
+            }
+        }
+
+        string? error = null;
+        try
+        {
+            _ = ChartDocument.Read(data);
+        }
+        catch (Exception e) when (e is ExcelFormatException or ArgumentException or IndexOutOfRangeException)
+        {
+            error = e.Message.TrimEnd('.');
+        }
+
+        if (zeroed.Count == 0)
+        {
+            return error;
+        }
+
+        return $"{error ?? "its series are cut short"}: the sector(s) at {string.Join(", ", zeroed)} are all zeros, so part of the save did not reach the disk";
+    }
+
+    // Whether an expression has an area spanning every row or every column with a relative end: whole rows or
+    // columns that GET.FORMULA's R1C1 text cannot give back as one area.
+    internal static bool HasRelativeWholeRowsOrColumns(ReadOnlySpan<byte> expression)
+    {
+        try
+        {
+            foreach (var token in FormulaTokens.Enumerate(expression))
+            {
+                if (token.Code != 0x25 || token.Offset + 7 > expression.Length)
+                {
+                    continue;
+                }
+
+                int first = (expression[token.Offset + 1] << 8) | expression[token.Offset + 2];
+                int last = (expression[token.Offset + 3] << 8) | expression[token.Offset + 4];
+                bool allRows = (first & 0x3FFF) == 0 && (last & 0x3FFF) == ExcelCellGrid.MaxRows - 1;
+                bool allColumns = expression[token.Offset + 5] == 0 && expression[token.Offset + 6] == ExcelCellGrid.MaxColumns - 1;
+                if ((allRows && ((first | last) & 0x4000) != 0) || (allColumns && ((first | last) & 0x8000) != 0))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (ExcelFormatException)
+        {
+        }
+
+        return false;
+    }
+
+    private static int CheckSheet(MfsFile original, MfsFile saved, Dictionary<string, ExcelCell> results, Dictionary<string, (bool Typed, string Text)> typed, CheckSettings settings)
     {
         bool all = settings.All;
         var ours = ExcelDocument.Read(original.Data);
@@ -443,7 +682,7 @@ sealed class CheckCommand : Command<CheckSettings>
 
         // The tokens in Excel's re-save, with the bytes left over from memory cleared. After --recompile they are
         // Excel's own compilation of each formula.
-        int compared = 0;
+        int compared = 0, refused = 0, expected = 0;
         foreach (var entry in ours.Cells.NonEmptyCells)
         {
             int r = entry.Row;
@@ -454,20 +693,115 @@ sealed class CheckCommand : Command<CheckSettings>
                 continue;
             }
 
+            // A recompile Excel refused (FORMULA gave an error, as for text its compiler rejects) leaves the cell with
+            // our tokens, which would otherwise pass as a match.
+            if (results.TryGetValue("recompile " + original.Name + "!" + new ExcelCellAddress(r, c), out var recompiled)
+                && recompiled.Formula?.Result is { Kind: ExcelValueKind.Error } refusal)
+            {
+                AnsiConsole.MarkupLine($"  [red]{new ExcelCellAddress(r, c)} not recompiled[/] {Markup.Escape(formula.ToText(ours))}: FORMULA gave {Markup.Escape(refusal.ToString())}, so Excel's compiler rejects its text");
+                refused++;
+                problems++;
+                continue;
+            }
+
+            // A typed formula Excel refused leaves the cell with our tokens too.
+            if (typed.TryGetValue(original.Name + "!" + new ExcelCellAddress(r, c), out var typing) && !typing.Typed)
+            {
+                AnsiConsole.MarkupLine($"  [red]{new ExcelCellAddress(r, c)} refused when typed[/] {Markup.Escape(typing.Text)}: Excel's compiler rejects the text, ours compiles it to {Markup.Escape(formula.ToText(ours))}");
+                refused++;
+                problems++;
+                continue;
+            }
+
             compared++;
             var a = FormulaTokens.ClearStaleBytes(formula.IsArrayFormula ? formula.SharedExpression : formula.Expression);
             var b = FormulaTokens.ClearStaleBytes(theirs.IsArrayFormula ? theirs.SharedExpression : theirs.Expression);
             bool sameFixups = formula.IsArrayFormula || formula.FixupWords.ToArray().SequenceEqual(theirs.FixupWords.ToArray());
             if (!a.AsSpan().SequenceEqual(b) || !sameFixups)
             {
-                AnsiConsole.MarkupLine($"  [yellow]{new ExcelCellAddress(r, c)} tokens[/] {Markup.Escape(formula.ToText(ours))}: ours {Convert.ToHexString(a)}, Excel {Convert.ToHexString(b)}" + (sameFixups ? "" : " (fix-ups differ)"));
+                string label = $"{new ExcelCellAddress(r, c)} tokens";
+                string line = $"{Markup.Escape(formula.ToText(ours))}: ours {Convert.ToHexString(a)}, Excel {Convert.ToHexString(b)}" + (sameFixups ? "" : " (fix-ups differ)");
+                if (results.ContainsKey("recompile " + original.Name + "!" + new ExcelCellAddress(r, c)) && HasRelativeWholeRowsOrColumns(a))
+                {
+                    // Recompiling goes through GET.FORMULA's R1C1 text, which turns relative whole rows and columns
+                    // into two areas joined by ':' (docs/ExcelBugs.md): not a difference in how Excel compiles A1.
+                    AnsiConsole.MarkupLine($"  [grey]{label} {line} (R1C1 text cannot say this; type the formula with a FILE.type to check it)[/]");
+                    expected++;
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine($"  [yellow]{label}[/] {line}");
+                    problems++;
+                }
+            }
+        }
+
+        if (compared + refused > 0)
+        {
+            AnsiConsole.MarkupLine($"  Tokens: {compared} formula(s) compared" + (refused > 0 ? $"; {refused} Excel would not compile" : "")
+                + (expected > 0 ? $"; {expected} differ only as R1C1 text makes them." : "."));
+        }
+
+        // Typed formulas in cells our copy leaves empty (the library refused the text, or the .type file names a cell
+        // of its own): compile the text here and compare with what Excel made of it.
+        var typedHere = typed.Where(t => t.Key.StartsWith(original.Name + "!", StringComparison.Ordinal)).ToList();
+        foreach (var (key, (accepted, text)) in typedHere)
+        {
+            var address = ExcelCellAddress.Parse(key[(original.Name.Length + 1)..]);
+            if (ours.Cells.Find(address.Row, address.Column)?.Formula is not null)
+            {
+                continue;
+            }
+
+            byte[]? compiled = null;
+            string? why = null;
+            try
+            {
+                compiled = FormulaTokens.ClearStaleBytes(ExcelFormula.Parse(text, ExcelDocument.Read(original.Data), ExcelVersion.Excel100).Expression);
+            }
+            catch (ExcelFormulaSyntaxException e)
+            {
+                why = e.Message;
+            }
+
+            var theirs = accepted ? excel.Cells.Find(address.Row, address.Column)?.Formula : null;
+            byte[]? excelTokens = theirs is null ? null : FormulaTokens.ClearStaleBytes(theirs.Expression);
+            if (excelTokens is null && compiled is null)
+            {
+                if (all)
+                {
+                    AnsiConsole.MarkupLine($"  {address} typed {Markup.Escape(text)}: refused by Excel and by us");
+                }
+            }
+            else if (excelTokens is null)
+            {
+                AnsiConsole.MarkupLine($"  [red]{address} refused when typed[/] {Markup.Escape(text)}: Excel's compiler rejects the text, ours compiles it to {Convert.ToHexString(compiled!)}");
+                problems++;
+            }
+            else if (compiled is null)
+            {
+                AnsiConsole.MarkupLine($"  [yellow]{address} typed[/] {Markup.Escape(text)}: Excel compiles it to {Convert.ToHexString(excelTokens)}, ours refuses it ({Markup.Escape(why!)})");
+            }
+            else if (!compiled.AsSpan().SequenceEqual(excelTokens))
+            {
+                AnsiConsole.MarkupLine($"  [yellow]{address} typed tokens[/] {Markup.Escape(text)}: ours {Convert.ToHexString(compiled)}, Excel {Convert.ToHexString(excelTokens)}");
                 problems++;
             }
         }
 
-        if (compared > 0)
+        if (typedHere.Count > 0)
         {
-            AnsiConsole.MarkupLine($"  Tokens: {compared} formula(s) compared.");
+            AnsiConsole.MarkupLine($"  Typed: {typedHere.Count} formula(s), {typedHere.Count(t => !t.Value.Typed)} refused by Excel.");
+        }
+
+        // Those cells are compared above; the rest of the sheet is compared as usual.
+        foreach (var (key, _) in typedHere)
+        {
+            var address = ExcelCellAddress.Parse(key[(original.Name.Length + 1)..]);
+            if (ours.Cells.Find(address.Row, address.Column)?.Formula is null && excel.Cells.Find(address.Row, address.Column) is not null)
+            {
+                excel.Cells[address.Row, address.Column].Clear();
+            }
         }
 
         if (settings.Bytes)
@@ -693,7 +1027,12 @@ sealed class CheckCommand : Command<CheckSettings>
 /// </summary>
 static class R1C1
 {
-    private static readonly Regex s_wholeRows = new(@"(?<![A-Za-z.])R(\[-?\d+\]|\d+):R(\[-?\d+\]|\d+)(?![C\d\[])", RegexOptions.Compiled);
+    // Whole rows and columns: R1:R3, C[-1]:C, and one row or column on its own (R2, C2), which GET.FORMULA writes
+    // for an area whose ends are the same row or column.
+    private static readonly Regex s_wholeRows = new(@"(?<![A-Za-z.\]\d])R(\[-?\d+\]|\d*):R(\[-?\d+\]|\d*)(?![C\d\[A-Za-z(])", RegexOptions.Compiled);
+    private static readonly Regex s_wholeColumns = new(@"(?<![A-Za-z.\]\d])C(\[-?\d+\]|\d*):C(\[-?\d+\]|\d*)(?![\d\[A-Za-z(])", RegexOptions.Compiled);
+    private static readonly Regex s_wholeRow = new(@"(?<![A-Za-z.\]\d:])R(\[-?\d+\]|\d+)(?![C\d\[A-Za-z(:])", RegexOptions.Compiled);
+    private static readonly Regex s_wholeColumn = new(@"(?<![A-Za-z.\]\d:])C(\[-?\d+\]|\d+)(?![\d\[A-Za-z(:])", RegexOptions.Compiled);
     private static readonly Regex s_cell = new(@"(?<![A-Za-z.])R(\[-?\d+\]|\d*)C(\[-?\d+\]|\d*)(?![A-Za-z(])", RegexOptions.Compiled);
     private static readonly Regex s_external = new(@"':([^']+)'!", RegexOptions.Compiled);
     private static readonly Regex s_number = new(@"(?<![A-Za-z$\d.\[])\d+(\.\d+)?([Ee][+-]?\d+)?(?![\d\]])", RegexOptions.Compiled);
@@ -706,13 +1045,22 @@ static class R1C1
             return (absolute ? int.Parse(group, CultureInfo.InvariantCulture) : origin + 1 + (group.Length == 0 ? 0 : int.Parse(group[1..^1], CultureInfo.InvariantCulture))).ToString(CultureInfo.InvariantCulture);
         }
 
-        text = s_wholeRows.Replace(text, m =>
+        string Row(string group)
         {
-            string first = Part(m.Groups[1].Value, row, out bool absolute);
-            string last = Part(m.Groups[2].Value, row, out _);
-            string d = absolute ? "$" : "";
-            return $"{d}A{d}{first}:{d}IV{d}{last}";
-        });
+            string number = Part(group, row, out bool absolute);
+            return (absolute ? "$" : "") + number;
+        }
+
+        string Column(string group)
+        {
+            int number = int.Parse(Part(group, column, out bool absolute), CultureInfo.InvariantCulture);
+            return (absolute ? "$" : "") + ExcelCellAddress.ColumnName(number - 1);
+        }
+
+        text = s_wholeRows.Replace(text, m => Row(m.Groups[1].Value) + ":" + Row(m.Groups[2].Value));
+        text = s_wholeRow.Replace(text, m => Row(m.Groups[1].Value) + ":" + Row(m.Groups[1].Value));
+        text = s_wholeColumns.Replace(text, m => Column(m.Groups[1].Value) + ":" + Column(m.Groups[2].Value));
+        text = s_wholeColumn.Replace(text, m => Column(m.Groups[1].Value) + ":" + Column(m.Groups[1].Value));
 
         text = s_cell.Replace(text, m =>
         {

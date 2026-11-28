@@ -190,6 +190,13 @@ Only the rows and columns that show are laid out, so a window takes the same tim
 about 0.2 ms for `Expenses`, allocating little beyond the bitmap. Text in a size the System has no bitmap for
 (Geneva 11, say) is stretched from another size, which comes close to Excel but not pixel for pixel.
 
+`ChartRenderer` draws a chart's window the same way, at the size it was saved, laid out as Excel saved it:
+
+```csharp
+var chart = ChartDocument.Load("Sales Chart");
+File.WriteAllBytes("Sales Chart.png", ChartRenderer.Render(chart, fonts, title: "Sales Chart").ToPng());
+```
+
 Excel 1.x for Macintosh uses the **1904 date system**: serial 0 is 1 January 1904.
 
 ## Formulas
@@ -426,6 +433,26 @@ var newChart = ChartDocument.Create(ChartType.ColumnOrBar);
 newChart.Series.Add(ChartSeries.Create("Sales", [1, 3, 2], "Data", "R2C1:R2C3", categoriesReference: "R1C1:R1C3"));
 newChart.Save("Sales Chart");
 ```
+
+A scale field marked automatic holds what Excel worked out when it last drew the chart. After changing the data,
+`UpdateAutomaticScales` works every automatic field out again as Excel 1.00 does, an overlay's shared scales
+included. How many tick labels fit along an axis decides the major unit: from a chart Excel has drawn, the library
+works it out from the saved layout and the System's fonts; otherwise give the number, 10 being what a chart at its
+usual window size has room for:
+
+```csharp
+chart.UpdateAutomaticScales(MacFontSet.Load("System.rsrc"));   // MacExcelReader.Rendering
+newChart.UpdateAutomaticScales(labelSpaces: 10);
+
+var (min, max) = chart.GetDataRange(chart.MainChart);                     // the data the value axis shows
+var (height, width) = chart.GetTickLabelSize(chart.MainChart, fonts, ChartAxisKind.Category);   // in twips
+```
+
+`LayOut` gives the layout Excel draws a chart with (chart area, margins, plot area, tick length and the label
+counts), including for a chart Excel has not drawn, with its title, legend and axis titles.
+
+`ChartAxisKind.Category` is a scatter chart's X axis where a method takes an axis. `GetLabelFont` gives an axis's
+font as Excel opens it.
 
 Patterns, markers, line weights and arrowheads are enums (`ChartPattern`, `ChartMarker`, `ChartLineWeight`,
 `ArrowHeadWidth`, `ArrowHeadLength`, `ArrowHeadStyle`) named after Excel 1.00's Patterns dialogs.

@@ -373,8 +373,9 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         }
 
         // A single-section format shows a negative number as a minus sign and the format of its magnitude, dates
-        // included: -1234.567 in m/d/yy is -5/19/07.
-        if (value < 0 && section == ExcelNumberFormatSection.Positive && text.Length > start)
+        // included: -1234.567 in m/d/yy is -5/19/07. The sign comes first even when the section shows nothing:
+        // TEXT(-1,"") is "-" (19.0d in 1.00).
+        if (value < 0 && section == ExcelNumberFormatSection.Positive)
         {
             text.Insert(start, "-");
         }
@@ -614,6 +615,14 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         int percents = 0;
         bool thousands = false;
         bool afterPoint = false;
+        // The compiler writes 07 where it meets the first comma: after whatever precedes the first digit run when
+        // that run has the comma, and straight after the header when a later run has it. So 07 before a literal
+        // that comes before the first run means the comma was in a later run (\#00+##,##0 is 03 07 02 23 06 02 …).
+        int header = tokens.FindIndex(static t => t.Code is 0x03 or 0x1C);
+        int firstRun = tokens.FindIndex(static t => t.Code is 0x04 or 0x06);
+        int commaLeftOut = header >= 0 && header + 1 < tokens.Count && tokens[header + 1].Code == 0x07 && firstRun > header + 2
+            ? firstRun : -1;
+        bool commaPending = commaLeftOut >= 0;
         for (int t = 0; t < tokens.Count; t++)
         {
             var token = tokens[t];
@@ -648,15 +657,24 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
                     break;
                 case 0x04 or 0x06 when op.Length == 1:
                     char digit = token.Code == 0x04 ? '#' : '0';
+                    int runStart = text.Length;
                     for (int n = 0; n < op[0]; n++)
                     {
                         text.Append(digit);
                         integerLeft--;
                         digitsLeft--;
-                        if (!afterPoint && thousands && integerLeft > 0 && integerLeft % 3 == 0)
+                        if (!afterPoint && thousands && integerLeft > 0 && integerLeft % 3 == 0 && t != commaLeftOut)
                         {
                             text.Append(',');
+                            commaPending = false;
                         }
+                    }
+
+                    // The comma left out of the first run goes in the next integer run, after its first placeholder.
+                    if (commaPending && t > commaLeftOut && !afterPoint)
+                    {
+                        text.Insert(runStart + 1, ',');
+                        commaPending = false;
                     }
 
                     if (digitsLeft == 0)
@@ -774,163 +792,181 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         return true;
     }
 
+    // Shows a number through its section's tokens one by one, as Excel 1.00's display routine does (19.0d, native
+    // code; docs/Display.md). The number is a run of decimal digits with `point` of them before the decimal point
+    // (negative for leading zeros after it); `positions` counts the integer placeholders still to come.
+    //   * Integer runs: placeholders beyond the digits still to show give 0 (for 0) or nothing (for #); the run
+    //     that reaches the digits shows every digit that does not fit in the placeholders after it.
+    //   * A point shows any integer digits no run took, then '.'; a second '.' only prints.
+    //   * Decimal runs: leading zeros, then the digits that are left, then 0s for the rest of a 0 run only.
+    //   * An exponent sign starts over with the exponent's digits as an integer of `n` positions (its operand).
+    //   * A comma turns on separators for the integer digits after it; a header or an exponent turns them off.
     private static void FormatNumber(List<Token> tokens, int header, double magnitude, ref TextBuffer text)
     {
-        byte[] h = tokens[header].Operands;
-        bool scientific = tokens[header].Code == 0x1C;
-        int decimals = h[1];
-        int extra = HeaderExtra(h);
-        bool thousands = tokens.Exists(static t => t.Code == 0x07);
-
-        // The digit placeholders in order, '#' or '0': the mantissa's integer places, then its decimal places, then
-        // the exponent's. A point (05) moves from integer to decimal places and an exponent sign (1D, 1E) to the
-        // exponent's, so each kind is one run.
-        int total = 0;
+        _ = header;
+        Span<char> converted = stackalloc char[15];
+        Span<char> digits = stackalloc char[16];
+        int count = 0, next = 0, point = 0, positions = 0, exponent = 0;
+        bool afterPoint = false, thousands = false;
         foreach (var token in tokens)
         {
-            if (token.Code is 0x04 or 0x06 && token.Operands.Length == 1)
+            switch (token.Code)
             {
-                total += token.Operands[0];
-            }
-        }
-
-        char[]? rented = total > 256 ? System.Buffers.ArrayPool<char>.Shared.Rent(total) : null;
-        Span<char> places = rented ?? stackalloc char[256];
-        try
-        {
-            int integerCount = 0, fractionCount = 0, count = 0;
-            int part = 0; // 0 integer, 1 fraction, 2 exponent
-            foreach (var token in tokens)
-            {
-                if (token.Code == 0x05 && part == 0)
+                case 0x03 when token.Operands.Length == 3:
                 {
-                    part = 1;
-                }
-                else if (token.Code is 0x1D or 0x1E)
-                {
-                    part = 2;
-                }
-                else if (token.Code is 0x04 or 0x06 && token.Operands.Length == 1)
-                {
-                    char place = token.Code == 0x04 ? '#' : '0';
-                    for (int n = 0; n < token.Operands[0]; n++)
+                    // The digits rounded half up to the decimal places, the point moved two places per percent sign
+                    // (or back three per scaling comma in 1.5).
+                    byte[] h = token.Operands;
+                    int length = ExcelValueFormatter.Num2Str(magnitude, converted, out point);
+                    point += HeaderExtra(h);
+                    count = length == 0 ? 0 : RoundDigits(converted[..length], point + h[1], digits, ref point);
+                    if (count == 0)
                     {
-                        places[count++] = place;
+                        point = 0;
                     }
 
-                    integerCount += part == 0 ? token.Operands[0] : 0;
-                    fractionCount += part == 1 ? token.Operands[0] : 0;
+                    next = 0;
+                    positions = h[0];
+                    afterPoint = thousands = false;
+                    break;
                 }
-            }
 
-            ReadOnlySpan<char> integerPlaces = places[..integerCount];
-            ReadOnlySpan<char> fractionPlaces = places.Slice(integerCount, fractionCount);
-            ReadOnlySpan<char> exponentPlaces = places[(integerCount + fractionCount)..count];
-
-            // Excel's decimal conversion: at most 14 significant digits, the value being 0.digits × 10^point. The
-            // percent signs and scaling commas move the point (docs/Display.md), so they cannot overflow the double.
-            Span<char> converted = stackalloc char[15];
-            int convertedLength = ExcelValueFormatter.Num2Str(magnitude, converted, out int point);
-            point += extra;
-            int exponent = 0;
-            int mantissaDigits = Math.Max(1, integerPlaces.Length);
-            if (scientific && convertedLength > 0)
-            {
-                exponent = point - mantissaDigits;
-                point = mantissaDigits;
-            }
-
-            // The digits rounded half up to the positions there are.
-            Span<char> significant = stackalloc char[15];
-            int significantLength = RoundDigits(converted[..convertedLength], point + decimals, significant, ref point);
-            if (scientific && significantLength > 0 && point > mantissaDigits)
-            {
-                // Rounding carried into a new digit (9.99 to 10.0): one more for the exponent instead.
-                point--;
-                exponent++;
-            }
-
-            significant = significant[..significantLength];
-            int integerLength = significantLength == 0 ? 0 : Math.Max(0, point);
-            // At most 309 + 128 integer digits (the scaling is a signed byte) and 255 decimals.
-            Span<char> digitText = stackalloc char[1024];
-            for (int i = 0; i < integerLength + decimals; i++)
-            {
-                int at = i < integerLength ? i : point + (i - integerLength);
-                digitText[i] = at >= 0 && at < significant.Length ? significant[at] : '0';
-            }
-
-            ReadOnlySpan<char> integerDigits = digitText[..integerLength];
-            ReadOnlySpan<char> fractionDigits = digitText.Slice(integerLength, decimals);
-            Span<char> exponentText = stackalloc char[11];
-            Math.Abs(exponent).TryFormat(exponentText, out int exponentLength, default, CultureInfo.InvariantCulture);
-            var exponentDigits = exponentText[..exponentLength].TrimStart('0');
-
-            // Decimal places show their digit, except trailing zeros where the placeholder is #.
-            int keep = fractionPlaces.Length;
-            while (keep > 0 && fractionPlaces[keep - 1] == '#' && keep - 1 < fractionDigits.Length && fractionDigits[keep - 1] == '0')
-            {
-                keep--;
-            }
-
-            // Walk the tokens again, putting each digit where its placeholder is.
-            int integerNext = 0, fractionNext = 0, exponentNext = 0;
-            part = 0;
-            foreach (var token in tokens)
-            {
-                switch (token.Code)
+                case 0x1C when token.Operands.Length == 3:
                 {
-                    case 0x04 or 0x06 when token.Operands.Length == 1:
-                        for (int n = 0; n < token.Operands[0]; n++)
+                    // Scientific: as many integer digits as there are integer placeholders, the digits rounded to
+                    // those and the decimal places and without trailing zeros. Percent signs do not move the point.
+                    byte[] h = token.Operands;
+                    int integers = h[0];
+                    int length = ExcelValueFormatter.Num2Str(magnitude, converted, out point);
+                    count = 0;
+                    if (length == 0)
+                    {
+                        point = integers;
+                    }
+                    else
+                    {
+                        count = RoundDigits(converted[..length], integers + h[1], digits, ref point);
+                        while (count > 0 && digits[count - 1] == '0')
                         {
-                            if (part == 0 && integerNext < integerPlaces.Length)
-                            {
-                                AppendIntegerPlace(ref text, integerDigits, integerPlaces, integerNext++, thousands);
-                            }
-                            else if (part == 1 && fractionNext < fractionPlaces.Length)
-                            {
-                                if (fractionNext < keep && fractionNext < fractionDigits.Length)
-                                {
-                                    text.Append(fractionDigits[fractionNext]);
-                                }
-
-                                fractionNext++;
-                            }
-                            else if (part == 2 && exponentNext < exponentPlaces.Length)
-                            {
-                                AppendIntegerPlace(ref text, exponentDigits, exponentPlaces, exponentNext++, thousands: false);
-                            }
+                            count--;
                         }
+                    }
 
-                        break;
-                    case 0x05 when part == 0:
-                        text.Append('.');
-                        part = 1;
-                        break;
-                    case 0x1D or 0x1E:
-                        if (exponent < 0)
-                        {
-                            text.Append('-');
-                        }
-                        else if (token.Code == 0x1D)
-                        {
-                            text.Append('+');
-                        }
-
-                        part = 2;
-                        break;
-                    default:
-                        AppendDisplayLiteral(ref text, token);
-                        break;
+                    exponent = point - integers;
+                    point = positions = integers;
+                    next = 0;
+                    afterPoint = thousands = false;
+                    break;
                 }
+
+                case 0x04 or 0x06 when token.Operands.Length == 1:
+                {
+                    int run = token.Operands[0];
+                    bool zeros = token.Code == 0x06;
+                    if (afterPoint)
+                    {
+                        if (point < 0)
+                        {
+                            int leading = Math.Min(-point, run);
+                            text.Append('0', leading);
+                            point += leading;
+                            run -= leading;
+                        }
+
+                        int shown = Math.Min(count - next, run);
+                        text.Append(digits.Slice(next, shown));
+                        next += shown;
+                        run -= shown;
+                        if (zeros)
+                        {
+                            text.Append('0', run);
+                        }
+
+                        break;
+                    }
+
+                    int spare = positions - point;
+                    if (spare > 0)
+                    {
+                        int empty = Math.Min(spare, run);
+                        run -= empty;
+                        for (int i = 0; i < empty; i++)
+                        {
+                            positions--;
+                            if (zeros)
+                            {
+                                text.Append('0');
+                                AppendSeparator(ref text, positions, thousands);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        run -= spare;
+                        positions = point;
+                    }
+
+                    AppendIntegerDigits(ref text, run, digits[..count], ref next, ref point, ref positions, thousands);
+                    break;
+                }
+
+                case 0x05:
+                    if (point > 0)
+                    {
+                        positions = point;
+                        AppendIntegerDigits(ref text, point, digits[..count], ref next, ref point, ref positions, thousands);
+                    }
+
+                    afterPoint = true;
+                    text.Append('.');
+                    break;
+                case 0x07:
+                    thousands = true;
+                    break;
+                case 0x1D or 0x1E when token.Operands.Length == 1:
+                {
+                    if (exponent < 0)
+                    {
+                        text.Append('-');
+                    }
+                    else if (token.Code == 0x1D)
+                    {
+                        text.Append('+');
+                    }
+
+                    Math.Abs(exponent).TryFormat(digits, out count, default, CultureInfo.InvariantCulture);
+                    next = 0;
+                    point = count;
+                    positions = token.Operands[0];
+                    afterPoint = thousands = false;
+                    break;
+                }
+
+                default:
+                    AppendDisplayLiteral(ref text, token);
+                    break;
             }
         }
-        finally
+    }
+
+    // Shows the next `run` integer digits (0 once they run out), with a separator before every third position from
+    // the right while separators are on.
+    private static void AppendIntegerDigits(ref TextBuffer text, int run, scoped ReadOnlySpan<char> digits, ref int next, ref int point, ref int positions, bool thousands)
+    {
+        for (int i = 0; i < run; i++)
         {
-            if (rented is not null)
-            {
-                System.Buffers.ArrayPool<char>.Shared.Return(rented);
-            }
+            text.Append(next < digits.Length ? digits[next++] : '0');
+            point--;
+            positions--;
+            AppendSeparator(ref text, positions, thousands);
+        }
+    }
+
+    private static void AppendSeparator(ref TextBuffer text, int positions, bool thousands)
+    {
+        if (thousands && positions > 0 && positions % 3 == 0)
+        {
+            text.Append(',');
         }
     }
 
@@ -969,32 +1005,6 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         return 1;
     }
 
-    // What one integer placeholder shows (`place` counts them from the left): a 0 shows a digit or 0, a # a digit or
-    // nothing, digits that do not fit go with the first placeholder, and a separator follows every third position
-    // from the right.
-    private static void AppendIntegerPlace(ref TextBuffer text, scoped ReadOnlySpan<char> digits, scoped ReadOnlySpan<char> places, int place, bool thousands)
-    {
-        int width = Math.Max(places.Length, digits.Length);
-        int spare = width - places.Length;
-        for (int i = place == 0 ? 0 : spare + place; i <= spare + place; i++)
-        {
-            int at = i - spare;
-            int digit = i - (width - digits.Length);
-            char shown = digit >= 0 ? digits[digit] : at >= 0 && places[at] == '0' ? '0' : '\0';
-            if (shown == '\0')
-            {
-                continue;
-            }
-
-            text.Append(shown);
-            int remaining = width - i - 1;
-            if (thousands && remaining > 0 && remaining % 3 == 0)
-            {
-                text.Append(',');
-            }
-        }
-    }
-
     // A token as it shows in a formatted value: strings without their quotes, and fills (which need a column
     // width) and colours as nothing.
     private static void AppendDisplayLiteral(ref TextBuffer text, Token token)
@@ -1029,7 +1039,6 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
         }
 
         var date = new DateTime(1904, 1, 1).AddSeconds(seconds);
-        bool twelveHour = tokens.Exists(static t => t.Code == 0x21);
         var names = CultureInfo.InvariantCulture.DateTimeFormat;
         int hour12 = date.Hour % 12 == 0 ? 12 : date.Hour % 12;
         foreach (var token in tokens)
@@ -1044,8 +1053,10 @@ public sealed record ExcelNumberFormat(byte[] Descriptor, byte[] Body)
                 case 0x10: text.AppendFormatted(date.Month, "00"); break;
                 case 0x11: text.Append(names.GetAbbreviatedMonthName(date.Month)); break;
                 case 0x12: text.Append(names.GetMonthName(date.Month)); break;
-                case 0x13: text.AppendFormatted(twelveHour ? hour12 : date.Hour, default); break;
-                case 0x14: text.AppendFormatted(twelveHour ? hour12 : date.Hour, "00"); break;
+                // 13 and 14 are 24-hour even beside AM/PM: the compiler makes only the hour just before an AM/PM a
+                // 12-hour 1F or 20 (07.09 in 1.00), so h:mm h:mm A/P shows 1 as 0:00 12:00 A.
+                case 0x13: text.AppendFormatted(date.Hour, default); break;
+                case 0x14: text.AppendFormatted(date.Hour, "00"); break;
                 case 0x1F: text.AppendFormatted(hour12, default); break;
                 case 0x20: text.AppendFormatted(hour12, "00"); break;
                 case 0x15: text.AppendFormatted(date.Minute, default); break;
