@@ -1946,6 +1946,9 @@ Tick-label position:
 | 40 | Word of flags (below) |
 | 42 | Pointer, left over from memory; zeroed on load |
 
+A field marked automatic holds what Excel worked out the last time it drew the chart ([Display](Display.md),
+"Automatic axis scales"). On a logarithmic scale the minimum, maximum and units are exponents of ten.
+
 Scale word 40:
 
 | Bits | Meaning |

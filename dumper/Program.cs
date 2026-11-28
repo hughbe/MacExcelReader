@@ -726,6 +726,7 @@ sealed class ChartCommand : Command<FileSettings>
             if (chart != document.MainChart)
             {
                 table.AddRow("Shares main chart's scale", $"value axis {Program.YesNo(chart.SharesValueAxisScale)}, X axis {Program.YesNo(chart.SharesXAxisScale)}");
+                table.AddRow("First series", chart.FirstOverlaySeries.ToString(CultureInfo.InvariantCulture));
             }
 
             var (top, left) = chart.DrawingMargins;
@@ -792,8 +793,11 @@ sealed class ChartCommand : Command<FileSettings>
     private static string Axis(ChartAxis axis)
         => $"ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition} (drawn at {axis.TickLabelsAt}); line {(axis.Line.Pattern == ChartPattern.None ? "hidden" : $"{axis.Line.Pattern} {axis.Line.Weight} at {axis.LineAt}")}; gridlines major {axis.MajorGridlines.Pattern}, minor {axis.MinorGridlines.Pattern}";
 
+    // Automatic values show what the record holds too: what Excel last worked out when it drew the chart.
     private static string Scale(ChartScale scale)
-        => $"min {(scale.AutomaticMinimum ? "auto" : scale.Minimum)}, max {(scale.AutomaticMaximum ? "auto" : scale.Maximum)}, major {(scale.AutomaticMajorUnit ? "auto" : scale.MajorUnit)}, minor {(scale.AutomaticMinorUnit ? "auto" : scale.MinorUnit)}, crosses {(scale.AutomaticCrossesAt ? "auto" : scale.CrossesAt)}{(scale.IsLogarithmic ? ", log" : string.Empty)}{(scale.ValuesInReverseOrder ? ", reversed" : string.Empty)}";
+        => $"min {Value(scale.AutomaticMinimum, scale.Minimum)}, max {Value(scale.AutomaticMaximum, scale.Maximum)}, major {Value(scale.AutomaticMajorUnit, scale.MajorUnit)}, minor {Value(scale.AutomaticMinorUnit, scale.MinorUnit)}, crosses {Value(scale.AutomaticCrossesAt, scale.CrossesAt)}{(scale.IsLogarithmic ? ", log" : string.Empty)}{(scale.ValuesInReverseOrder ? ", reversed" : string.Empty)}";
+
+    private static string Value(bool automatic, double value) => automatic ? $"auto ({value.ToString("R", CultureInfo.InvariantCulture)})" : value.ToString("R", CultureInfo.InvariantCulture);
 }
 
 static class RangeParser
@@ -1092,6 +1096,14 @@ sealed class NewChartSettings : CommandSettings
     [CommandOption("--bar")]
     [Description("Horizontal bars (with ColumnOrBar).")]
     public bool Bar { get; init; }
+
+    [CommandOption("--scale <FIELD=VALUE>")]
+    [Description("Fix a value-axis scale field instead of leaving it automatic: min, max, major, minor or crosses, as min=2. Repeatable.")]
+    public string[] Scale { get; init; } = [];
+
+    [CommandOption("--log")]
+    [Description("A logarithmic value axis.")]
+    public bool Log { get; init; }
 }
 
 /// <summary>
@@ -1113,6 +1125,23 @@ sealed class NewChartCommand : Command<NewChartSettings>
         {
             var values = series[i].Split(',').Select(v => double.Parse(v, CultureInfo.InvariantCulture)).ToList();
             document.Series.Add(ChartSeries.Create($"Series {i + 1}", values, "Data", $"R{i + 1}C1:R{i + 1}C{values.Count}"));
+        }
+
+        var scale = document.MainChart.ValueScale;
+        scale.IsLogarithmic = settings.Log;
+        foreach (string field in settings.Scale)
+        {
+            var parts = field.Split('=', 2);
+            double value = double.Parse(parts[1], CultureInfo.InvariantCulture);
+            switch (parts[0])
+            {
+                case "min": scale.Minimum = value; scale.AutomaticMinimum = false; break;
+                case "max": scale.Maximum = value; scale.AutomaticMaximum = false; break;
+                case "major": scale.MajorUnit = value; scale.AutomaticMajorUnit = false; break;
+                case "minor": scale.MinorUnit = value; scale.AutomaticMinorUnit = false; break;
+                case "crosses": scale.CrossesAt = value; scale.AutomaticCrossesAt = false; break;
+                default: throw new ArgumentException($"Unknown scale field {parts[0]}: use min, max, major, minor or crosses.");
+            }
         }
 
         File.WriteAllBytes(settings.Output, document.ToArray());

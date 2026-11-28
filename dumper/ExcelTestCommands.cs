@@ -536,7 +536,7 @@ sealed class CheckCommand : Command<CheckSettings>
     {
         if (ExcelTest.IsChart(data))
         {
-            return null;
+            return UnreadableChart(data);
         }
 
         try
@@ -569,6 +569,42 @@ sealed class CheckCommand : Command<CheckSettings>
                 ? e.Message.TrimEnd('.')
                 : $"{e.Message.TrimEnd('.')}; the 512-byte sector(s) at {string.Join(", ", zeroed)} are all zeros, so part of the save did not reach the disk";
         }
+    }
+
+    // A chart that lost a sector usually still reads, its series cut short. The series lists come last, from the
+    // offset in header word 26, and no chart sample has a long run of zeros there, so a sector of them that is all
+    // zeros (whole, or at least 64 bytes of the last one) did not reach the disk. Only a series of 8 or more zero
+    // values in a row could look the same; rerunning it does no harm. Sectors before them can be zeros: the page
+    // setup mostly is.
+    private static string? UnreadableChart(byte[] data)
+    {
+        int seriesLists = data.Length >= 28 ? (data[26] << 8) | data[27] : 0;
+        var zeroed = new List<string>();
+        for (int sector = seriesLists / 512 * 512; sector < data.Length; sector += 512)
+        {
+            int from = Math.Max(sector, seriesLists), length = Math.Min(sector + 512, data.Length) - from;
+            if (length >= 64 && !data.AsSpan(from, length).ContainsAnyExcept((byte)0))
+            {
+                zeroed.Add($"0x{sector:X}");
+            }
+        }
+
+        string? error = null;
+        try
+        {
+            _ = ChartDocument.Read(data);
+        }
+        catch (Exception e) when (e is ExcelFormatException or ArgumentException or IndexOutOfRangeException)
+        {
+            error = e.Message.TrimEnd('.');
+        }
+
+        if (zeroed.Count == 0)
+        {
+            return error;
+        }
+
+        return $"{error ?? "its series are cut short"}: the sector(s) at {string.Join(", ", zeroed)} are all zeros, so part of the save did not reach the disk";
     }
 
     // Whether an expression has an area spanning every row or every column with a relative end: whole rows or

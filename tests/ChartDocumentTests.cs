@@ -318,4 +318,57 @@ public class ChartDocumentTests
         await reread.WriteAsync(output);
         Assert.Equal(bytes, output.ToArray());
     }
+
+    [Theory]
+    [InlineData(3485, false, 240, 120, 240, 12)]
+    [InlineData(783, false, 180, 120, 180, 2)]
+    [InlineData(8315, true, 240, 120, 240, 23)]
+    [InlineData(300, false, 240, 120, 240, 0)]
+    public void GetLabelSpaces_FollowsExcel(int length, bool horizontal, int height, int zeroWidth, int otherHeight, int expected)
+    {
+        // Down an axis: the plot height less two of the other axis's label heights, over a label's height. Across:
+        // the plot width over three widths of 0 (37.0a).
+        Assert.Equal(expected, ChartScale.GetLabelSpaces(length, horizontal, height, zeroWidth, otherHeight));
+    }
+
+    [Fact]
+    public void SetAutomaticValues_PicksTheMajorUnitFromTheTable()
+    {
+        // 10 intervals over 0 to 101: 10.1% of 100 each, so 20% of it, 20 (37.0a).
+        var scale = Chart.Create(ChartType.Line).ValueScale;
+        scale.SetAutomaticValues(0, 101, 10);
+        Assert.Equal((0.0, 120.0, 20.0, 4.0, 0.0), (scale.Minimum, scale.Maximum, scale.MajorUnit, scale.MinorUnit, scale.CrossesAt));
+
+        // Fewer label spaces, wider units: 2 intervals over 0 to 7 need 350% each, so 500%.
+        scale.SetAutomaticValues(0, 7, 2);
+        Assert.Equal((0.0, 10.0, 5.0), (scale.Minimum, scale.Maximum, scale.MajorUnit));
+    }
+
+    [Fact]
+    public void SetAutomaticValues_KeepsFixedFields()
+    {
+        var scale = Chart.Create(ChartType.Line).ValueScale;
+        scale.AutomaticMinimum = false;
+        scale.Minimum = 2;
+        scale.SetAutomaticValues(0, 10, 10);
+        Assert.Equal((2.0, 10.0, 1.0, 2.0), (scale.Minimum, scale.Maximum, scale.MajorUnit, scale.CrossesAt));
+    }
+
+    [Fact]
+    public void GetSeries_SplitsAtTheOverlaysFirstSeries()
+    {
+        var document = ChartDocument.Create(ChartType.ColumnOrBar);
+        var overlay = Chart.Create(ChartType.Line);
+        overlay.FirstOverlaySeries = 3;
+        document.Charts.Insert(0, overlay);
+        for (int i = 0; i < 4; i++)
+        {
+            document.Series.Add(ChartSeries.Create($"S{i}", [i, i + 1], "Data", $"R{i + 1}C1:R{i + 1}C2"));
+        }
+
+        Assert.Equal(["S0", "S1"], document.GetSeries(document.MainChart).Select(s => s.Name));
+        Assert.Equal(["S2", "S3"], document.GetSeries(overlay).Select(s => s.Name));
+        Assert.Equal((0.0, 2.0), document.GetDataRange(document.MainChart));
+        Assert.Equal((2.0, 4.0), document.GetDataRange(overlay));
+    }
 }

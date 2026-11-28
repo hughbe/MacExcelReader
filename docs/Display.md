@@ -2,8 +2,8 @@
 
 The [format specification](Spec.md) describes what a file holds. This describes how Excel shows it on screen: how a
 value is turned into text in its number format, how that text is fitted into its cell and row, and how the window
-round the cells is drawn. It uses the spec's conventions and cites code the same way (`segment.procedure`, spec
-Background), and `ExcelValueFormatter` and `ExcelRenderer` follow it.
+round the cells is drawn, and how a chart's automatic axis scales are worked out. It uses the spec's conventions and cites code the same way (`segment.procedure`, spec
+Background), and `ExcelValueFormatter`, `ExcelRenderer` and `ChartScale.SetAutomaticValues` follow it.
 
 Drawing also follows the Macintosh's own code: the Mac Plus ROM (checksum `4D1F8172`) that the screens
 were captured under, cited by ROM offset, with Apple's 1985 QuickDraw source (`DrawText.a`, `Stretch.a`), and
@@ -264,7 +264,74 @@ Each division rounds down; row 16383 gives 17982. The System's scroll bar (`CDEF
 maximum pixels along its travel, the track's length less the thumb's, rounding up only when the remainder is more
 than half the maximum: (column × travel + 127) ÷ 255 for the horizontal thumb.
 
+## Automatic axis scales
+
+When Excel 1.00 draws a chart it works out every scale field marked automatic (spec §16.5) and writes the result
+into the scale record, which Save then writes out: a chart Excel has drawn holds the values it drew with
+(`37.0a` in 1.00). A pie chart has no axes and its scale is left alone. Every step below uses Excel's own
+floating-point operations in this order; `ChartScale.SetAutomaticValues` follows them and gives the same doubles
+for every chart sample, Excel's own from 1.00, 1.03 and 1.5 among them.
+
+**The data** (`37.16`): the smallest and largest value on the axis, over the chart's series. With an overlay, the
+main chart plots the series before the overlay's first series and the overlay the rest.
+
+* A stacked chart (header bit 13, not scatter) runs from 0 to the largest total of a category's values, each
+  counted positive: two series of −1, −2, −3 and −4, 5, −6 give 0 to 9 (`Scale Stacked Negative`).
+* A 100% stacked chart runs from 0 to 100.
+* A scatter chart's X axis takes the series' category numbers, or 1, 2, … for a series that has none.
+* A logarithmic axis leaves out values that are not positive, and has 1 wherever a linear one has 0.
+* With no values both ends are 0 (1 on a logarithmic axis).
+
+**A single value.** When the data's ends are equal, the minimum moves a tenth of its size away from zero, and
+for a scatter chart the maximum moves a tenth the other way: 5 gives 4.5 to 5, or 4.5 to 5.5 in a scatter chart.
+All zeros give 0 to 1.
+
+**Fixed fields.** A fixed minimum or maximum replaces the data's. On a logarithmic axis a fixed maximum *m*
+becomes 10 to the power of ⌈log₁₀ *m*⌉, and a fixed minimum, which the record holds as an exponent *e*, becomes
+10 to the power of ⌊*e*⌋.
+
+**Starting at zero.** Unless the minimum is fixed or the chart is a scatter chart, a scale whose data does not
+straddle zero starts at zero when the range is at least 8% of the end furthest from zero (|100 × range ÷ end| −
+10 + 2 ≥ 0): 92 to 100 starts at 0, 93 to 100 and 92.5 to 100 do not. Negative data ends at zero instead.
+
+**The major unit.** With *p* the power of ten below the range (10 to the power of the exponent `Num2Str` gives
+the range, less 1) and *n* intervals, Excel takes the smallest of 10, 20, 50, 100, 200, 500 and 1000 (a table in
+1.00's initial data) at least ⌈100 × range ÷ *n* ÷ *p*⌉, and the unit is that × *p* ÷ 100. 0 to 101 over 10
+intervals needs 10.1, so the unit is 20 × 100 ÷ 100 = 20 and the axis runs to 120.
+
+*n* is the number of tick labels that fit along the axis, from 1 to 10:
+
+* Along a vertical axis: the plot area's height, less twice the other axis's label height, divided by the axis's
+  label height (the font's ascent and descent).
+* Along a horizontal axis (a bar chart's value axis, a scatter chart's X axis): the plot area's width divided by
+  three widths of the digit 0 in the axis's label font.
+
+Each division rounds down, and the lengths are in twips with the fonts at the size Excel draws them for the
+window. Excel 1.00 scales a chart's fonts with its window (`30.26`): for each font it picks the largest size whose
+line height and widest character fit the window's share of the font's size in twips **(inferred)**; the library
+does not work these sizes out, so `ChartScale.GetLabelSpaces` takes the label metrics. A library chart in a
+300-point-wide window gets 1 interval at a plot height of 450 twips, 2 at 783, 4 at 1276, 6 at 1935 and 9 at 2761
+(the `Scale Window` samples).
+
+**The other fields.** An automatic minor unit is a fifth of the major unit. Then each unit, fixed or not, is
+limited: one too small to change either end of the scale becomes the whole range, and one that would divide the
+range into more than 500 parts becomes the range ÷ 500. An automatic maximum moves up and an automatic minimum
+down to a whole number of major units, unless it is one already; the multiple is the unit times the quotient
+rounded towards zero. An automatic crossing point is 0, or the end of the scale nearer to zero when zero is
+outside it. Last, an automatic minimum not below the maximum becomes the maximum less a major unit, and an
+automatic maximum not above the minimum the minimum plus one.
+
+**Logarithmic scales** (`37.2d`) hold exponents of ten. The maximum is ⌈log₁₀ max⌉, allowing 1E−10 for rounding
+in the logarithm, and the minimum ⌊log₁₀ |min|⌋: 0.5 to 30 gives −1 to 2. The minor unit is 1, and the major unit
+is (⌊range⌋ − 1) ÷ (*n* − 1) + 1 in whole numbers, where *n* is not limited to 10. An automatic maximum is then
+the minimum plus the range moved up to a whole number of major units.
+
 ## Open questions
 
 * How the 64K ROM that Excel 1.00 also ran on draws a font size with no bitmap. Running it needs the 64K ROM and
   MAME's `mac512k`, neither of which this project has, and a 400K boot disk, which the 64K ROM needs.
+* What Excel 1.00 does when a fixed maximum is below the data and the data's minimum is 0 (`Scale Fixed Maximum
+  Below Data`): the test for starting at zero divides by the minimum, and Excel's result, −5.5 to −5 in units of
+  0.5, is not what an IEEE division by zero would give.
+* How an overlay that shares the main chart's scale (spec §16.5) combines the two charts' data (`37.2f`); no
+  sample has one.

@@ -1772,4 +1772,66 @@ public class ExperimentTests
             Assert.Equal(Internal.NameKey.Of("a" + excel + "x"), Internal.NameKey.Of("a" + character + "x"));
         }
     }
+
+    // The label spaces of the samples saved from windows too small for 10 intervals (Display.md).
+    private static readonly Dictionary<string, int> s_scaleLabelSpaces = new()
+    {
+        ["Scale Window 70"] = 1,
+        ["Scale Window 130"] = 2,
+        ["Scale Window 160"] = 4,
+        ["Scale Window 200"] = 6,
+        ["Scale Window 250"] = 9,
+        ["Scale Bar Window 120"] = 4,
+        ["Scale Bar Window 200"] = 7,
+    };
+
+    public static TheoryData<string> AxisCharts() => new(AllSamples()
+        .Where(path => File.ReadAllBytes(SampleFile(path))[0] == 0x01 && ChartDocument.Load(SampleFile(path)).MainChart.Type != ChartType.Pie && !path.EndsWith("Scale Fixed Maximum Below Data", StringComparison.Ordinal)));
+
+    [Theory]
+    [MemberData(nameof(AxisCharts))]
+    public void Scale_AutomaticValuesAreExcels(string path)
+    {
+        // Every chart Excel saved holds in its scale records the automatic values Excel worked out when it last drew
+        // it (37.0a), and the library works out the same doubles from the series: Excel's own samples from 1.00,
+        // 1.03 and 1.5, and the "Scale" samples, library charts with chosen data, fixed fields and window sizes that
+        // Excel 1.00 drew and saved. A window big enough for 10 intervals is all but one of them.
+        var document = ChartDocument.Load(SampleFile(path));
+        int labelSpaces = s_scaleLabelSpaces.GetValueOrDefault(Path.GetFileName(path), 10);
+        var chart = document.MainChart;
+        foreach (var xAxis in chart.XScale is null ? [false] : new[] { false, true })
+        {
+            var scale = xAxis ? chart.XScale! : chart.ValueScale;
+            double[] saved = [scale.Minimum, scale.Maximum, scale.MajorUnit, scale.MinorUnit, scale.CrossesAt];
+            document.UpdateAutomaticScale(chart, labelSpaces, xAxis);
+            Assert.Equal(saved, new[] { scale.Minimum, scale.Maximum, scale.MajorUnit, scale.MinorUnit, scale.CrossesAt });
+        }
+    }
+
+    [Fact]
+    public void Scale_FixedMaximumBelowTheData()
+    {
+        // Data 0 to 10 with the maximum fixed at -5: 37.0a divides by the minimum, 0, when it decides whether the
+        // scale starts at zero, and Excel's result (minimum -5.5, major unit 0.5) is not what the division gives
+        // as an IEEE infinity (Display.md, open questions).
+        var scale = ChartDocument.Load(SamplePath("Scale Fixed Maximum Below Data")).MainChart.ValueScale;
+        Assert.False(scale.AutomaticMaximum);
+        Assert.Equal(-5, scale.Maximum);
+        Assert.Equal(-5.5, scale.Minimum);
+        Assert.Equal(0.5, scale.MajorUnit);
+    }
+
+    [Theory]
+    [InlineData("Scale Stacked Area", 0, 9)]
+    [InlineData("Scale Stacked Negative", 0, 9)]
+    [InlineData("Scale Stacked 100", 0, 100)]
+    [InlineData("Scale Three Series", -8, 40)]
+    [InlineData("Scale Log Negative", 3000, 3000)]
+    public void Scale_DataRange(string name, double min, double max)
+    {
+        // Stacked charts total each category's values counted positive, from 0; 100% charts run 0 to 100; a
+        // logarithmic axis leaves out values that are not positive (37.16).
+        var document = ChartDocument.Load(SamplePath(name));
+        Assert.Equal((min, max), document.GetDataRange(document.MainChart));
+    }
 }

@@ -611,4 +611,32 @@ public sealed class ChartScale
 
     /// <summary>Gets or sets values in reverse order.</summary>
     public bool ValuesInReverseOrder { get => GetFlag(9); set => SetFlag(9, value); }
+
+    /// <summary>
+    /// Sets the fields marked automatic as Excel 1.00 does when it draws the chart, from the data's range: the
+    /// minimum, maximum, units and crossing point it then saves (docs/Display.md, "Automatic axis scales"). Fixed
+    /// fields are left as they are and bound the automatic ones. A logarithmic scale holds exponents.
+    /// </summary>
+    /// <param name="dataMinimum">The smallest value the axis shows (<see cref="ChartDocument.GetDataRange"/>).</param>
+    /// <param name="dataMaximum">The largest value the axis shows.</param>
+    /// <param name="labelSpaces">How many tick labels fit along the axis (<see cref="GetLabelSpaces"/>). A linear
+    /// scale takes 1 to 10 intervals from it.</param>
+    /// <param name="scatter">Whether the chart is a scatter chart, whose scale never moves to zero and whose single
+    /// value widens both ways.</param>
+    public void SetAutomaticValues(double dataMinimum, double dataMaximum, int labelSpaces, bool scatter = false)
+        => ChartAutomaticScale.Apply(this, dataMinimum, dataMaximum, labelSpaces, scatter);
+
+    /// <summary>
+    /// Gets how many tick labels Excel 1.00 reckons fit along an axis when it works out an automatic major unit
+    /// (<c>37.0a</c>): along a vertical axis the plot area's height, less two of the other axis's label heights,
+    /// over a label's height; along a horizontal axis the plot area's width over three widths of the digit 0.
+    /// Lengths are in twips, with the fonts at the sizes Excel draws them for the window.
+    /// </summary>
+    /// <param name="plotLength">The plot area's height for a vertical axis, its width for a horizontal one.</param>
+    /// <param name="horizontal">Whether the axis runs across: a bar chart's value axis or a scatter chart's X axis.</param>
+    /// <param name="labelHeight">The ascent and descent of the axis's label font.</param>
+    /// <param name="zeroWidth">The width of 0 in the axis's label font.</param>
+    /// <param name="otherLabelHeight">The ascent and descent of the other axis's label font.</param>
+    public static int GetLabelSpaces(int plotLength, bool horizontal, int labelHeight, int zeroWidth, int otherLabelHeight)
+        => horizontal ? plotLength / (3 * zeroWidth) : (plotLength - 2 * otherLabelHeight) / labelHeight;
 }

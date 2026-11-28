@@ -427,6 +427,16 @@ newChart.Series.Add(ChartSeries.Create("Sales", [1, 3, 2], "Data", "R2C1:R2C3", 
 newChart.Save("Sales Chart");
 ```
 
+A scale field marked automatic holds what Excel worked out when it last drew the chart. After changing the data,
+`UpdateAutomaticScale` works the automatic fields out again as Excel 1.00 does. It needs to know how many tick
+labels fit along the axis. Excel 1.00 fits up to 10 intervals, which a chart at its usual window size has room for:
+
+```csharp
+newChart.UpdateAutomaticScale(newChart.MainChart, labelSpaces: 10);
+// or from the plot area and the label fonts' metrics, in twips:
+int spaces = ChartScale.GetLabelSpaces(plotHeight, horizontal: false, labelHeight, zeroWidth, otherLabelHeight);
+```
+
 Patterns, markers, line weights and arrowheads are enums (`ChartPattern`, `ChartMarker`, `ChartLineWeight`,
 `ArrowHeadWidth`, `ArrowHeadLength`, `ArrowHeadStyle`) named after Excel 1.00's Patterns dialogs.
 

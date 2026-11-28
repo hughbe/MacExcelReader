@@ -52,7 +52,7 @@ For each file, `check` reports:
 - the byte counts, and how many bytes differ.
 
 By default it skips the changes Excel is expected to make:
-- automatic chart scale limits, which Excel works out when it draws;
+- automatic chart scale values, which Excel works out when it draws ([Display](Display.md));
 - recalculated formula results;
 - windows;
 - the code signature and chart version, which say which Excel saved the file;
@@ -61,7 +61,7 @@ By default it skips the changes Excel is expected to make:
 
 `--all` shows them too. The exit code is 0 when nothing unexpected differs.
 
-To test charts, `dumper newchart TYPE OUT [--series 1,2,3]... [--title T] [--bar]` builds one with the library.
+To test charts, `dumper newchart TYPE OUT [--series 1,2,3]... [--title T] [--bar] [--log] [--scale min=2]...` builds one with the library.
 
 Options for `pack`:
 - `--volume NAME`: the disk's name. Driver opens files as `Volume:Name`, so each mounted test disk needs its
@@ -160,8 +160,10 @@ files it has, and is the quickest way to ask Excel something:
   then cannot be read): 2 of 76 disks of about 20 KB saves, on 400K and 800K disks alike, at unrelated places
   (track 3 sector 11, track 20 sector 5). The test disk is ejected, which flushes it, before MAME stops, so the
   cause is **(unknown)**; MAME's conversion of a sector it cannot decode back to the raw image is one candidate,
-  and checking it needs MAME's `floptool`, which Homebrew's MAME does not include. `check` treats a save as readable only if every formula and name in it
-  decodes, names any zeroed sectors, and `experiment` runs those files again on a disk of their own. A check
+  and checking it needs MAME's `floptool`, which Homebrew's MAME does not include. `check` treats a sheet as
+  readable only if every formula and name in it decodes, and a chart only if no sector of its series lists is all
+  zeros (a chart that lost one still reads, its last series cut short; 1 of the 123 scale charts did). It names
+  any zeroed sectors, and `experiment` runs those files again on a disk of their own. A check
   that fails on one disk is reported with the rest instead of ending the experiment.
 - **Crashes.** A disk that does not finish is split in halves until the file that stops Excel is found; its
   last screen is in `results/DISK/screen.png`. Excel 1.00 crashes on some formulas it should refuse and on some
@@ -400,6 +402,7 @@ window, so they differ from the renderer where it lies.
 | Nov 2026 | 1.00 | The seven random-format sheets that crashed Excel, split into 280 formats with TEXT and FORMAT.NUMBER on sheets of their own | Only TEXT crashes, and only for a format with two exponents in a section after the first, whichever section the value uses; with them in the first section TEXT gives `#VALUE!` (`TEXT Two Exponents`), and FORMAT.NUMBER refuses both. `pack` now warns about these and the other crashing shapes ([Excel bugs](ExcelBugs.md)) |
 | Nov 2026 | 1.00 | `Calc 3`: 166 function results, among them square roots, exponentials, logarithms and trigonometry up to 1E9, MOD and ROUND at their limits, financial functions, statistics, dates and text, compared with correctly rounded values | `LN` and `LOG10` were exact, `EXP` and `SQRT` at most a unit out, the trigonometric functions within 2 units up to 3 and up to 189 at 1E8, then #NUM! at 1E9; `MOD` fails for large quotients, `ROUND` works on the 14-digit conversion, times round to the second, and `RATE` without a guess fails over 360 periods ([Calculation](Calculation.md); `tests/Data/calc-1.00.txt`, now checked against all three Calc samples) |
 | Nov 2026 | 1.00, 1.04 | The System files of Excel 1.00's Data disk and of Excel 1.04's disk (System 3.2), read with `excel-test files` | The Data disk's System has no `FOND` resources; System 3.2 has five, and Geneva's gives bold an extra width of 0, which is why a scaled size's bold headings are lighter under it ([Display](Display.md)) |
+| Nov 2026 | 1.00 | 123 library charts with chosen data, fixed scale fields, stacked, 100%, logarithmic and scatter formats, and windows from 70 to 330 points (`newchart --scale`, `--log`, `SIZE`), with the scale code (`37.0a`, `37.16`, `37.2d`) decompiled | Excel saves the automatic scale it drew with; the library now works it out to the bit for every chart sample, Excel's own from 1.03 and 1.5 included: the 8% rule for starting at zero, the major units 10, 20, 50 × a power of ten, stacked totals counted positive, logarithmic scales as exponents, and the label count that fits the plot area. Only a fixed maximum below data starting at 0 differs (`Scale` samples; [Display](Display.md)) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

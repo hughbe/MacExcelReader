@@ -45,7 +45,8 @@ The library targets .NET 9 and has no dependencies.
   you change are re-encoded. Values are checked as they are set against what a file can hold and what Excel
   itself would store, and defined names are kept in the order Excel searches them.
 - **Charts.** Type and options, axes and scales, legend, titles, data labels, free text and arrows, point
-  formats, overlay charts and the series data, in Microsoft Chart's 8-byte decimal numbers.
+  formats, overlay charts and the series data, in Microsoft Chart's 8-byte decimal numbers. Automatic axis
+  scales are worked out as Excel 1.00 draws them, to the bit.
 - **Drawing.** `ExcelRenderer` draws a sheet's window as Excel 1.00 shows it, as a one-bit picture or PNG, with
   the bitmap fonts of a System file you supply: headings, gridlines, cells laid out as Excel lays them out,
   borders, the selection and the scroll bars, and sizes the System has no bitmap for stretched as the Mac Plus

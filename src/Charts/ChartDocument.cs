@@ -439,4 +439,109 @@ public sealed class ChartDocument
         writer.WriteUInt16(checked((ushort)secondArrayOffset));
         writer.WriteBytes(bytes);
     }
+
+    /// <summary>
+    /// Gets the series a chart plots: all of them for a lone chart; with an overlay, the main chart has those before
+    /// the overlay's first series (<see cref="Chart.FirstOverlaySeries"/>, counted from 1) and the overlay the rest.
+    /// </summary>
+    public IReadOnlyList<ChartSeries> GetSeries(Chart chart)
+    {
+        if (OverlayChart is not { } overlay)
+        {
+            return Series;
+        }
+
+        int first = Math.Clamp(overlay.FirstOverlaySeries - 1, 0, Series.Count);
+        return chart == overlay ? Series.GetRange(first, Series.Count - first) : Series.GetRange(0, first);
+    }
+
+    /// <summary>
+    /// Gets the range of the data an axis of a chart shows, as Excel 1.00 takes it for an automatic scale
+    /// (<c>37.16</c>): the smallest and largest values; for a stacked chart 0 and the largest total of a
+    /// category's values, each counted positive; 0 and 100 for a 100% chart. A logarithmic axis leaves out
+    /// values that are not positive, and has 1 where a linear one has 0. With no values the range is empty: both
+    /// ends 0 (1 on a logarithmic axis).
+    /// </summary>
+    /// <param name="chart">The main chart or the overlay.</param>
+    /// <param name="xAxis">The X axis of a scatter chart, whose values are the series' category numbers (or 1, 2,
+    /// … for a series without them) instead of the value axis's.</param>
+    public (double Minimum, double Maximum) GetDataRange(Chart chart, bool xAxis = false)
+    {
+        bool scatter = chart.Type == ChartType.Scatter;
+        var scale = xAxis ? chart.XScale ?? chart.ValueScale : chart.ValueScale;
+        bool log = scale.IsLogarithmic;
+        double empty = log ? 1 : 0;
+        bool stacked = !scatter && chart.IsStacked;
+        if (stacked && chart.IsPercent)
+        {
+            return (empty, 100);
+        }
+
+        var series = GetSeries(chart);
+        double min = double.PositiveInfinity, max = double.NegativeInfinity;
+        void Add(double value)
+        {
+            if (log && value <= 0)
+            {
+                return;
+            }
+
+            min = Math.Min(min, value);
+            max = Math.Max(max, value);
+        }
+
+        if (stacked)
+        {
+            int points = series.Count == 0 ? 0 : series.Max(s => s.Values.Count);
+            for (int i = 0; i < points; i++)
+            {
+                double total = 0;
+                foreach (var s in series)
+                {
+                    if (i < s.Values.Count)
+                    {
+                        total += Math.Abs(s.Values[i].ToDouble());
+                    }
+                }
+
+                Add(total);
+            }
+        }
+        else
+        {
+            foreach (var s in series)
+            {
+                for (int i = 0; i < s.Values.Count; i++)
+                {
+                    Add(!xAxis ? s.Values[i].ToDouble()
+                        : s.SeriesType != 3 && i < s.CategoryValues.Count ? s.CategoryValues[i].ToDouble() : i + 1);
+                }
+            }
+        }
+
+        if (min > max)
+        {
+            return (empty, empty);
+        }
+
+        return (stacked ? empty : min, max);
+    }
+
+    /// <summary>
+    /// Sets the automatic fields of a chart's axis scale as Excel 1.00 does when it draws the chart, from the data
+    /// (<see cref="GetDataRange"/>) and how many tick labels fit along the axis
+    /// (<see cref="ChartScale.GetLabelSpaces"/>). A pie chart has no axes, and Excel leaves its scale as it is. An
+    /// overlay that shares the main chart's scale is not covered.
+    /// </summary>
+    public void UpdateAutomaticScale(Chart chart, int labelSpaces, bool xAxis = false)
+    {
+        if (chart.Type == ChartType.Pie)
+        {
+            return;
+        }
+
+        var scale = xAxis ? chart.XScale ?? throw new InvalidOperationException("Only a scatter chart has an X-axis scale.") : chart.ValueScale;
+        var (min, max) = GetDataRange(chart, xAxis);
+        scale.SetAutomaticValues(min, max, labelSpaces, chart.Type == ChartType.Scatter);
+    }
 }
