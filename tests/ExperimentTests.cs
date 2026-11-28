@@ -1497,6 +1497,42 @@ public class ExperimentTests
         Assert.True(differ == 0 && (expected.Width, expected.Height) == (actual.Width, actual.Height), $"{differ} pixels differ from Excel's screen; {actual.Width} × {actual.Height} drawn, {expected.Width} × {expected.Height} captured");
     }
 
+    // Excel 1.00's chart windows captured from the screen (tests/Data/Screens/charts.txt), each with the chart Excel
+    // saved after drawing it, and the pixels the renderer still draws differently: legends and a marker on the
+    // value axis (docs/Display.md "Drawing a chart").
+    public static TheoryData<string> ChartScreens() => new(File.ReadLines(ChartScreenIndex).Where(l => !l.StartsWith('#')).Select(l => l.Split('\t')[0]));
+
+    private static string ChartScreenIndex => Path.Combine(AppContext.BaseDirectory, "Data", "Screens", "charts.txt");
+
+    [Theory]
+    [MemberData(nameof(ChartScreens))]
+    public void ChartRendering_MatchesExcelsScreen(string name)
+    {
+        // Needs Excel's fonts: MACEXCEL_SYSTEM names Excel 1.00's Data disk image or a System file's resource fork.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var fields = File.ReadLines(ChartScreenIndex).First(l => l.Split('\t')[0] == name).Split('\t');
+        var expected = RenderTests.ReadPng(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", "Screens", name + ".png")));
+        var actual = Rendering.ChartRenderer.Render(ChartDocument.Load(TestData.SamplePath(name)), fonts, title: fields[1]);
+        int differ = 0;
+        for (int y = 0; y < expected.Height; y++)
+        {
+            for (int x = 0; x < expected.Width; x++)
+            {
+                if (expected[x, y] != actual[x, y])
+                {
+                    differ++;
+                }
+            }
+        }
+
+        Assert.Equal((expected.Width, expected.Height), (actual.Width, actual.Height));
+        Assert.Equal(int.Parse(fields[2], System.Globalization.CultureInfo.InvariantCulture), differ);
+    }
+
     private static readonly Lazy<Rendering.MacFontSet?> SystemFonts = new(() =>
     {
         string? path = Environment.GetEnvironmentVariable("MACEXCEL_SYSTEM");

@@ -79,7 +79,7 @@ public sealed class Program
                 .WithDescription("Export the sheet as SYLK, byte for byte as Excel 1.00's Save As does.")
                 .WithExample("sylk", "Expenses", "-o", "Expenses.slk");
             config.AddCommand<RenderCommand>("render")
-                .WithDescription("Draw a sheet's window as Excel 1.00 shows it, as a PNG, with the fonts of a System file.")
+                .WithDescription("Draw a sheet's or chart's window as Excel 1.00 shows it, as a PNG, with the fonts of a System file.")
                 .WithExample("render", "Expenses", "--system", "Excel-Data.img", "-o", "Expenses.png");
         });
 

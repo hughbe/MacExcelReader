@@ -190,6 +190,13 @@ Only the rows and columns that show are laid out, so a window takes the same tim
 about 0.2 ms for `Expenses`, allocating little beyond the bitmap. Text in a size the System has no bitmap for
 (Geneva 11, say) is stretched from another size, which comes close to Excel but not pixel for pixel.
 
+`ChartRenderer` draws a chart's window the same way, at the size it was saved, laid out as Excel saved it:
+
+```csharp
+var chart = ChartDocument.Load("Sales Chart");
+File.WriteAllBytes("Sales Chart.png", ChartRenderer.Render(chart, fonts, title: "Sales Chart").ToPng());
+```
+
 Excel 1.x for Macintosh uses the **1904 date system**: serial 0 is 1 January 1904.
 
 ## Formulas

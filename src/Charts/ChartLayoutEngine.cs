@@ -52,6 +52,22 @@ internal sealed class ChartLayoutEngine
         public int Measure(ReadOnlySpan<char> text) => Font.MeasureText(text, Bold);
     }
 
+    /// <summary>The value axis's label font, as Excel sets it to measure and draw the labels.</summary>
+    internal (MacBitmapFont Font, bool Bold) ValueFont => (_valueFont.Font, _valueFont.Bold);
+
+    /// <summary>The category axis's label font.</summary>
+    internal (MacBitmapFont Font, bool Bold) CategoryFont => (_categoryFont.Font, _categoryFont.Bold);
+
+    /// <summary>The room, in pixels, the value axis's number labels are formatted in (37.2c).</summary>
+    internal int ValueLabelRoom(ChartBox area, int plotWidth)
+    {
+        var scale = _chart.ValueScale;
+        int slot = _chart.IsBar
+            ? plotWidth / Math.Max(1, (int)(scale.MajorUnit == 0 ? 1 : (scale.Maximum - scale.Minimum) / scale.MajorUnit))
+            : area.Width / 4;
+        return Math.Max(slot / TwipsPerPixel, 4 * _valueFont.Measure("0"));
+    }
+
     /// <summary>The layout Excel draws the chart with, worked forward from its chart area (or the default one).</summary>
     public ChartLayout LayOut()
     {
@@ -650,6 +666,9 @@ internal sealed class ChartLayoutEngine
     }
 
     // General in a cell `room` pixels wide: as many characters as 0s fit, less a minus sign (19.0d).
+    internal static int FormatInRoom(double value, int room, MacBitmapFont font, bool bold, Span<char> destination)
+        => FormatInRoom(value, room, new LabelFont(font, bold), destination);
+
     private static int FormatInRoom(double value, int room, LabelFont font, Span<char> destination)
     {
         int digits = (room - (value < 0 ? font.Measure("-") : 0)) / font.Measure("0");
@@ -728,7 +747,14 @@ internal sealed class ChartLayoutEngine
     // 33.1e and 33.1f: lays text out in lines no wider than `width` pixels, a word at a time (a word runs to and
     // includes the next space or hyphen), breaking a first word too wide for its line between characters. A return
     // or line feed ends a line. Gives the number of lines and the widest.
-    private static (int Lines, int Width) Wrap(ReadOnlySpan<char> text, int width, LabelFont font)
+    private static (int Lines, int Width) Wrap(ReadOnlySpan<char> text, int width, LabelFont font) => Wrap(text, width, font, default);
+
+    /// <summary>Lays text out in lines no wider than <paramref name="width"/> pixels as Excel does (33.1e), filling
+    /// <paramref name="lines"/> with each line's characters.</summary>
+    internal static (int Lines, int Width) Wrap(ReadOnlySpan<char> text, int width, MacBitmapFont font, bool bold, Span<Range> lines)
+        => Wrap(text, width, new LabelFont(font, bold), lines);
+
+    private static (int Lines, int Width) Wrap(ReadOnlySpan<char> text, int width, LabelFont font, Span<Range> ranges)
     {
         int lines = 0, widest = 0, start = 0;
         while (start < text.Length)
@@ -776,6 +802,11 @@ internal sealed class ChartLayoutEngine
                 }
 
                 break;
+            }
+
+            if (lines < ranges.Length)
+            {
+                ranges[lines] = new Range(start, at);
             }
 
             lines++;
@@ -845,6 +876,13 @@ internal sealed class ChartLayoutEngine
     // A text object's font: the Macintosh font number and size at record bytes 18 and 19 (mem 20 and 21, spec §16.7);
     // 0 and 0, as the library writes, are the System font at 12.
     private LabelFont GetTextFont(ChartText text) => GetFont(text.Record[18], text.Record[19] == 0 ? 12 : text.Record[19], bold: false);
+
+    /// <summary>A text object's font, or the automatic title's (Geneva 9).</summary>
+    internal (MacBitmapFont Font, bool Bold) TextFont(ChartText? text)
+    {
+        var font = text is null ? GetFont(3, 9, bold: false) : GetTextFont(text);
+        return (font.Font, font.Bold);
+    }
 
     // 33.1d: a text object's box: its lines and widest line, or for vertical text its stacked columns, with a pixel of
     // margin all round and a pixel more each side for a border.

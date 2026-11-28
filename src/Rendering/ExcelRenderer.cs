@@ -593,6 +593,20 @@ public static class ExcelRenderer
         return product % max > max / 2 ? offset + 1 : offset;
     }
 
+    // The grow box's 16 pixels square, its border included, with its top left at (x, y) in the bitmap.
+    internal static void DrawGrowBox(MonoBitmap bitmap, int x, int y)
+    {
+        for (int row = 0; row < s_growBox.Length; row++)
+        {
+            bitmap.FillRect(x, y + row, x + 16, y + row + 1, false);
+            bitmap.OrBits(x, y + row, (ulong)s_growBox[row] << 48, 16, 0, bitmap.Width);
+        }
+    }
+
+    // A document window's frame round contents `width` by `height` at (1, 19): a line, the title bar and a shadow.
+    internal static void DrawWindowFrame(MonoBitmap bitmap, int width, int height, string title, MacBitmapFont titleFont)
+        => DrawFrame(bitmap, width, height, title, titleFont);
+
     private static void DrawFrame(MonoBitmap bitmap, int width, int height, string title, MacBitmapFont titleFont)
     {
         int right = width + 1, bottom = height + 19;

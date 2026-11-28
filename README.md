@@ -51,7 +51,10 @@ The library targets .NET 9 and has no dependencies.
   the bitmap fonts of a System file you supply: headings, gridlines, cells laid out as Excel lays them out,
   borders, the selection and the scroll bars, and sizes the System has no bitmap for stretched as the Mac Plus
   ROM stretches them. It matches all 27 windows captured from Excel 1.00's screen pixel for pixel, and draws a
-  window in about 0.2 ms whatever the sheet's size.
+  window in about 0.2 ms whatever the sheet's size. `ChartRenderer` draws a chart's window the same way: axes,
+  ticks, gridlines, labels, titles, markers, columns, bars, areas and pies, with QuickDraw's lines, polygons and
+  arcs. It matches ten of twelve chart windows captured from Excel 1.00 pixel for pixel; legends are not drawn
+  yet.
 - **Workspaces.** Read and write "Resume Excel" files: the settings and the windows Excel reopens.
 - **SYLK export.** `ExportSylk` writes a sheet as SYLK, byte for byte as Excel 1.00's or 1.5's Save As does,
   checked against 178 files the two exported. It allocates nothing per cell.
@@ -200,7 +203,7 @@ dotnet run -c Release --project benchmarks -- --filter '*'
 | `export <file> [-o out.csv] [--tsv] [--formulas] [--raw] [-r range]` | The sheet as CSV or TSV: displayed values, raw values or formulas |
 | `json <file> [-o out.json] [--empty]` | The whole document as JSON |
 | `sylk <file> [-o out.slk] [--excel 1.5]` | The sheet as SYLK, as Excel 1.00 (or 1.5) exports it |
-| `render <file> --system <disk or rsrc> [-o out.png] [--no-frame] [--scale N]` | The sheet's window drawn as Excel 1.00 shows it, as a PNG, with the fonts of a System file (Excel 1.00's Data disk image works) |
+| `render <file> --system <disk or rsrc> [-o out.png] [--no-frame] [--scale N]` | The sheet's or chart's window drawn as Excel 1.00 shows it, as a PNG, with the fonts of a System file (Excel 1.00's Data disk image works) |
 | `dump <file>` | Everything: header, settings, column widths, external references, names, windows, page breaks, print setup and cells |
 | `workspace <file>` | A workspace ("Resume Excel", type XLIN) file: settings and the windows it reopens |
 | `layout <file>` | Where each part of the file lies: header, code segments, state block and all eight sections |

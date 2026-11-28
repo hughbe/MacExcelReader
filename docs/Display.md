@@ -429,6 +429,74 @@ legends in every position and axis titles among them, and library charts Excel h
 (`ChartDocument.LayOut`). Charts Excel 1.03 and 1.5 saved differ by a pixel or so in places: 1.03's value labels of
 fractions and its scatter X labels, 1.5's automatic titles and automatic axis titles.
 
+## Drawing a chart
+
+Excel 1.00 draws a chart in twips and maps each point to the window's pixels as it goes (`32.04`): across, a twip
+coordinate becomes x × (window width − 16) / drawing width, and down, (drawing height − y) × (window height − 16) /
+drawing height, both truncated, where the window's size is words 3 and 2 of the chart's window block. A length
+mapped on its own (`32.02`) is truncated the same way, so where Excel draws a line by its length rather than to its
+end, the end can fall a pixel short of the mapped point. The chart's drawing coordinates are the chart area's plus
+the margins (spec §16.5).
+
+**Lines.** Every line is QuickDraw's: a one-pixel pen run from the top end down a scanline at a time, each row a
+slab whose edges start half a pixel in and half the slope along and step by the slope, 16.16 fixed point with the
+slope truncated (the Mac Plus ROM's DrawLine). Excel moves to a point and draws a line of a given length
+(`32.05`, `32.07`), with the start half a pen (10 twips) left of and below the point:
+
+* **Axes** (`3a.03`) run from the plot area's foot or left edge for the plot area's height or width. The value axis
+  stands at its saved position in a column or line chart; a bar chart swaps the two axes.
+* **Ticks** (`3a.04`–`3a.06`) are drawn a 70th of the plot area's smaller side long, and at least a pixel and a
+  half (`3a.00`; the saved tick length, a 70th of the chart area's, only lays the chart out). A tick outside or
+  across starts its length out from the axis and runs back to it.
+* **Gridlines** (`3a.08`, `3a.0f`) cross the plot area in their pattern, before the axes are drawn: the value
+  axis's minor then major, then the category axis's. Minor gridlines on a logarithmic scale fall at 2 to 9 times
+  each power of ten.
+* **A line chart's series** (`53.03`) joins its points with segments that each start half a pen from one point and
+  run for the distance to the next, its length truncated to pixels. A point is the category's middle (or its edge,
+  when the value axis crosses at a category) and the plot area's foot plus the value's share of its height
+  (`37.23`), mapped without the pen's offset.
+
+**Markers** (`53.08`) are 8-pixel bitmaps from Excel's resources, from 4 pixels left of and above the point to 3
+right of and below it: Excel clears a mask a pixel larger than the marker, then draws the marker (CopyBits, srcBic
+then srcOr), so lines stop a pixel short of it. The star has no mask. Automatic markers go through the eight in turn,
+series by series.
+
+**Columns and bars** (`39.03`, `39.04`, `39.00`): each category's share of the plot area holds its series' columns.
+A column is 100 units wide, the next series' starts a column and the overlap further on, and half the gap between
+clusters lies either side, so a column is the share × 100 / (gap + (series − 1) × (100 + overlap) + 100). A column
+runs from where the category axis crosses to its value. Its corners are mapped to pixels; a column no pixel wide
+is drawn one pixel wide, and one no pixel high is not drawn. It is filled with its pattern and framed with a
+one-pixel pen. A bar chart's categories run up from the plot area's foot (`37.24`).
+
+**Areas** (`55.00`, `55.01`): each series is a polygon along its tops and back along its base (the series below's
+tops when stacked, which adds the values' sizes; otherwise where the category axis crosses). QuickDraw fills it as
+the region its edges make: each edge that is not upright adds inversion points where its left edge, worked out as
+DrawLine works it out, steps to another pixel (PutLine). The border is drawn along the tops only.
+
+Columns and areas are clipped to the plot area; a line chart's lines and markers are not. Automatic patterns go
+through the patterns in turn, series by series (`3c.03`): solid black, 75% grey, and so on.
+
+**Pies** (`56.00`–`56.05`): the pie is a circle as wide as the plot area's smaller side, in its middle (`56.01`).
+Each slice runs from the running total of the values' sizes so far, as a share of 360°, rounded, turned by the
+first slice's angle (`56.02`). A slice is filled with FillArc, which only a chart that varies by category does for
+automatic slices, and its edge drawn with FrameArc and its two radii. QuickDraw's oval takes, on each scanline,
+half-pixel steps out from the centre while (2x/w)² + (2y/h)² stays within 1, y measured to the row's middle; a
+frame takes away the oval a pixel inside; an arc keeps what lies between the rays at its start and stop angles,
+clockwise from 12 o'clock. A radius runs from the centre to the circle's edge, at half the sum of the rect's sides
+plus the side times Excel's sine of the angle (a table of round(32767 × sine) for each whole degree, `56.06`), and
+both ends are moved a pixel by the pen according to the radius's quadrant (`56.05`).
+
+**Labels and titles** sit as the layout put them (above): value labels right-aligned a pixel inside the widest
+label's box, which ends two tick lengths left of the plot area, each box a line and a pixel's margin high and
+centred on its tick; labels along the foot centred under their place, their box's top two tick lengths below the
+axis. A scatter chart's X labels stand at its X scale's major units, and a logarithmic scale's labels are the
+powers of ten. Titles are drawn in their saved boxes, each line centred a pixel inside; the automatic title is
+centred over the plot area at the top of the chart area.
+
+Drawn this way, ten of twelve chart windows captured from Excel 1.00's screen match it pixel for pixel, title bar
+and frame included: line, column, bar, stacked area, scatter, logarithmic and pie charts, with titles, axis titles
+and a smaller window (`ChartRenderer`, `tests/Data/Screens/charts.txt`). Legends are not drawn yet.
+
 ## Open questions
 
 * How the 64K ROM that Excel 1.00 also ran on draws a font size with no bitmap. Running it needs the 64K ROM and
@@ -436,3 +504,13 @@ fractions and its scatter X labels, 1.5's automatic titles and automatic axis ti
 * Where Excel 1.03 and 1.5 lay a chart out differently from 1.00: a pixel more for 1.03's value labels of fractions,
   its scatter X labels, and 1.5's automatic titles and axis titles (`Area Drop Lines`, `Scatter`, `BREAK CHART`,
   `Chart 102 Categories`).
+* How Excel 1.00 draws a legend's entries. The keys and text are drawn through its text objects (`57.00`, `33.1d`,
+  `33.0b`), and the two captures disagree on a single rule: in `Draw Legend` (columns, at the foot) the entries
+  stand about 1,700 twips apart where the layout's widest entry and spacing make 1,680, and the text starts 28
+  pixels into its entry; in `Draw Layout Legend Right` (lines, on the right) it starts 26 pixels in. A line's key
+  is a 16-pixel line with its marker in the middle; a column's is a 13 × 12 pixel box. More captures, with
+  entries of different widths, should settle it.
+* Why a line chart's first point on a logarithmic value axis (`Draw Scale Log`, 0.5 at the axis) shows no marker
+  where Excel draws the line to it: 31 pixels differ there.
+* How Excel draws what no capture has yet: stacked and 100% columns, overlays, exploded pie slices, drop and hi-lo
+  lines, data labels, arrows, minor ticks, thicker lines and borders, shadows, and charts in Excel 1.03 and 1.5.
