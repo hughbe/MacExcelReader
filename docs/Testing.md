@@ -61,7 +61,7 @@ By default it skips the changes Excel is expected to make:
 
 `--all` shows them too. The exit code is 0 when nothing unexpected differs.
 
-To test charts, `dumper newchart TYPE OUT [--series 1,2,3]... [--title T] [--bar] [--log] [--scale min=2]... [--overlay TYPE [--overlay-from N] [--share] [--share-x] [--hide-overlay-axes]] [--hide-value-axis] [--axis-font 3:9] [--legend Bottom] [--value-title T] [--category-title T]` builds one with the library.
+To test charts, `dumper newchart TYPE OUT [--series 1,2,3]... [--title T] [--bar] [--log] [--scale min=2]... [--overlay TYPE [--overlay-from N] [--share] [--share-x] [--hide-overlay-axes]] [--hide-value-axis] [--axis-font 3:9] [--legend Bottom] [--value-title T] [--category-title T] [--name N]... [--stacked] [--percent] [--vary] [--explode 20] [--explode-point 1=25]... [--labels values|percent]` builds one with the library.
 
 Options for `pack`:
 - `--volume NAME`: the disk's name. Driver opens files as `Volume:Name`, so each mounted test disk needs its
@@ -320,7 +320,10 @@ MACEXCEL_SYSTEM=~/Excel/Data.img dotnet test --filter Rendering_MatchesExcelsScr
 Charts work the same way: `charts.txt` names each chart Excel saved after drawing it (the `Draw` samples), its
 window's title and how many pixels the renderer still draws differently, and
 `ExperimentTests.ChartRendering_MatchesExcelsScreen` checks that count. Charts open as `Volume:Name saved`; the
-window shows the volume in its title.
+window shows the volume in its title. A window that runs off the foot of the screen is captured shorter, and only
+its rows are compared. To capture a chart Excel makes itself, pack a sheet whose `.commands` select its data and
+run `=NEW(2)` (and a gallery format, such as `=GALLERY.PIE(5)`): Driver then saves the new chart under the sheet's
+name.
 
 Without MAME, capture them in Mini vMac: pack with `--keep-open`, run Driver, bring each window to the front from
 the Window menu and capture Mini vMac's window at its exact pixels with macOS's `screencapture -o -l<window id>`
@@ -415,6 +418,7 @@ window, so they differ from the renderer where it lies.
 | Nov 2026 | 1.00 | The chart layout decompiled (`37.03`, `37.04`, `37.07`, `37.0f`, `37.2c`, `38.02`) and run forward from each save's chart area | The chart area, border, title (its box plus 5% of the chart's height), tick length (the smaller side ÷ 70) and the labels' room give the plot area Excel saved for all 716 charts without a legend, axis titles or overlay; number labels are formatted as General in their slot's width, only the ends (and ends ± a unit) measured. A library chart never drawn gets Excel's layout and scales ([Display](Display.md), `ChartDocument.LayOut`) |
 | Nov 2026 | 1.00 | 23 library charts with legends in every position (two and five series, categories, bars) and axis titles, a long title and a scatter chart with all three (`newchart --legend`, `--value-title`, `--category-title`); the legend and axis-title layout decompiled (`57.00`–`57.04`, `37.05`, `37.06`, `33.1e` vertical text) | The legend's entries (key, text, margins, 80-twip spacing), columns and rows, the axis titles' widths and vertical text, and text objects' fonts at mem 20 and 21 give the plot area of every chart Excel 1.00 saved without an overlay, 745 in all; library charts with legends and titles laid out before Excel drew them come out the same (`Layout` samples) |
 | Nov 2026 | 1.00 | Twelve charts (line, column, bar, stacked area, scatter, logarithmic, pie, with titles, axis titles, legends and a smaller window) opened with `--keep-open` and each window captured from the screen; the drawing code decompiled (`32.04`–`32.07`, `3a.00`–`3a.0f`, `39.00`–`39.04`, `53.03`, `53.08`, `55.00`, `56.00`–`56.06`) and the Mac Plus ROM's DrawLine disassembled | `ChartRenderer` draws ten of them pixel for pixel, title bar included: lines are QuickDraw's slab lines drawn by length from half a pen off their point, ticks are a 70th of the plot area's smaller side, markers are Excel's 8 × 8 bitmaps with a larger mask, columns follow the overlap and gap, areas are QuickDraw polygons clipped to the plot area, and pies are QuickDraw arcs with radii from Excel's sine table. The two legends differ (592 and 358 pixels) and the logarithmic chart's first point (31) ([Display](Display.md) "Drawing a chart"; the `Draw` samples, `tests/Data/Screens/charts.txt`) |
+| Nov 2026 | 1.00 | 41 more charts opened and captured: legends in every position with entries of different widths, a category legend, scatter and pie legends; logarithmic scales; stacked, 100% and stacked bar columns; overlays; exploded pies; data labels on columns, bars, lines, scatter charts, pies and areas, from library charts and from charts Excel made itself with `NEW(2)` and the gallery; the legend, data label and pie code decompiled (`57.00`, `33.05`, `33.08`, `33.0d`, `33.10`, `39.01`, `53.04`, `55.03`, `56.0b`–`56.0f`) | `ChartRenderer` draws 47 of the 53 captured chart windows pixel for pixel; the rest differ by a pixel in a label's place. Tick labels erase their text's rectangle, area borders run up the left side and down the right a pixel in, clipped to the area, and an overlay's series take the first automatic patterns. Library charts had blank data-label templates, so Excel labelled them with the series' name: `Chart.Create` now writes Excel's ([Display](Display.md) "Drawing a chart", spec §16.5; the `Draw` samples) |
 
 The files Excel saved in these experiments are samples in `tests/Samples` (named for what they show, such as
 `Errors`, `Column Widths` and `Pie Exploded`), and `tests/ExperimentTests.cs` checks what each one showed. Every

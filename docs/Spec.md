@@ -1854,7 +1854,11 @@ The two built-in text objects are addressed as indices −2 and −1 of the char
 together with the axis labels by "apply to all". They are the templates for data labels: a new chart makes
 both with kind 4, data label (`0f.05` in 1.00), and the label code (`33.10`) copies object −2 for each series
 whose point format has bit 11 set (one label per series) and object −1 for each data point of a series with
-bit 10 set (one label per point) (§16.8).
+bit 10 set (one label per point) (§16.8). A chart Excel 1.00 makes from a sheet writes them as kind 4 in Geneva 9 (bytes 18 and 19 `03 09`) with
+automatic text (flags `0x6040`), the point template also showing its value (`0x6050`); in full, object −2 is
+`00 05 40 04 00 00 00 00 60 40 00 01 00 C0 00 00 0C 00 03 09 00 00 0C 00 00 00 F0 00` followed by zeros but for
+`05 40 04` at 37–39, and object −1 the same with `60 50` at 8 (`Draw Excel Column`). With both blank, as early
+library charts had them, Excel labels a series or point with the series' name in the System font.
 
 **Chart header** (18 bytes):
 

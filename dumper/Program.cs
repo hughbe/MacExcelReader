@@ -1175,6 +1175,34 @@ sealed class NewChartSettings : CommandSettings
     [CommandOption("--hide-value-axis")]
     [Description("Hide the main chart's value axis.")]
     public bool HideValueAxis { get; init; }
+
+    [CommandOption("--name <TEXT>")]
+    [Description("The next series' name, in order; repeatable. Default: Series 1, Series 2 and so on.")]
+    public string[] Names { get; init; } = [];
+
+    [CommandOption("--stacked")]
+    [Description("Stack the series (column, bar, line and area charts).")]
+    public bool Stacked { get; init; }
+
+    [CommandOption("--percent")]
+    [Description("Stack the series as percentages of each category's total.")]
+    public bool Percent { get; init; }
+
+    [CommandOption("--vary")]
+    [Description("Vary the patterns by category.")]
+    public bool Vary { get; init; }
+
+    [CommandOption("--explode <PERCENT>")]
+    [Description("Pull every pie slice out by this percentage of the radius.")]
+    public ushort? Explode { get; init; }
+
+    [CommandOption("--explode-point <POINT=PERCENT>")]
+    [Description("Pull one pie slice (counted from 0) out, as 1=25. Repeatable.")]
+    public string[] ExplodePoints { get; init; } = [];
+
+    [CommandOption("--labels <KIND>")]
+    [Description("Data labels on every point: values, or percent (pies).")]
+    public string? Labels { get; init; }
 }
 
 /// <summary>
@@ -1195,11 +1223,40 @@ sealed class NewChartCommand : Command<NewChartSettings>
         for (int i = 0; i < series.Length; i++)
         {
             var values = series[i].Split(',').Select(v => double.Parse(v, CultureInfo.InvariantCulture)).ToList();
-            document.Series.Add(ChartSeries.Create($"Series {i + 1}", values, "Data", $"R{i + 1}C1:R{i + 1}C{values.Count}"));
+            string name = i < settings.Names.Length ? settings.Names[i] : $"Series {i + 1}";
+            document.Series.Add(ChartSeries.Create(name, values, "Data", $"R{i + 1}C1:R{i + 1}C{values.Count}"));
         }
 
         var scale = document.MainChart.ValueScale;
         scale.IsLogarithmic = settings.Log;
+        document.MainChart.IsStacked = settings.Stacked || settings.Percent;
+        document.MainChart.IsPercent = settings.Percent;
+        document.MainChart.VaryByCategory = settings.Vary;
+        var defaultFormat = document.MainChart.DefaultSeriesFormat;
+        if (settings.Explode is { } explode)
+        {
+            defaultFormat.Explosion = explode;
+        }
+
+        foreach (string point in settings.ExplodePoints)
+        {
+            var parts = point.Split('=', 2);
+            document.MainChart.AddPointFormat(byte.Parse(parts[0], CultureInfo.InvariantCulture)).Explosion = ushort.Parse(parts[1], CultureInfo.InvariantCulture);
+        }
+
+        switch (settings.Labels)
+        {
+            case null:
+                break;
+            case "values":
+                defaultFormat.PointLabels = true;
+                break;
+            case "percent":
+                defaultFormat.PointLabels = defaultFormat.PercentLabels = true;
+                break;
+            default:
+                throw new ArgumentException($"Unknown labels {settings.Labels}: use values or percent.");
+        }
         if (settings.Legend is { } legend)
         {
             document.MainChart.HasLegend = true;

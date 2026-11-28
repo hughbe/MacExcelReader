@@ -272,6 +272,25 @@ internal sealed class ChartLayoutEngine
 
     private (int Height, int Width) LegendSize(ChartBox area, bool stacked)
     {
+        var legend = GetLegendLayout(area, stacked);
+        if (stacked)
+        {
+            return (Math.Min(legend.Total + legend.Spacing, short.MaxValue), legend.Widest + 2 * legend.Spacing);
+        }
+
+        int rows = (legend.Entries - 1) / legend.Columns + 1;
+        return (Math.Min(rows * (legend.Spacing + legend.Tallest) + legend.Spacing, area.Height / 2), legend.Columns * (legend.Spacing + legend.Widest) + legend.Spacing);
+    }
+
+    /// <summary>
+    /// How the legend's entries are laid out (57.01): the spacing between them, the key's width in pixels, the
+    /// room each entry's text wraps in (pixels), the widest and tallest entry's box and the stacked entries' total
+    /// height in twips, and how many columns a legend across fits.
+    /// </summary>
+    internal readonly record struct LegendLayout(int Spacing, int Key, int TextRoom, int Entries, bool Categories, int Widest, int Tallest, int Total, int Columns);
+
+    internal LegendLayout GetLegendLayout(ChartBox area, bool stacked)
+    {
         var font = GetLegendFont();
         int spacing = (((BinaryPrimitives.ReadUInt16BigEndian(_chart.Record.AsSpan(154)) >> 10) & 7) + 2) * 40;
         int key = font.Font.Ascent + font.Font.WidMax;
@@ -284,18 +303,10 @@ internal sealed class ChartLayoutEngine
         Span<char> number = stackalloc char[ExcelValueFormatter.GeneralSize(20)];
         for (int i = 0; i < entries; i++)
         {
-            scoped ReadOnlySpan<char> text = categories ? CategoryLabel(i, number) : LegendSeriesName(i);
-            var (lines, textWidth) = Wrap(text, limit / TwipsPerPixel - key, font);
-            int boxHeight = ((lines == 0 ? font.Font.Ascent : lines * font.LineHeight) + 2) * TwipsPerPixel;
-            int boxWidth = (textWidth + key + 2) * TwipsPerPixel;
+            int boxHeight = LegendEntryHeight(i, limit / TwipsPerPixel - key, number, out int boxWidth);
             total = Math.Min(total + spacing + boxHeight, short.MaxValue);
             tallest = Math.Max(tallest, boxHeight);
             widest = Math.Max(widest, boxWidth);
-        }
-
-        if (stacked)
-        {
-            return (Math.Min(total + spacing, short.MaxValue), widest + 2 * spacing);
         }
 
         int columns = Math.Clamp((area.Width - spacing) / (spacing + widest), 1, Math.Max(1, entries));
@@ -305,8 +316,29 @@ internal sealed class ChartLayoutEngine
             columns--;
         }
 
-        return (Math.Min(rows * (spacing + tallest) + spacing, area.Height / 2), columns * (spacing + widest) + spacing);
+        return new LegendLayout(spacing, key, limit / TwipsPerPixel - key, entries, categories, widest, tallest, total, columns);
     }
+
+    // An entry's box in twips: its text wrapped in the room beside its key, a pixel of margin all round.
+    private int LegendEntryHeight(int index, int room, Span<char> number, out int width)
+    {
+        var font = GetLegendFont();
+        int key = font.Font.Ascent + font.Font.WidMax;
+        scoped ReadOnlySpan<char> text = LegendShowsCategories() ? CategoryLabel(index, number) : LegendSeriesName(index);
+        var (lines, textWidth) = Wrap(text, room, font);
+        width = (textWidth + key + 2) * TwipsPerPixel;
+        return ((lines == 0 ? font.Font.Ascent : lines * font.LineHeight) + 2) * TwipsPerPixel;
+    }
+
+    /// <summary>A legend entry's text: a series' name, or a category's label.</summary>
+    internal ReadOnlySpan<char> LegendText(int index, Span<char> number)
+        => LegendShowsCategories() ? CategoryLabel(index, number) : LegendSeriesName(index);
+
+    /// <summary>A category's label: its text, or its number in General.</summary>
+    internal ReadOnlySpan<char> CategoryText(int index, Span<char> number) => CategoryLabel(index, number);
+
+    /// <summary>The legend's font.</summary>
+    internal (MacBitmapFont Font, bool Bold) LegendFont => (GetLegendFont().Font, GetLegendFont().Bold);
 
     // A single series' legend lists its categories, unless the chart is an area chart or an overlay has series.
     private bool LegendShowsCategories()

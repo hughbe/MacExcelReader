@@ -2,12 +2,52 @@
 Draw Library Line	C:C01 saved	0
 Draw Library Column	C:C02 saved	0
 Draw Library Scatter	C:C03 saved	0
-Draw Legend	C:C04 saved	592
+Draw Legend	C:C04 saved	0
 Draw Layout Both Titles	C:C05 saved	0
 Draw Scale Window 200	C:C06 saved	0
 Draw Labels Short	C:C07 saved	0
-Draw Layout Legend Right	C:C08 saved	358
+Draw Layout Legend Right	C:C08 saved	0
 Draw Layout Bar Titles	C:C09 saved	0
 Draw Scale Stacked Area	C:C10 saved	0
-Draw Scale Log	C:C11 saved	31
+Draw Scale Log	C:C11 saved	1
 Draw Library Pie	C:C12 saved	0
+Draw Legend Column Names	L:L01 saved	0
+Draw Legend Column Three	L:L02 saved	0
+Draw Legend Line Names	L:L03 saved	0
+Draw Legend Line Corner	L:L04 saved	0
+Draw Legend Area Top	L:L05 saved	0
+Draw Legend Scatter	L:L06 saved	0
+Draw Legend Pie	L:L07 saved	0
+Draw Legend Column Categories	L:L08 saved	0
+Draw Legend Line Categories	L:L09 saved	0
+Draw Legend Column Rows	L:L10 saved	0
+Draw Legend Bar	L:L11 saved	0
+Draw Legend Line Top	L:L12 saved	0
+Draw Log Point Below Axis	M:M01 saved	0
+Draw Log	M:M02 saved	0
+Draw Stacked Column	M:M03 saved	0
+Draw Stacked Column 100	M:M04 saved	0
+Draw Stacked Bar Negative	M:M05 saved	0
+Draw Overlay Line	M:M06 saved	0
+Draw Overlay Hidden Axes	M:M07 saved	0
+Draw Pie Exploded All	M:M08 saved	0
+Draw Pie Exploded Point	M:M09 saved	0
+Draw Gallery Pie 3	P:P3 saved	0
+Draw Gallery Column 3	P:P8 saved	0
+Draw Excel Pie Labels	Q:Q1 saved	0
+Draw Excel Pie Percentages	Q:Q2 saved	0
+Draw Excel Pie Percentages 4	Q:Q3 saved	0
+Draw Excel Area Labels	Q:Q4 saved	182
+Draw Excel Column	Q:Q5 saved	0
+Draw Excel Pie Labels 4	Q:Q6 saved	0
+Draw Excel Area Labels 3	Q:Q7 saved	1
+Draw Excel Line	Q:Q8 saved	1
+Draw Labels Column Negative	R:R1 saved	16
+Draw Labels Line	R:R2 saved	0
+Draw Labels Bar	R:R3 saved	0
+Draw Labels Pie Percent	R:R4 saved	0
+Draw Labels Pie Categories	R:R5 saved	0
+Draw Labels Area	R:R6 saved	138
+Draw Labels Column Two Series	R:R7 saved	0
+Draw Labels Scatter	R:R8 saved	0
+Draw Labels Pie Values	R:R9 saved	0

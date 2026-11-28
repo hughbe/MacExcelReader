@@ -1497,6 +1497,22 @@ public class ExperimentTests
         Assert.True(differ == 0 && (expected.Width, expected.Height) == (actual.Width, actual.Height), $"{differ} pixels differ from Excel's screen; {actual.Width} × {actual.Height} drawn, {expected.Width} × {expected.Height} captured");
     }
 
+    [Theory]
+    [InlineData("Draw Excel Pie Labels")]
+    [InlineData("Draw Excel Area Labels")]
+    [InlineData("Draw Excel Column")]
+    public void NewChart_HasExcelsLabelTemplates(string name)
+    {
+        // A chart Excel 1.00 made itself (NEW(2) from a sheet) has data-label templates in Geneva 9 with automatic
+        // text; the library writes the same, without which Excel labels a series or point with the series' name.
+        var excel = ChartDocument.Load(SamplePath(name)).MainChart;
+        var library = Chart.Create(ChartType.ColumnOrBar);
+        Assert.Equal(excel.SeriesLabelTemplate.Record, library.SeriesLabelTemplate.Record);
+        Assert.Equal(excel.PointLabelTemplate.Record, library.PointLabelTemplate.Record);
+        Assert.Equal(ChartTextKind.DataLabel, library.PointLabelTemplate.Kind);
+        Assert.True(library.PointLabelTemplate.IsAutomaticText);
+    }
+
     // Excel 1.00's chart windows captured from the screen (tests/Data/Screens/charts.txt), each with the chart Excel
     // saved after drawing it, and the pixels the renderer still draws differently: legends and a marker on the
     // value axis (docs/Display.md "Drawing a chart").
@@ -1529,7 +1545,9 @@ public class ExperimentTests
             }
         }
 
-        Assert.Equal((expected.Width, expected.Height), (actual.Width, actual.Height));
+        // A window that ran off the foot of the screen is captured shorter; the rows it has are compared.
+        Assert.Equal(expected.Width, actual.Width);
+        Assert.True(expected.Height <= actual.Height, $"{actual.Height} rows drawn, {expected.Height} captured");
         Assert.Equal(int.Parse(fields[2], System.Globalization.CultureInfo.InvariantCulture), differ);
     }
 

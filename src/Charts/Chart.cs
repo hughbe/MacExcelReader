@@ -138,6 +138,18 @@ public sealed class Chart
     /// <summary>Gets the text objects: titles first, then attached and free text.</summary>
     public List<ChartText> Texts { get; } = [];
 
+    /// <summary>
+    /// Gets a copy of built-in text object −2, the template for a series' data label (record offset 266, spec §16.5,
+    /// §16.8): its font, alignment and box. Changing the copy does not change the chart.
+    /// </summary>
+    public ChartText SeriesLabelTemplate => new(Record.AsSpan(266, ChartText.RecordSize).ToArray());
+
+    /// <summary>
+    /// Gets a copy of built-in text object −1, the template for each data point's label (record offset 312).
+    /// Changing the copy does not change the chart.
+    /// </summary>
+    public ChartText PointLabelTemplate => new(Record.AsSpan(312, ChartText.RecordSize).ToArray());
+
     /// <summary>Gets the per-series word list (ignored by Excel on load).</summary>
     public List<ushort> SeriesWords { get; } = [];
 
@@ -211,6 +223,17 @@ public sealed class Chart
 
     /// <summary>Gets a view of one of the <see cref="PointFormats"/>.</summary>
     public ChartPointFormat GetPointFormat(int index) => new(PointFormats[index], 0);
+
+    /// <summary>
+    /// Adds a data-point format record for one series (or one point of a chart with one series), starting as a copy
+    /// of the default series format.
+    /// </summary>
+    public ChartPointFormat AddPointFormat(byte seriesOrPoint)
+    {
+        var record = Record.AsSpan(366, 12).ToArray();
+        PointFormats.Add(record);
+        return new ChartPointFormat(record, 0) { SeriesOrPoint = seriesOrPoint };
+    }
 
     private ushort GetWord(int offset) => BinaryPrimitives.ReadUInt16BigEndian(Record.AsSpan(offset));
 
@@ -353,6 +376,11 @@ public sealed class Chart
         // The default series format Excel writes: solid automatic line, hollow diamonds, automatic marker and area.
         // Without it the series are invisible (spec §16.8).
         Convert.FromHexString("00010C00000000" + "02B0000000").CopyTo(chart.Record, 366);
+        // The data-label templates, built-in text objects -2 and -1, as a chart Excel 1.00 makes has them: data labels
+        // in Geneva 9 with automatic text, the point labels showing their values (spec §16.5). Without them Excel
+        // labels a series or point with the series' name.
+        Convert.FromHexString("00054004000000006040000100C000000C00030900000C000000F000000000000000000000054004000000000000").CopyTo(chart.Record, 266);
+        Convert.FromHexString("00054004000000006050000100C000000C00030900000C000000F000000000000000000000054004000000000000").CopyTo(chart.Record, 312);
         var scale = chart.ValueScale;
         scale.AutomaticMinimum = scale.AutomaticMaximum = scale.AutomaticMajorUnit = scale.AutomaticMinorUnit = scale.AutomaticCrossesAt = true;
         if (type == ChartType.Scatter)
