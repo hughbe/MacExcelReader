@@ -791,7 +791,7 @@ sealed class ChartCommand : Command<FileSettings>
             + (format.Explosion != 0 ? $"; pulled out {format.Explosion}%" : string.Empty);
 
     private static string Axis(ChartAxis axis)
-        => $"ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition} (drawn at {axis.TickLabelsAt}); line {(axis.Line.Pattern == ChartPattern.None ? "hidden" : $"{axis.Line.Pattern} {axis.Line.Weight} at {axis.LineAt}")}; gridlines major {axis.MajorGridlines.Pattern}, minor {axis.MinorGridlines.Pattern}";
+        => $"font {axis.SavedFontNumber} size {axis.SavedFontSize}{(axis.IsBold ? " bold" : string.Empty)}; ticks major {axis.MajorTickMarks}, minor {axis.MinorTickMarks}; labels {axis.TickLabelPosition} (drawn at {axis.TickLabelsAt}); line {(axis.Line.Pattern == ChartPattern.None ? "hidden" : $"{axis.Line.Pattern} {axis.Line.Weight} at {axis.LineAt}")}; gridlines major {axis.MajorGridlines.Pattern}, minor {axis.MinorGridlines.Pattern}";
 
     // Automatic values show what the record holds too: what Excel last worked out when it drew the chart.
     private static string Scale(ChartScale scale)

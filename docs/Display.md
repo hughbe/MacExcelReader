@@ -305,32 +305,37 @@ intervals needs 10.1, so the unit is 20 × 100 ÷ 100 = 20 and the axis runs to 
 
 *n* is the number of tick labels that fit along the axis, from 1 to 10. `37.08` works it out before the labels
 are laid out: it sets the plot area to the space left after the titles and legend (`37.10`), works out the scales,
-and only then takes the axes' labels and ticks off the plot area (`37.0e`) and sets it again. Measured against
-that provisional plot area:
+and only then measures the labels (`37.09`), takes their room off the plot area (`37.0e`) and sets it again. So
+the count is against that provisional plot area:
 
-* Along a vertical axis: the height, less twice the other axis's label height, divided by the axis's label height.
-* Along a horizontal axis (a bar chart's value axis, a scatter chart's X axis): the width divided by three widths
+* Along a vertical axis: its height, less twice the other axis's label height, divided by the axis's label height.
+* Along a horizontal axis (a bar chart's value axis, a scatter chart's X axis): its width divided by three widths
   of the digit 0 in the axis's label font.
 
-Each division rounds down. The lengths are in twips; `37.0b` takes a label's height from the font's ascent and
-descent and the width of 0, and converts them with `32.01`, which maps the window's pixels onto the drawing's
-twips (20 a pixel). On screen Excel 1.00 draws a chart's labels at their own size in every window: captures at
-window heights from 130 to 250 points show the same digits. `30.26`, which picks smaller sizes to fit a window's
-share of each font, belongs to another path, perhaps printing **(inferred)**.
+Each division rounds down. A label height here is the font's ascent and descent and a width that of 0 (in bold
+for bold labels), from `37.0b`, in twips: 20 a pixel (`32.01` maps the window's pixels onto the drawing's twips).
+On screen Excel 1.00 draws a chart's labels at their own size in every window; `30.26`, which picks smaller sizes
+to fit a window's share of each font, belongs to another path, perhaps printing **(inferred)**.
 
-The saved plot area is the provisional one less the room the labels took. Sweeping a library line chart's window
-from 100 to 260 points high, and a bar chart's from 100 to 340 points wide, with data ranges that each change the
-major unit at one interval count (so every save shows *n*), the counts fit these heights and widths exactly, with
-the room labels took constant for each font **(inferred)**:
+**The room the labels take** (`37.0e`), on each side of the plot area in turn:
 
-| Labels | Label height | Room taken vertically | Width of 0 | Room taken across |
-|--------|-------------:|----------------------:|-----------:|------------------:|
-| System font (Chicago 12, 15 pixels) | 280 | 504–517 | 160 | 518–562 |
-| Geneva 9 (12 pixels) | 220 | 364 | | |
-| New York 9 (11 pixels) | 200 | 304–314 | | |
+* An axis's labels measure as the largest label's text with a pixel of margin all round: the font's ascent,
+  descent and leading plus 2 pixels high, its width plus 2 pixels wide (`37.09`). Number labels run from the
+  scale's minimum to its maximum in major units, in General; category labels are the first series' categories, every
+  so many as the category axis says. A hidden axis, or one without labels, takes no room.
+* Along the top and bottom of a column or line chart the category axis's labels lie (a bar chart's value axis);
+  along the left and right the value axis's, with 100 twips more.
+* On the side the labels are on (the low side, or the high side when the scale runs in reverse): labels next to
+  the axis take their size less how far the axis is from that side, never less than 0; "low" labels take their
+  size. On the other side only "high" labels do.
+* The other axis's labels overhang the ends: each side takes at least half the other axis's label size, except
+  the value axis's labels on a chart whose value axis crosses between categories (and is not a scatter chart).
+* Each side also takes twice the axis's tick length.
 
-A label's height is a pixel less than the font's ascent and descent, times 20 **(unknown)** why. The room taken is
-about one category-label height plus half a value-label height, plus a little that grows with the font.
+The saved plot area is the provisional one less this room, so a chart Excel has drawn gives back the provisional
+plot area and with it *n* (`ChartDocument.GetLabelSpaces`). Label counts worked out this way reproduce Excel's
+scales for all 728 chart saves of the experiments, among them 495 library charts in windows from 100 to 340
+points, with labels in the System font (Chicago 12), Geneva 9 and New York 9.
 
 **The other fields.** An automatic minor unit is a fifth of the major unit. Then each unit, fixed or not, is
 limited: one too small to change either end of the scale becomes the whole range, and one that would divide the
@@ -365,6 +370,5 @@ the minimum plus the range moved up to a whole number of major units.
 
 * How the 64K ROM that Excel 1.00 also ran on draws a font size with no bitmap. Running it needs the 64K ROM and
   MAME's `mac512k`, neither of which this project has, and a 400K boot disk, which the 64K ROM needs.
-* Why a chart label's height counts a pixel less than its font's ascent and descent, and exactly how much room
-  `37.0e` takes for the labels (spec §16.5's layout fields): both are measured above but not derived, so the
-  library takes the provisional plot area as given (`ChartScale.GetLabelSpaces`).
+* How category labels that do not fit their slot wrap (`37.2b` lays them out in boxes as wide as a category,
+  `33.1d`), which changes their height; the library takes each on one line.

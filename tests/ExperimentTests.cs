@@ -1825,6 +1825,45 @@ public class ExperimentTests
     }
 
     [Theory]
+    [MemberData(nameof(AxisCharts))]
+    public void Scale_LabelSpacesAreExcels(string path)
+    {
+        // Needs Excel's fonts (MACEXCEL_SYSTEM). The number of tick labels that fit, worked back from the layout Excel
+        // saved and the axes' fonts (37.0a, 37.09, 37.0e), gives Excel's scales for every chart sample, the windows
+        // too small for 10 intervals and the Geneva 9 and New York 9 labels among them.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var document = ChartDocument.Load(SampleFile(path));
+        var saved = document.Charts.SelectMany(c => c.XScale is null ? [c.ValueScale] : new[] { c.ValueScale, c.XScale })
+            .Select(s => (s.Minimum, s.Maximum, s.MajorUnit, s.MinorUnit, s.CrossesAt)).ToList();
+        document.UpdateAutomaticScales(fonts);
+        Assert.Equal(saved, document.Charts.SelectMany(c => c.XScale is null ? [c.ValueScale] : new[] { c.ValueScale, c.XScale })
+            .Select(s => (s.Minimum, s.Maximum, s.MajorUnit, s.MinorUnit, s.CrossesAt)));
+    }
+
+    [Theory]
+    [InlineData("Scale Window 130", 2)]
+    [InlineData("Scale Window 200", 6)]
+    [InlineData("Scale Window Geneva 9", 6)]
+    [InlineData("Scale Window New York 9", 5)]
+    [InlineData("Scale Bar Window 120", 4)]
+    [InlineData("Scale Bar Window 180", 6)]
+    [InlineData("Library Line", 11)]
+    public void Scale_LabelSpaces(string name, int expected)
+    {
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var document = ChartDocument.Load(SamplePath(name));
+        Assert.Equal(expected, document.GetLabelSpaces(document.MainChart, fonts));
+    }
+
+    [Theory]
     [InlineData("Scale Fixed Maximum Below Data", -5.5, 0.5)]
     [InlineData("Scale Fixed Maximum Far Below Data", -22, 2)]
     [InlineData("Scale Fixed Minimum Above Negative Data", 5, 0.5)]

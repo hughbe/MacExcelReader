@@ -408,6 +408,51 @@ public sealed class ChartAxis
 
     /// <summary>Gets the tick-label font descriptor bytes (on disk, Microsoft Chart codes).</summary>
     public ReadOnlySpan<byte> Font => _data.AsSpan(_offset + 2, 4);
+
+    /// <summary>
+    /// Gets or sets the tick labels' Macintosh font number that Excel hides in bits 9–2 of the axis line's word, and
+    /// restores on load when the chart version has bit 2 set (spec §16.4). 0 is the System font.
+    /// </summary>
+    public int SavedFontNumber { get => GetHidden(14); set => SetHidden(14, value); }
+
+    /// <summary>
+    /// Gets or sets the tick labels' point size that Excel hides in bits 9–2 of the major gridlines' word (spec §16.4);
+    /// 0 is the System font's size, 12.
+    /// </summary>
+    public int SavedFontSize { get => GetHidden(18); set => SetHidden(18, value); }
+
+    /// <summary>Gets whether the tick labels are bold (font code bit 0x40, spec §16.4).</summary>
+    public bool IsBold => (_data[_offset + 3] & 0x40) != 0;
+
+    /// <summary>
+    /// Gets the tick labels' Macintosh font number and size as Excel 1.00 opens them: the hidden ones when
+    /// <paramref name="version"/> has bit 2 set, otherwise converted back from the Microsoft Chart codes (New York and
+    /// Geneva 9, 12 or 15; anything else, which is taken as the System font, 12, 18 or 24).
+    /// </summary>
+    public (int Family, int Size) GetFont(int version)
+    {
+        if ((version & 4) != 0)
+        {
+            return (SavedFontNumber, SavedFontSize == 0 ? 12 : SavedFontSize);
+        }
+
+        int code = _data[_offset + 3] & 0x3F, index = _data[_offset + 4];
+        return code switch
+        {
+            16 => (2, 9 + 3 * index),
+            1 => (3, 9 + 3 * index),
+            _ => (0, 12 + 6 * index),
+        };
+    }
+
+    private int GetHidden(int offset) => (BinaryPrimitives.ReadUInt16BigEndian(_data.AsSpan(_offset + offset)) >> 2) & 0xFF;
+
+    private void SetHidden(int offset, int value)
+    {
+        var span = _data.AsSpan(_offset + offset);
+        ushort word = BinaryPrimitives.ReadUInt16BigEndian(span);
+        BinaryPrimitives.WriteUInt16BigEndian(span, (ushort)((word & ~0x3FC) | ((value & 0xFF) << 2)));
+    }
 }
 
 /// <summary>
@@ -631,13 +676,12 @@ public sealed class ChartScale
     /// (<c>37.0a</c>): along a vertical axis the plot area's height, less two of the other axis's label heights,
     /// over a label's height; along a horizontal axis the plot area's width over three widths of the digit 0. The
     /// plot area is the provisional one, before the axis labels are laid out (<c>37.10</c>): the saved plot area plus
-    /// the room the labels took (docs/Display.md, "Automatic axis scales", measures it). Lengths are in twips, 20 a
-    /// pixel.
+    /// the room the labels took, which <see cref="ChartDocument.GetLabelSpaces"/> works out from a drawn chart. Lengths
+    /// are in twips, 20 a pixel.
     /// </summary>
     /// <param name="plotLength">The provisional plot area's height for a vertical axis, its width for a horizontal one.</param>
     /// <param name="horizontal">Whether the axis runs across: a bar chart's value axis or a scatter chart's X axis.</param>
-    /// <param name="labelHeight">The height of the axis's labels (a pixel less than the font's ascent and descent, in the
-    /// charts measured).</param>
+    /// <param name="labelHeight">The ascent and descent of the axis's label font.</param>
     /// <param name="zeroWidth">The width of 0 in the axis's label font.</param>
     /// <param name="otherLabelHeight">The height of the other axis's labels.</param>
     public static int GetLabelSpaces(int plotLength, bool horizontal, int labelHeight, int zeroWidth, int otherLabelHeight)

@@ -557,7 +557,7 @@ public sealed class ChartDocument
     /// (<see cref="GetDataRange"/>) and how many tick labels fit along the axis
     /// (<see cref="ChartScale.GetLabelSpaces"/>). Excel leaves the scale of a pie chart, which has no axes, and of a
     /// chart with no series as it is. Excel works out whether the overlay shares the scales first
-    /// (<see cref="UpdateSharedScales"/>); <see cref="UpdateAutomaticScales"/> does both.
+    /// (<see cref="UpdateSharedScales"/>); <see cref="UpdateAutomaticScales(int)"/> does both.
     /// </summary>
     public void UpdateAutomaticScale(Chart chart, int labelSpaces, bool xAxis = false)
     {
@@ -647,6 +647,42 @@ public sealed class ChartDocument
             if (chart.XScale is not null)
             {
                 UpdateAutomaticScale(chart, labelSpaces, xAxis: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets how many tick labels Excel 1.00 reckons fit along an axis of a chart Excel has drawn, from the layout it
+    /// saved (<c>37.0a</c>): the plot area it counts against is the saved one plus the room its axis labels and ticks
+    /// took (<c>37.0e</c>), measured in the axes' fonts. Category labels are taken on one line each.
+    /// </summary>
+    /// <param name="chart">The main chart or the overlay.</param>
+    /// <param name="fonts">The System's fonts, which Excel measures the labels in.</param>
+    /// <param name="xAxis">The X axis of a scatter chart instead of the value axis.</param>
+    public int GetLabelSpaces(Chart chart, Rendering.MacFontSet fonts, bool xAxis = false)
+        => ChartLabelLayout.GetLabelSpaces(this, chart, fonts, xAxis);
+
+    /// <summary>
+    /// Works out every automatic scale field of the document's charts as Excel 1.00 does when it draws them in their
+    /// saved windows, with the number of tick labels that fit along each axis (<see cref="GetLabelSpaces"/>).
+    /// </summary>
+    public void UpdateAutomaticScales(Rendering.MacFontSet fonts)
+    {
+        UpdateSharedScales();
+        foreach (var chart in Charts)
+        {
+            if (chart.Type == ChartType.Pie || GetSeries(chart).Count == 0)
+            {
+                continue;
+            }
+
+            // Both counts come from the saved layout, before either scale changes.
+            int valueSpaces = GetLabelSpaces(chart, fonts);
+            int xSpaces = chart.XScale is null ? 0 : GetLabelSpaces(chart, fonts, xAxis: true);
+            UpdateAutomaticScale(chart, valueSpaces);
+            if (chart.XScale is not null)
+            {
+                UpdateAutomaticScale(chart, xSpaces, xAxis: true);
             }
         }
     }

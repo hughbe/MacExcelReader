@@ -434,8 +434,8 @@ to 10 intervals, which a chart at its usual window size has room for:
 
 ```csharp
 newChart.UpdateAutomaticScales(labelSpaces: 10);
-// or from the plot area and the label fonts' metrics, in twips:
-int spaces = ChartScale.GetLabelSpaces(plotHeight, horizontal: false, labelHeight, zeroWidth, otherLabelHeight);
+// or, for a chart Excel has drawn, from its saved layout and the System's fonts (MacFontSet):
+chart.UpdateAutomaticScales(MacFontSet.Load("System.rsrc"));
 ```
 
 Patterns, markers, line weights and arrowheads are enums (`ChartPattern`, `ChartMarker`, `ChartLineWeight`,

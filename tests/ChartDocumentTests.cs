@@ -371,4 +371,21 @@ public class ChartDocumentTests
         Assert.Equal((0.0, 2.0), document.GetDataRange(document.MainChart));
         Assert.Equal((2.0, 4.0), document.GetDataRange(overlay));
     }
+
+    [Fact]
+    public void AxisFont_ReadsTheHiddenNumberAndSize()
+    {
+        // Geneva 9 on the value axis of a library chart: the codes are 1 and 0, the real number and size hide in the
+        // axis line's and major gridlines' words (spec §16.4).
+        var axis = ChartDocument.Load(TestData.SamplePath("Scale Window Geneva 9")).MainChart.ValueAxis;
+        Assert.Equal(3, axis.SavedFontNumber);
+        Assert.Equal(9, axis.SavedFontSize);
+        Assert.Equal((3, 9), axis.GetFont(12));
+        Assert.Equal((3, 9), axis.GetFont(3));
+        var library = Chart.Create(ChartType.Line).ValueAxis;
+        Assert.Equal((0, 12), library.GetFont(12));
+        library.SavedFontNumber = 4;
+        library.SavedFontSize = 10;
+        Assert.Equal((4, 10), library.GetFont(12));
+    }
 }
