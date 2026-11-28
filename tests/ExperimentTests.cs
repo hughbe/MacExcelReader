@@ -1786,7 +1786,7 @@ public class ExperimentTests
     };
 
     public static TheoryData<string> AxisCharts() => new(AllSamples()
-        .Where(path => File.ReadAllBytes(SampleFile(path))[0] == 0x01 && ChartDocument.Load(SampleFile(path)).MainChart.Type != ChartType.Pie && !path.EndsWith("Scale Fixed Maximum Below Data", StringComparison.Ordinal)));
+        .Where(path => File.ReadAllBytes(SampleFile(path))[0] == 0x01 && ChartDocument.Load(SampleFile(path)).MainChart.Type != ChartType.Pie));
 
     [Theory]
     [MemberData(nameof(AxisCharts))]
@@ -1795,30 +1795,43 @@ public class ExperimentTests
         // Every chart Excel saved holds in its scale records the automatic values Excel worked out when it last drew
         // it (37.0a), and the library works out the same doubles from the series: Excel's own samples from 1.00,
         // 1.03 and 1.5, and the "Scale" samples, library charts with chosen data, fixed fields and window sizes that
-        // Excel 1.00 drew and saved. A window big enough for 10 intervals is all but one of them.
+        // Excel 1.00 drew and saved. Most had room for 10 intervals; s_scaleLabelSpaces lists the others.
+        // With an overlay, Excel first works out whether it shares each axis (37.34) and both charts then plot on the
+        // range of their data together (37.2f).
         var document = ChartDocument.Load(SampleFile(path));
         int labelSpaces = s_scaleLabelSpaces.GetValueOrDefault(Path.GetFileName(path), 10);
-        var chart = document.MainChart;
-        foreach (var xAxis in chart.XScale is null ? [false] : new[] { false, true })
+        var saved = Scales(document);
+        document.UpdateAutomaticScales(labelSpaces);
+        Assert.Equal(saved, Scales(document));
+
+        static List<object> Scales(ChartDocument document)
         {
-            var scale = xAxis ? chart.XScale! : chart.ValueScale;
-            double[] saved = [scale.Minimum, scale.Maximum, scale.MajorUnit, scale.MinorUnit, scale.CrossesAt];
-            document.UpdateAutomaticScale(chart, labelSpaces, xAxis);
-            Assert.Equal(saved, new[] { scale.Minimum, scale.Maximum, scale.MajorUnit, scale.MinorUnit, scale.CrossesAt });
+            var fields = new List<object>();
+            foreach (var chart in document.Charts)
+            {
+                foreach (var scale in chart.XScale is null ? [chart.ValueScale] : new[] { chart.ValueScale, chart.XScale })
+                {
+                    fields.AddRange([scale.Minimum, scale.Maximum, scale.MajorUnit, scale.MinorUnit, scale.CrossesAt, scale.IsLogarithmic, scale.ValuesInReverseOrder]);
+                }
+
+                fields.AddRange([chart.SharesValueAxisScale, chart.SharesXAxisScale, chart.CategoriesInReverseOrder, chart.ValueAxisCrossesBetweenCategories]);
+            }
+
+            return fields;
         }
     }
 
-    [Fact]
-    public void Scale_FixedMaximumBelowTheData()
+    [Theory]
+    [InlineData("Scale Fixed Maximum Below Data", -5.5, 0.5)]
+    [InlineData("Scale Fixed Maximum Far Below Data", -22, 2)]
+    [InlineData("Scale Fixed Minimum Above Negative Data", 5, 0.5)]
+    public void Scale_FixedEndBeyondTheData(string name, double minimum, double majorUnit)
     {
-        // Data 0 to 10 with the maximum fixed at -5: 37.0a divides by the minimum, 0, when it decides whether the
-        // scale starts at zero, and Excel's result (minimum -5.5, major unit 0.5) is not what the division gives
-        // as an IEEE infinity (Display.md, open questions).
-        var scale = ChartDocument.Load(SamplePath("Scale Fixed Maximum Below Data")).MainChart.ValueScale;
-        Assert.False(scale.AutomaticMaximum);
-        Assert.Equal(-5, scale.Maximum);
-        Assert.Equal(-5.5, scale.Minimum);
-        Assert.Equal(0.5, scale.MajorUnit);
+        // A fixed end beyond the data's other end makes the range negative: the major unit is worked out from its
+        // size, and with data starting at 0 the test for starting at zero, which divides by 0, never does (37.0a).
+        var scale = ChartDocument.Load(SamplePath(name)).MainChart.ValueScale;
+        Assert.Equal(minimum, scale.Minimum);
+        Assert.Equal(majorUnit, scale.MajorUnit);
     }
 
     [Theory]

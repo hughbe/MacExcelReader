@@ -460,12 +460,37 @@ public sealed class ChartDocument
     /// (<c>37.16</c>): the smallest and largest values; for a stacked chart 0 and the largest total of a
     /// category's values, each counted positive; 0 and 100 for a 100% chart. A logarithmic axis leaves out
     /// values that are not positive, and has 1 where a linear one has 0. With no values the range is empty: both
-    /// ends 0 (1 on a logarithmic axis).
+    /// ends 0 (1 on a logarithmic axis). When the overlay shares the axis (<see cref="Chart.SharesValueAxisScale"/>,
+    /// <see cref="Chart.SharesXAxisScale"/>), both charts get the range of their data together.
     /// </summary>
     /// <param name="chart">The main chart or the overlay.</param>
     /// <param name="xAxis">The X axis of a scatter chart, whose values are the series' category numbers (or 1, 2,
     /// … for a series without them) instead of the value axis's.</param>
     public (double Minimum, double Maximum) GetDataRange(Chart chart, bool xAxis = false)
+    {
+        // 37.2f: an overlay that shares the axis puts both charts on the range of their data together, the main
+        // chart's own (when it has series) widened by the overlay's.
+        if (OverlayChart is { } overlay && (xAxis ? overlay.SharesXAxisScale : overlay.SharesValueAxisScale))
+        {
+            if (GetSeries(MainChart).Count == 0)
+            {
+                return GetOwnDataRange(overlay, xAxis);
+            }
+
+            var (min, max) = GetOwnDataRange(MainChart, xAxis);
+            if (GetSeries(overlay).Count == 0)
+            {
+                return (min, max);
+            }
+
+            var (overlayMin, overlayMax) = GetOwnDataRange(overlay, xAxis);
+            return (min - overlayMin < 0 ? min : overlayMin, max - overlayMax > 0 ? max : overlayMax);
+        }
+
+        return GetOwnDataRange(chart, xAxis);
+    }
+
+    private (double Minimum, double Maximum) GetOwnDataRange(Chart chart, bool xAxis)
     {
         bool scatter = chart.Type == ChartType.Scatter;
         var scale = xAxis ? chart.XScale ?? chart.ValueScale : chart.ValueScale;
@@ -530,18 +555,99 @@ public sealed class ChartDocument
     /// <summary>
     /// Sets the automatic fields of a chart's axis scale as Excel 1.00 does when it draws the chart, from the data
     /// (<see cref="GetDataRange"/>) and how many tick labels fit along the axis
-    /// (<see cref="ChartScale.GetLabelSpaces"/>). A pie chart has no axes, and Excel leaves its scale as it is. An
-    /// overlay that shares the main chart's scale is not covered.
+    /// (<see cref="ChartScale.GetLabelSpaces"/>). Excel leaves the scale of a pie chart, which has no axes, and of a
+    /// chart with no series as it is. Excel works out whether the overlay shares the scales first
+    /// (<see cref="UpdateSharedScales"/>); <see cref="UpdateAutomaticScales"/> does both.
     /// </summary>
     public void UpdateAutomaticScale(Chart chart, int labelSpaces, bool xAxis = false)
     {
-        if (chart.Type == ChartType.Pie)
+        if (chart.Type == ChartType.Pie || GetSeries(chart).Count == 0)
         {
             return;
         }
 
         var scale = xAxis ? chart.XScale ?? throw new InvalidOperationException("Only a scatter chart has an X-axis scale.") : chart.ValueScale;
         var (min, max) = GetDataRange(chart, xAxis);
-        scale.SetAutomaticValues(min, max, labelSpaces, chart.Type == ChartType.Scatter);
+
+        // On a shared axis, the scale is a scatter chart's only when both charts are scatter charts.
+        bool scatter = chart.Type == ChartType.Scatter;
+        if (OverlayChart is { } overlay && (xAxis ? overlay.SharesXAxisScale : overlay.SharesValueAxisScale))
+        {
+            scatter &= MainChart.Type == ChartType.Scatter && overlay.Type == ChartType.Scatter;
+        }
+
+        scale.SetAutomaticValues(min, max, labelSpaces, scatter);
+    }
+
+    /// <summary>
+    /// Works out the overlay's shared-scale flags as Excel 1.00 does each time it draws a chart with an overlay
+    /// (<c>37.34</c>), when both charts have series: the value axis is shared when either chart's value axis is hidden,
+    /// neither chart is a pie, and both are bars or neither, and 100% or neither; the X (category) axis when both are
+    /// scatter charts, or when either chart's category axis is hidden, neither is a pie or a scatter chart, and both
+    /// are bars or neither. The chart whose axis is hidden takes the other's logarithmic and reverse-order settings for it, and
+    /// on a shared category axis the overlay takes the main chart's crossing between categories.
+    /// </summary>
+    public void UpdateSharedScales()
+    {
+        if (OverlayChart is not { } overlay || GetSeries(MainChart).Count == 0 || GetSeries(overlay).Count == 0)
+        {
+            return;
+        }
+
+        var main = MainChart;
+        bool noPie = main.Type != ChartType.Pie && overlay.Type != ChartType.Pie;
+        bool overlayValueHidden = overlay.ValueAxis.Line.Pattern == ChartPattern.None;
+        overlay.SharesValueAxisScale = (overlayValueHidden || main.ValueAxis.Line.Pattern == ChartPattern.None)
+            && noPie && main.IsBar == overlay.IsBar && main.IsPercent == overlay.IsPercent;
+        if (overlay.SharesValueAxisScale)
+        {
+            var (from, to) = overlayValueHidden ? (main.ValueScale, overlay.ValueScale) : (overlay.ValueScale, main.ValueScale);
+            to.IsLogarithmic = from.IsLogarithmic;
+            to.ValuesInReverseOrder = from.ValuesInReverseOrder;
+        }
+
+        bool overlayCategoryHidden = overlay.CategoryAxis.Line.Pattern == ChartPattern.None;
+        bool mainScatter = main.Type == ChartType.Scatter, overlayScatter = overlay.Type == ChartType.Scatter;
+        overlay.SharesXAxisScale = mainScatter && overlayScatter
+            || (overlayCategoryHidden || main.CategoryAxis.Line.Pattern == ChartPattern.None) && noPie
+                && !mainScatter && !overlayScatter && main.IsBar == overlay.IsBar;
+        if (overlay.SharesXAxisScale)
+        {
+            var (from, to) = overlayCategoryHidden ? (main, overlay) : (overlay, main);
+            bool reverse = from.XScale is { } fromScale ? fromScale.ValuesInReverseOrder : from.CategoriesInReverseOrder;
+            if (to.XScale is { } toScale)
+            {
+                toScale.ValuesInReverseOrder = reverse;
+            }
+            else
+            {
+                to.CategoriesInReverseOrder = reverse;
+            }
+
+            if (overlayScatter && from.XScale is { } fromX && to.XScale is { } toX)
+            {
+                toX.IsLogarithmic = fromX.IsLogarithmic;
+            }
+
+            overlay.ValueAxisCrossesBetweenCategories = main.ValueAxisCrossesBetweenCategories;
+        }
+    }
+
+    /// <summary>
+    /// Works out every automatic scale field of the document's charts as Excel 1.00 does when it draws them: the
+    /// shared-scale flags (<see cref="UpdateSharedScales"/>), then each chart's value axis and a scatter chart's X
+    /// axis (<see cref="UpdateAutomaticScale"/>).
+    /// </summary>
+    public void UpdateAutomaticScales(int labelSpaces)
+    {
+        UpdateSharedScales();
+        foreach (var chart in Charts)
+        {
+            UpdateAutomaticScale(chart, labelSpaces);
+            if (chart.XScale is not null)
+            {
+                UpdateAutomaticScale(chart, labelSpaces, xAxis: true);
+            }
+        }
     }
 }

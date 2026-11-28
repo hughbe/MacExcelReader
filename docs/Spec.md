@@ -1843,8 +1843,8 @@ chart.
 | Bits | Meaning |
 |-----:|---------|
 | 11–10 | No effect: a new chart's record clears them (`0f.06`), the reader and writer copy them, and nothing else in Excel 1.00 reads them |
-| 9 | Scale the overlay's value axis over the data of both charts, so the overlay plots against the main chart's axis (`37.0a`) |
-| 8 | The same for the X axis of a scatter overlay |
+| 9 | Scale the overlay's value axis over the data of both charts, so the overlay plots against the main chart's axis (`37.0a`). Excel works it out again each time it draws the chart (`37.34`; [Display](Display.md), "Overlays"). |
+| 8 | The same for the X axis |
 
 Showing an overlay axis with Chart > Axes sets that axis's line pattern (`Overlay Axis` sample), not these
 bits. The word's low byte is 0 from Excel 1.00 and 1.03 and `0x0F` in the 1.5 samples.

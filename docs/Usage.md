@@ -428,11 +428,12 @@ newChart.Save("Sales Chart");
 ```
 
 A scale field marked automatic holds what Excel worked out when it last drew the chart. After changing the data,
-`UpdateAutomaticScale` works the automatic fields out again as Excel 1.00 does. It needs to know how many tick
-labels fit along the axis. Excel 1.00 fits up to 10 intervals, which a chart at its usual window size has room for:
+`UpdateAutomaticScales` works the automatic fields out again as Excel 1.00 does, with an overlay's shared scales
+(`UpdateAutomaticScale` does one axis). It needs to know how many tick labels fit along the axis. Excel 1.00 fits up
+to 10 intervals, which a chart at its usual window size has room for:
 
 ```csharp
-newChart.UpdateAutomaticScale(newChart.MainChart, labelSpaces: 10);
+newChart.UpdateAutomaticScales(labelSpaces: 10);
 // or from the plot area and the label fonts' metrics, in twips:
 int spaces = ChartScale.GetLabelSpaces(plotHeight, horizontal: false, labelHeight, zeroWidth, otherLabelHeight);
 ```

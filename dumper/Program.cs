@@ -1104,6 +1104,30 @@ sealed class NewChartSettings : CommandSettings
     [CommandOption("--log")]
     [Description("A logarithmic value axis.")]
     public bool Log { get; init; }
+
+    [CommandOption("--overlay <TYPE>")]
+    [Description("Add an overlay chart of this type, plotting the series from --overlay-from on.")]
+    public ChartType? Overlay { get; init; }
+
+    [CommandOption("--overlay-from <N>")]
+    [Description("The overlay's first series, counted from 1 (default: the last series).")]
+    public int? OverlayFrom { get; init; }
+
+    [CommandOption("--share")]
+    [Description("Scale the overlay's value axis over the data of both charts.")]
+    public bool Share { get; init; }
+
+    [CommandOption("--share-x")]
+    [Description("Scale a scatter overlay's X axis over the data of both charts.")]
+    public bool ShareX { get; init; }
+
+    [CommandOption("--hide-overlay-axes")]
+    [Description("Hide the overlay's axes, as Excel does when it makes an overlay.")]
+    public bool HideOverlayAxes { get; init; }
+
+    [CommandOption("--hide-value-axis")]
+    [Description("Hide the main chart's value axis.")]
+    public bool HideValueAxis { get; init; }
 }
 
 /// <summary>
@@ -1129,6 +1153,11 @@ sealed class NewChartCommand : Command<NewChartSettings>
 
         var scale = document.MainChart.ValueScale;
         scale.IsLogarithmic = settings.Log;
+        if (settings.HideValueAxis)
+        {
+            document.MainChart.ValueAxis.Line.Pattern = ChartPattern.None;
+        }
+
         foreach (string field in settings.Scale)
         {
             var parts = field.Split('=', 2);
@@ -1142,6 +1171,19 @@ sealed class NewChartCommand : Command<NewChartSettings>
                 case "crosses": scale.CrossesAt = value; scale.AutomaticCrossesAt = false; break;
                 default: throw new ArgumentException($"Unknown scale field {parts[0]}: use min, max, major, minor or crosses.");
             }
+        }
+
+        if (settings.Overlay is { } overlayType)
+        {
+            var overlay = Chart.Create(overlayType);
+            overlay.FirstOverlaySeries = settings.OverlayFrom ?? series.Length;
+            overlay.SharesValueAxisScale = settings.Share;
+            overlay.SharesXAxisScale = settings.ShareX;
+            if (settings.HideOverlayAxes)
+            {
+                overlay.CategoryAxis.Line.Pattern = overlay.ValueAxis.Line.Pattern = ChartPattern.None;
+            }
+            document.Charts.Insert(0, overlay);
         }
 
         File.WriteAllBytes(settings.Output, document.ToArray());

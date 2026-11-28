@@ -630,7 +630,8 @@ public sealed class ChartScale
     /// Gets how many tick labels Excel 1.00 reckons fit along an axis when it works out an automatic major unit
     /// (<c>37.0a</c>): along a vertical axis the plot area's height, less two of the other axis's label heights,
     /// over a label's height; along a horizontal axis the plot area's width over three widths of the digit 0.
-    /// Lengths are in twips, with the fonts at the sizes Excel draws them for the window.
+    /// Lengths are in twips (pixels × 20). This follows the code; the value axes of charts Excel 1.00 drew fit the plot
+    /// height over the label height, without the other axis's labels taken off (docs/Display.md, open questions).
     /// </summary>
     /// <param name="plotLength">The plot area's height for a vertical axis, its width for a horizontal one.</param>
     /// <param name="horizontal">Whether the axis runs across: a bar chart's value axis or a scatter chart's X axis.</param>

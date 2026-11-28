@@ -73,7 +73,10 @@ internal static class ChartAutomaticScale
                 bool maxNotNegative = max >= 0;
                 if (min >= 0 || !maxNotNegative)
                 {
-                    double share = Math.Abs(100.0 * range / (maxNotNegative ? max : min)) - 10 + 2;
+                    // Dividing by an end of 0 (a fixed maximum below data starting at 0) never starts the
+                    // scale at zero in Excel (the Scale Fixed Maximum samples), where an IEEE division would.
+                    double end = maxNotNegative ? max : min;
+                    double share = end == 0 ? -1 : Math.Abs(100.0 * range / end) - 10 + 2;
                     if (share >= 0)
                     {
                         if (maxNotNegative)
@@ -96,7 +99,8 @@ internal static class ChartAutomaticScale
                 ExcelValueFormatter.Num2Str(Math.Abs(range), digits, out int exponent);
                 double power = Pow10(exponent - 1);
                 int intervals = Math.Clamp(labelSpaces + 1, 2, 11) - 1;
-                double percent = range / intervals / power * 100;
+                // A fixed end beyond the other makes the range negative; the unit comes out as for its size.
+                double percent = Math.Abs(range) / intervals / power * 100;
                 int needed = (int)percent;
                 if (Math.Truncate(percent) - percent != 0)
                 {
