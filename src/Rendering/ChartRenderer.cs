@@ -550,7 +550,7 @@ public static class ChartRenderer
             if (chart.Type == ChartType.Pie)
             {
                 _engine = new ChartLayoutEngine(document, chart, fonts);
-                DrawAreas31();
+                DrawChartAndPlotAreas();
                 DrawPie();
                 DrawLegend();
                 DrawTexts();
@@ -558,11 +558,11 @@ public static class ChartRenderer
             }
 
             _engine = new ChartLayoutEngine(document, chart, fonts);
-            DrawAreas31();
+            DrawChartAndPlotAreas();
             DrawGridlines();
             DrawAxes();
             DrawColumns();
-            DrawAreas();
+            DrawAreaSeries();
             DrawSeries();
             DrawValueLabels();
             DrawCategoryLabels();
@@ -609,7 +609,7 @@ public static class ChartRenderer
         }
 
         // The chart area (the main chart's) and the plot area, before anything else (31.03).
-        private void DrawAreas31()
+        private void DrawChartAndPlotAreas()
         {
             if (chart == document.MainChart)
             {
@@ -1162,7 +1162,7 @@ public static class ChartRenderer
         // Area charts (55.00, 55.01): each series a polygon along its tops and back along its base (the series
         // below's tops when stacked, which adds the values' sizes; otherwise where the category axis crosses),
         // filled with its pattern, then its border drawn through the polygon's points.
-        private void DrawAreas()
+        private void DrawAreaSeries()
         {
             if (chart.Type != ChartType.Area)
             {
