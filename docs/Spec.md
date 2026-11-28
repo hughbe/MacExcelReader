@@ -1750,7 +1750,8 @@ the font byte is 16 for New York (font 2), 1 for Geneva (font 3) and 32 for anyt
 bold and `0x80` for italic; the size byte is an index 0–2, `(size − 9) / 3` for Geneva and New York and `(size
 − 12) / 6` otherwise. Excel also hides the real Macintosh font number and size in spare bits nearby (listed
 with each record) and restores them on load when the version has bit 2 set; for other versions it converts the
-codes back.
+codes back. Font number 0 is the System font and 1 the application font, Geneva: charts Excel makes with NEW save
+1 and size 9 (the `Labels` samples), library charts 0 and 0, the System font at 12.
 
 **Line format** (4 bytes), for axis lines, gridlines, drop lines, hi-lo lines:
 

@@ -317,12 +317,22 @@ for bold labels), from `37.0b`, in twips: 20 a pixel (`32.01` maps the window's 
 On screen Excel 1.00 draws a chart's labels at their own size in every window; `30.26`, which picks smaller sizes
 to fit a window's share of each font, belongs to another path, perhaps printing **(inferred)**.
 
+**Wrapping category labels** (`37.2b`, `33.1e`, `33.1f`). A category label's slot is the plot area's width divided
+among the labels (as many as the categories, one fewer when the value axis does not cross between them, divided by
+the categories between labels), but never narrower than a 0; in a bar chart it is a third of the chart area's width.
+Excel converts it to pixels and fills each line a word at a time (`33.21`), a word running to and including the
+next space or hyphen, while the words' widths, trailing spaces included, fit. A first word too wide for its line
+breaks between characters, and a line takes at least one character. A return or line feed ends a line. Excel's own
+column charts with labels from one to nine lines of Geneva 9 (the `Labels` samples) lose exactly 240 twips of plot
+height for each line more.
+
 **The room the labels take** (`37.0e`), on each side of the plot area in turn:
 
-* An axis's labels measure as the largest label's text with a pixel of margin all round: the font's ascent,
-  descent and leading plus 2 pixels high, its width plus 2 pixels wide (`37.09`). Number labels run from the
-  scale's minimum to its maximum in major units, in General; category labels are the first series' categories, every
-  so many as the category axis says. A hidden axis, or one without labels, takes no room.
+* An axis's labels measure as the largest label's box: its lines of text (each the font's ascent, descent and
+  leading) and its widest line, with a pixel of margin all round (`37.09`, `33.1d`). Number labels run from the
+  scale's minimum to its maximum in major units, in General, on one line each. Category labels are the first
+  series' categories, every so many as the category axis says, each wrapped to its slot. A hidden axis, or one
+  without labels, takes no room.
 * Along the top and bottom of a column or line chart the category axis's labels lie (a bar chart's value axis);
   along the left and right the value axis's, with 100 twips more.
 * On the side the labels are on (the low side, or the high side when the scale runs in reverse): labels next to
@@ -333,7 +343,7 @@ to fit a window's share of each font, belongs to another path, perhaps printing 
 * Each side also takes twice the axis's tick length.
 
 The saved plot area is the provisional one less this room, so a chart Excel has drawn gives back the provisional
-plot area and with it *n* (`ChartDocument.GetLabelSpaces`). Label counts worked out this way reproduce Excel's
+plot area and with it *n* (`ChartDocument.GetLabelSpaces`; `GetTickLabelSize` gives the label box). Label counts worked out this way reproduce Excel's
 scales for all 728 chart saves of the experiments, among them 495 library charts in windows from 100 to 340
 points, with labels in the System font (Chicago 12), Geneva 9 and New York 9.
 
@@ -370,5 +380,3 @@ the minimum plus the range moved up to a whole number of major units.
 
 * How the 64K ROM that Excel 1.00 also ran on draws a font size with no bitmap. Running it needs the 64K ROM and
   MAME's `mac512k`, neither of which this project has, and a 400K boot disk, which the 64K ROM needs.
-* How category labels that do not fit their slot wrap (`37.2b` lays them out in boxes as wide as a category,
-  `33.1d`), which changes their height; the library takes each on one line.

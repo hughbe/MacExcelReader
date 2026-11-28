@@ -24,6 +24,24 @@ public enum ChartType : ushort
 }
 
 /// <summary>
+/// An axis of a chart, as the scale methods of <see cref="ChartDocument"/> choose one.
+/// </summary>
+public enum ChartAxisKind
+{
+    /// <summary>The value axis.</summary>
+    Value,
+
+    /// <summary>The category axis: a scatter chart's X axis, which has a scale of its own.</summary>
+    Category,
+}
+
+/// <summary>
+/// A chart text's font as Excel opens it (spec §16.4): a Macintosh font number (0 the System font, 1 the application
+/// font, Geneva), a point size, and the style.
+/// </summary>
+public readonly record struct ChartFont(int Family, int Size, bool Bold, bool Italic);
+
+/// <summary>
 /// The legend position (bits 15–13 of chart-structure word 156).
 /// </summary>
 public enum LegendPosition
@@ -424,24 +442,24 @@ public sealed class ChartAxis
     /// <summary>Gets whether the tick labels are bold (font code bit 0x40, spec §16.4).</summary>
     public bool IsBold => (_data[_offset + 3] & 0x40) != 0;
 
-    /// <summary>
-    /// Gets the tick labels' Macintosh font number and size as Excel 1.00 opens them: the hidden ones when
-    /// <paramref name="version"/> has bit 2 set, otherwise converted back from the Microsoft Chart codes (New York and
-    /// Geneva 9, 12 or 15; anything else, which is taken as the System font, 12, 18 or 24).
-    /// </summary>
-    public (int Family, int Size) GetFont(int version)
+    /// <summary>Gets whether the tick labels are italic (font code bit 0x80, spec §16.4).</summary>
+    public bool IsItalic => (_data[_offset + 3] & 0x80) != 0;
+
+    // The font as Excel 1.00 opens it: the hidden number and size when the chart version has bit 2 set, otherwise
+    // converted back from the Microsoft Chart codes (anything but New York and Geneva taken as the System font).
+    internal ChartFont GetFont(int version)
     {
         if ((version & 4) != 0)
         {
-            return (SavedFontNumber, SavedFontSize == 0 ? 12 : SavedFontSize);
+            return new(SavedFontNumber, SavedFontSize == 0 ? 12 : SavedFontSize, IsBold, IsItalic);
         }
 
         int code = _data[_offset + 3] & 0x3F, index = _data[_offset + 4];
         return code switch
         {
-            16 => (2, 9 + 3 * index),
-            1 => (3, 9 + 3 * index),
-            _ => (0, 12 + 6 * index),
+            16 => new(2, 9 + 3 * index, IsBold, IsItalic),
+            1 => new(3, 9 + 3 * index, IsBold, IsItalic),
+            _ => new(0, 12 + 6 * index, IsBold, IsItalic),
         };
     }
 
@@ -664,26 +682,10 @@ public sealed class ChartScale
     /// </summary>
     /// <param name="dataMinimum">The smallest value the axis shows (<see cref="ChartDocument.GetDataRange"/>).</param>
     /// <param name="dataMaximum">The largest value the axis shows.</param>
-    /// <param name="labelSpaces">How many tick labels fit along the axis (<see cref="GetLabelSpaces"/>). A linear
-    /// scale takes 1 to 10 intervals from it.</param>
+    /// <param name="labelSpaces">How many tick labels fit along the axis (<see cref="ChartDocument.GetLabelSpaces"/>).
+    /// A linear scale takes 1 to 10 intervals from it.</param>
     /// <param name="scatter">Whether the chart is a scatter chart, whose scale never moves to zero and whose single
     /// value widens both ways.</param>
     public void SetAutomaticValues(double dataMinimum, double dataMaximum, int labelSpaces, bool scatter = false)
         => ChartAutomaticScale.Apply(this, dataMinimum, dataMaximum, labelSpaces, scatter);
-
-    /// <summary>
-    /// Gets how many tick labels Excel 1.00 reckons fit along an axis when it works out an automatic major unit
-    /// (<c>37.0a</c>): along a vertical axis the plot area's height, less two of the other axis's label heights,
-    /// over a label's height; along a horizontal axis the plot area's width over three widths of the digit 0. The
-    /// plot area is the provisional one, before the axis labels are laid out (<c>37.10</c>): the saved plot area plus
-    /// the room the labels took, which <see cref="ChartDocument.GetLabelSpaces"/> works out from a drawn chart. Lengths
-    /// are in twips, 20 a pixel.
-    /// </summary>
-    /// <param name="plotLength">The provisional plot area's height for a vertical axis, its width for a horizontal one.</param>
-    /// <param name="horizontal">Whether the axis runs across: a bar chart's value axis or a scatter chart's X axis.</param>
-    /// <param name="labelHeight">The ascent and descent of the axis's label font.</param>
-    /// <param name="zeroWidth">The width of 0 in the axis's label font.</param>
-    /// <param name="otherLabelHeight">The height of the other axis's labels.</param>
-    public static int GetLabelSpaces(int plotLength, bool horizontal, int labelHeight, int zeroWidth, int otherLabelHeight)
-        => horizontal ? plotLength / (3 * zeroWidth) : (plotLength - 2 * otherLabelHeight) / labelHeight;
 }

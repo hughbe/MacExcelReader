@@ -1786,6 +1786,7 @@ public class ExperimentTests
         ["Scale Bar Window 180"] = 6,
         ["Scale Window Geneva 9"] = 6,
         ["Scale Window New York 9"] = 5,
+        ["Labels Small Window"] = 7,
     };
 
     public static TheoryData<string> AxisCharts() => new(AllSamples()
@@ -1861,6 +1862,51 @@ public class ExperimentTests
 
         var document = ChartDocument.Load(SamplePath(name));
         Assert.Equal(expected, document.GetLabelSpaces(document.MainChart, fonts));
+    }
+
+    [Theory]
+    [InlineData("Labels Short", 1, 280)]
+    [InlineData("Labels Long Word", 2, 520)]
+    [InlineData("Labels Hyphens", 2, 520)]
+    [InlineData("Labels Wrapped 4 Lines", 4, 1000)]
+    [InlineData("Labels Wrapped 5 Lines", 5, 1240)]
+    [InlineData("Labels Narrow Slots", 9, 2200)]
+    public void TickLabels_WrapAsExcelLaysThemOut(string name, int lines, int height)
+    {
+        // Needs Excel's fonts (MACEXCEL_SYSTEM). Column charts Excel 1.00 made with NEW from text categories, in the same
+        // window: each category label wraps to its slot a word at a time (a word runs to the next space or hyphen),
+        // and a word too wide for a line breaks between characters (33.1d). Each line of Geneva 9 is 12 pixels, so the
+        // label box is lines × 240 + 40 twips, and the saved plot area is that much shorter: the plot height and the
+        // label height add up to the same in every chart. "Labels Narrow Slots" has ten categories 24 pixels wide.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var document = ChartDocument.Load(SamplePath(name));
+        var (labelHeight, _) = document.GetTickLabelSize(document.MainChart, fonts, ChartAxisKind.Category);
+        Assert.Equal(height, labelHeight);
+        Assert.Equal((lines * 12 + 2) * 20, labelHeight);
+        Assert.Equal(3053, document.MainChart.PlotArea.Box.Height + labelHeight);
+    }
+
+    [Theory]
+    [InlineData("Labels Bar Short", 140)]
+    [InlineData("Labels Bar Wrapped", 1680)]
+    public void TickLabels_WrapInABarChart(string name, int width)
+    {
+        // Needs Excel's fonts (MACEXCEL_SYSTEM). A bar chart's category labels lie along the left and wrap to a third
+        // of the chart area's width, so the saved plot area is narrower by the label box (37.0e): the plot width and
+        // the label width add up to the same in both charts.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var document = ChartDocument.Load(SamplePath(name));
+        var (_, labelWidth) = document.GetTickLabelSize(document.MainChart, fonts, ChartAxisKind.Category);
+        Assert.Equal(width, labelWidth);
+        Assert.Equal(5051, document.MainChart.PlotArea.Box.Width + labelWidth);
     }
 
     [Theory]

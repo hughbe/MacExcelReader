@@ -428,15 +428,21 @@ newChart.Save("Sales Chart");
 ```
 
 A scale field marked automatic holds what Excel worked out when it last drew the chart. After changing the data,
-`UpdateAutomaticScales` works the automatic fields out again as Excel 1.00 does, with an overlay's shared scales
-(`UpdateAutomaticScale` does one axis). It needs to know how many tick labels fit along the axis. Excel 1.00 fits up
-to 10 intervals, which a chart at its usual window size has room for:
+`UpdateAutomaticScales` works every automatic field out again as Excel 1.00 does, an overlay's shared scales
+included. How many tick labels fit along an axis decides the major unit: from a chart Excel has drawn, the library
+works it out from the saved layout and the System's fonts; otherwise give the number, 10 being what a chart at its
+usual window size has room for:
 
 ```csharp
+chart.UpdateAutomaticScales(MacFontSet.Load("System.rsrc"));   // MacExcelReader.Rendering
 newChart.UpdateAutomaticScales(labelSpaces: 10);
-// or, for a chart Excel has drawn, from its saved layout and the System's fonts (MacFontSet):
-chart.UpdateAutomaticScales(MacFontSet.Load("System.rsrc"));
+
+var (min, max) = chart.GetDataRange(chart.MainChart);                     // the data the value axis shows
+var (height, width) = chart.GetTickLabelSize(chart.MainChart, fonts, ChartAxisKind.Category);   // in twips
 ```
+
+`ChartAxisKind.Category` is a scatter chart's X axis where a method takes an axis. `GetLabelFont` gives an axis's
+font as Excel opens it.
 
 Patterns, markers, line weights and arrowheads are enums (`ChartPattern`, `ChartMarker`, `ChartLineWeight`,
 `ArrowHeadWidth`, `ArrowHeadLength`, `ArrowHeadStyle`) named after Excel 1.00's Patterns dialogs.

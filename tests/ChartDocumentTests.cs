@@ -319,18 +319,6 @@ public class ChartDocumentTests
         Assert.Equal(bytes, output.ToArray());
     }
 
-    [Theory]
-    [InlineData(3485, false, 240, 120, 240, 12)]
-    [InlineData(783, false, 180, 120, 180, 2)]
-    [InlineData(8315, true, 240, 120, 240, 23)]
-    [InlineData(300, false, 240, 120, 240, 0)]
-    public void GetLabelSpaces_FollowsExcel(int length, bool horizontal, int height, int zeroWidth, int otherHeight, int expected)
-    {
-        // Down an axis: the plot height less two of the other axis's label heights, over a label's height. Across:
-        // the plot width over three widths of 0 (37.0a).
-        Assert.Equal(expected, ChartScale.GetLabelSpaces(length, horizontal, height, zeroWidth, otherHeight));
-    }
-
     [Fact]
     public void SetAutomaticValues_PicksTheMajorUnitFromTheTable()
     {
@@ -377,15 +365,21 @@ public class ChartDocumentTests
     {
         // Geneva 9 on the value axis of a library chart: the codes are 1 and 0, the real number and size hide in the
         // axis line's and major gridlines' words (spec §16.4).
-        var axis = ChartDocument.Load(TestData.SamplePath("Scale Window Geneva 9")).MainChart.ValueAxis;
+        var document = ChartDocument.Load(TestData.SamplePath("Scale Window Geneva 9"));
+        var axis = document.MainChart.ValueAxis;
         Assert.Equal(3, axis.SavedFontNumber);
         Assert.Equal(9, axis.SavedFontSize);
-        Assert.Equal((3, 9), axis.GetFont(12));
-        Assert.Equal((3, 9), axis.GetFont(3));
-        var library = Chart.Create(ChartType.Line).ValueAxis;
-        Assert.Equal((0, 12), library.GetFont(12));
-        library.SavedFontNumber = 4;
-        library.SavedFontSize = 10;
-        Assert.Equal((4, 10), library.GetFont(12));
+        Assert.Equal(new ChartFont(3, 9, false, false), document.GetLabelFont(axis));
+
+        // A Microsoft Chart file (version without bit 2) is read from the codes: Geneva, size index 0.
+        document.Version = 3;
+        Assert.Equal(new ChartFont(3, 9, false, false), document.GetLabelFont(axis));
+
+        // A library chart's labels are the System font at its size; the saved number and size can be set.
+        var library = ChartDocument.Create(ChartType.Line);
+        Assert.Equal(new ChartFont(0, 12, false, false), library.GetLabelFont(library.MainChart.ValueAxis));
+        library.MainChart.ValueAxis.SavedFontNumber = 4;
+        library.MainChart.ValueAxis.SavedFontSize = 10;
+        Assert.Equal(new ChartFont(4, 10, false, false), library.GetLabelFont(library.MainChart.ValueAxis));
     }
 }

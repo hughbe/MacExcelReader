@@ -695,12 +695,23 @@ sealed class DumpCommand : Command<FileSettings>
     }
 }
 
-sealed class ChartCommand : Command<FileSettings>
+sealed class ChartSettings : FileSettings
 {
-    public override int Execute(CommandContext context, FileSettings settings, CancellationToken cancellationToken)
-        => Dump(ChartDocument.Load(settings.Input));
+    [CommandOption("-s|--system <FILE>")]
+    [Description("Excel 1.00's Data disk image or a System file's resource fork (default: $MACEXCEL_SYSTEM), to measure the tick labels in the System's fonts and show how many fit along each axis.")]
+    public string? System { get; init; }
+}
 
-    internal static int Dump(ChartDocument document)
+sealed class ChartCommand : Command<ChartSettings>
+{
+    public override int Execute(CommandContext context, ChartSettings settings, CancellationToken cancellationToken)
+    {
+        string? system = settings.System ?? Environment.GetEnvironmentVariable("MACEXCEL_SYSTEM");
+        var fonts = string.IsNullOrEmpty(system) || !File.Exists(system) ? null : RenderCommand.LoadFonts(system);
+        return Dump(ChartDocument.Load(settings.Input), fonts);
+    }
+
+    internal static int Dump(ChartDocument document, MacExcelReader.Rendering.MacFontSet? fonts = null)
     {
         AnsiConsole.MarkupLine($"[bold]Chart file[/] version {document.Version}, signature 0x{document.Signature:X4}, {document.Charts.Count} chart(s), {document.Series.Count} series, page setup {Program.YesNo(document.PageSetup is not null)}");
         foreach (var chart in document.Charts)
@@ -731,6 +742,20 @@ sealed class ChartCommand : Command<FileSettings>
 
             var (top, left) = chart.DrawingMargins;
             table.AddRow("Layout (twips)", $"margins top {top}, left {left}; chart area {Box(chart.ChartArea.Box)}; plot area {Box(chart.PlotArea.Box)}; tick length {chart.ValueAxis.TickLength}");
+            if (fonts is not null && chart.Type != ChartType.Pie)
+            {
+                // The label boxes Excel lays out and how many labels it reckons fit (37.09, 37.0a; docs/Display.md).
+                string Labels(ChartAxisKind axis)
+                {
+                    var (height, width) = document.GetTickLabelSize(chart, fonts, axis);
+                    return $"{height} × {width}";
+                }
+
+                table.AddRow("Tick labels (twips)", $"value {Labels(ChartAxisKind.Value)}, category {Labels(ChartAxisKind.Category)}; "
+                    + $"{document.GetLabelSpaces(chart, fonts)} fit up the value axis"
+                    + (chart.XScale is null ? string.Empty : $", {document.GetLabelSpaces(chart, fonts, ChartAxisKind.Category)} along the X axis"));
+            }
+
             table.AddRow("Default series format", PointFormat(chart.DefaultSeriesFormat));
             for (int i = 0; i < chart.PointFormats.Count; i++)
             {

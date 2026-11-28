@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using MacExcelReader.Internal;
 
 namespace MacExcelReader.Charts;
@@ -444,134 +445,145 @@ public sealed class ChartDocument
     /// Gets the series a chart plots: all of them for a lone chart; with an overlay, the main chart has those before
     /// the overlay's first series (<see cref="Chart.FirstOverlaySeries"/>, counted from 1) and the overlay the rest.
     /// </summary>
-    public IReadOnlyList<ChartSeries> GetSeries(Chart chart)
+    public IReadOnlyList<ChartSeries> GetSeries(Chart chart) => SeriesOf(chart).ToArray();
+
+    internal ReadOnlySpan<ChartSeries> SeriesOf(Chart chart)
     {
+        var all = CollectionsMarshal.AsSpan(Series);
         if (OverlayChart is not { } overlay)
         {
-            return Series;
+            return all;
         }
 
-        int first = Math.Clamp(overlay.FirstOverlaySeries - 1, 0, Series.Count);
-        return chart == overlay ? Series.GetRange(first, Series.Count - first) : Series.GetRange(0, first);
+        int first = Math.Clamp(overlay.FirstOverlaySeries - 1, 0, all.Length);
+        return chart == overlay ? all[first..] : all[..first];
     }
 
     /// <summary>
-    /// Gets the range of the data an axis of a chart shows, as Excel 1.00 takes it for an automatic scale
-    /// (<c>37.16</c>): the smallest and largest values; for a stacked chart 0 and the largest total of a
-    /// category's values, each counted positive; 0 and 100 for a 100% chart. A logarithmic axis leaves out
-    /// values that are not positive, and has 1 where a linear one has 0. With no values the range is empty: both
-    /// ends 0 (1 on a logarithmic axis). When the overlay shares the axis (<see cref="Chart.SharesValueAxisScale"/>,
-    /// <see cref="Chart.SharesXAxisScale"/>), both charts get the range of their data together.
+    /// Gets a chart text's font as Excel 1.00 opens it: the Macintosh font number and size Excel hides in the axis
+    /// record (<see cref="ChartAxis.SavedFontNumber"/>, <see cref="ChartAxis.SavedFontSize"/>), or for a Microsoft Chart
+    /// file, whose version lacks bit 2, the font converted back from its codes (spec §16.4).
     /// </summary>
-    /// <param name="chart">The main chart or the overlay.</param>
-    /// <param name="xAxis">The X axis of a scatter chart, whose values are the series' category numbers (or 1, 2,
-    /// … for a series without them) instead of the value axis's.</param>
-    public (double Minimum, double Maximum) GetDataRange(Chart chart, bool xAxis = false)
+    public ChartFont GetLabelFont(ChartAxis axis) => axis.GetFont(Version);
+
+    /// <summary>
+    /// Gets the range of the data an axis of a chart shows, as Excel 1.00 takes it for an automatic scale
+    /// (<c>37.16</c>, <c>37.2f</c>): the smallest and largest values; for a stacked chart 0 and the largest total of
+    /// a category's values, each counted positive; 0 and 100 for a 100% chart. A scatter chart's category axis takes
+    /// the series' category numbers (or 1, 2, … for a series without them). A logarithmic axis leaves out values that
+    /// are not positive, and has 1 where a linear one has 0. With no values both ends are 0 (1 on a logarithmic
+    /// axis). When the overlay shares the axis, both charts get the range of their data together.
+    /// </summary>
+    public (double Minimum, double Maximum) GetDataRange(Chart chart, ChartAxisKind axis = ChartAxisKind.Value)
     {
-        // 37.2f: an overlay that shares the axis puts both charts on the range of their data together, the main
-        // chart's own (when it has series) widened by the overlay's.
-        if (OverlayChart is { } overlay && (xAxis ? overlay.SharesXAxisScale : overlay.SharesValueAxisScale))
+        if (OverlayChart is { } overlay && Shares(overlay, axis))
         {
-            if (GetSeries(MainChart).Count == 0)
+            if (SeriesOf(MainChart).IsEmpty)
             {
-                return GetOwnDataRange(overlay, xAxis);
+                return GetOwnDataRange(overlay, axis);
             }
 
-            var (min, max) = GetOwnDataRange(MainChart, xAxis);
-            if (GetSeries(overlay).Count == 0)
+            var (min, max) = GetOwnDataRange(MainChart, axis);
+            if (SeriesOf(overlay).IsEmpty)
             {
                 return (min, max);
             }
 
-            var (overlayMin, overlayMax) = GetOwnDataRange(overlay, xAxis);
+            var (overlayMin, overlayMax) = GetOwnDataRange(overlay, axis);
             return (min - overlayMin < 0 ? min : overlayMin, max - overlayMax > 0 ? max : overlayMax);
         }
 
-        return GetOwnDataRange(chart, xAxis);
-    }
-
-    private (double Minimum, double Maximum) GetOwnDataRange(Chart chart, bool xAxis)
-    {
-        bool scatter = chart.Type == ChartType.Scatter;
-        var scale = xAxis ? chart.XScale ?? chart.ValueScale : chart.ValueScale;
-        bool log = scale.IsLogarithmic;
-        double empty = log ? 1 : 0;
-        bool stacked = !scatter && chart.IsStacked;
-        if (stacked && chart.IsPercent)
-        {
-            return (empty, 100);
-        }
-
-        var series = GetSeries(chart);
-        double min = double.PositiveInfinity, max = double.NegativeInfinity;
-        void Add(double value)
-        {
-            if (log && value <= 0)
-            {
-                return;
-            }
-
-            min = Math.Min(min, value);
-            max = Math.Max(max, value);
-        }
-
-        if (stacked)
-        {
-            int points = series.Count == 0 ? 0 : series.Max(s => s.Values.Count);
-            for (int i = 0; i < points; i++)
-            {
-                double total = 0;
-                foreach (var s in series)
-                {
-                    if (i < s.Values.Count)
-                    {
-                        total += Math.Abs(s.Values[i].ToDouble());
-                    }
-                }
-
-                Add(total);
-            }
-        }
-        else
-        {
-            foreach (var s in series)
-            {
-                for (int i = 0; i < s.Values.Count; i++)
-                {
-                    Add(!xAxis ? s.Values[i].ToDouble()
-                        : s.SeriesType != 3 && i < s.CategoryValues.Count ? s.CategoryValues[i].ToDouble() : i + 1);
-                }
-            }
-        }
-
-        if (min > max)
-        {
-            return (empty, empty);
-        }
-
-        return (stacked ? empty : min, max);
+        return GetOwnDataRange(chart, axis);
     }
 
     /// <summary>
-    /// Sets the automatic fields of a chart's axis scale as Excel 1.00 does when it draws the chart, from the data
-    /// (<see cref="GetDataRange"/>) and how many tick labels fit along the axis
-    /// (<see cref="ChartScale.GetLabelSpaces"/>). Excel leaves the scale of a pie chart, which has no axes, and of a
-    /// chart with no series as it is. Excel works out whether the overlay shares the scales first
-    /// (<see cref="UpdateSharedScales"/>); <see cref="UpdateAutomaticScales(int)"/> does both.
+    /// Gets how many tick labels Excel 1.00 reckons fit along an axis of a chart it has drawn (<c>37.0a</c>), from the
+    /// layout it saved: the plot area it counts against is the saved one plus the room the axis labels and ticks took
+    /// (<c>37.0e</c>), with category labels wrapped to their slots, all measured in the axes' fonts. Along a vertical
+    /// axis it is that height, less two of the other axis's label heights, over a label height; along a horizontal one
+    /// that width over three widths of 0. A linear scale takes 1 to 10 intervals from it.
     /// </summary>
-    public void UpdateAutomaticScale(Chart chart, int labelSpaces, bool xAxis = false)
+    /// <param name="chart">The main chart or the overlay.</param>
+    /// <param name="fonts">The System's fonts, in which Excel measures the labels.</param>
+    /// <param name="axis">The value axis, or a scatter chart's category (X) axis.</param>
+    public int GetLabelSpaces(Chart chart, Rendering.MacFontSet fonts, ChartAxisKind axis = ChartAxisKind.Value)
+        => ChartLabelLayout.GetLabelSpaces(this, chart, fonts, axis == ChartAxisKind.Category);
+
+    /// <summary>
+    /// Gets the size, in twips, of the box Excel 1.00 lays out for an axis's largest tick label (<c>37.09</c>): its
+    /// lines of text and widest line with a pixel of margin all round. Number labels run from the scale's minimum to its
+    /// maximum in major units, in General, on one line each. Category labels wrap to a category's share of the plot
+    /// area's width (a third of the chart's width in a bar chart): a word at a time, a word running to the next space
+    /// or hyphen, and a word too wide for a line breaking between characters. A hidden axis, or one without labels,
+    /// has none.
+    /// </summary>
+    /// <param name="chart">The main chart or the overlay.</param>
+    /// <param name="fonts">The System's fonts, in which Excel measures the labels.</param>
+    /// <param name="axis">The value axis, or the category axis (a scatter chart's X axis).</param>
+    public (int Height, int Width) GetTickLabelSize(Chart chart, Rendering.MacFontSet fonts, ChartAxisKind axis = ChartAxisKind.Value)
+        => ChartLabelLayout.GetTickLabelSize(this, chart, fonts, axis == ChartAxisKind.Category);
+
+    /// <summary>
+    /// Works out every automatic scale field of the document's charts as Excel 1.00 does when it draws them in their
+    /// saved windows: first whether the overlay shares the main chart's scales (<c>37.34</c>), then each value axis and
+    /// scatter X axis from its data (<see cref="GetDataRange"/>) and the tick labels that fit along it
+    /// (<see cref="GetLabelSpaces"/>). Fixed fields stay as they are. A pie chart, which has no axes, and a chart with
+    /// no series keep their scales.
+    /// </summary>
+    /// <param name="fonts">The System's fonts, in which Excel measures the labels.</param>
+    public void UpdateAutomaticScales(Rendering.MacFontSet fonts)
     {
-        if (chart.Type == ChartType.Pie || GetSeries(chart).Count == 0)
+        ArgumentNullException.ThrowIfNull(fonts);
+        UpdateSharedScales();
+        foreach (var chart in Charts)
         {
-            return;
+            if (HasScales(chart))
+            {
+                // Both counts come from the saved layout, before either scale changes.
+                int value = GetLabelSpaces(chart, fonts);
+                int category = chart.XScale is null ? 0 : GetLabelSpaces(chart, fonts, ChartAxisKind.Category);
+                UpdateScale(chart, ChartAxisKind.Value, value);
+                if (chart.XScale is not null)
+                {
+                    UpdateScale(chart, ChartAxisKind.Category, category);
+                }
+            }
         }
+    }
 
-        var scale = xAxis ? chart.XScale ?? throw new InvalidOperationException("Only a scatter chart has an X-axis scale.") : chart.ValueScale;
-        var (min, max) = GetDataRange(chart, xAxis);
+    /// <summary>
+    /// Works out every automatic scale field of the document's charts as <see cref="UpdateAutomaticScales(Rendering.MacFontSet)"/>
+    /// does, with the same number of tick labels fitting along every axis: 10 or more gives a linear scale up to 10
+    /// intervals, as Excel draws a chart in a window of its usual size.
+    /// </summary>
+    public void UpdateAutomaticScales(int labelSpaces = 10)
+    {
+        UpdateSharedScales();
+        foreach (var chart in Charts)
+        {
+            if (HasScales(chart))
+            {
+                UpdateScale(chart, ChartAxisKind.Value, labelSpaces);
+                if (chart.XScale is not null)
+                {
+                    UpdateScale(chart, ChartAxisKind.Category, labelSpaces);
+                }
+            }
+        }
+    }
 
-        // On a shared axis, the scale is a scatter chart's only when both charts are scatter charts.
+    private bool HasScales(Chart chart) => chart.Type != ChartType.Pie && !SeriesOf(chart).IsEmpty;
+
+    private static bool Shares(Chart overlay, ChartAxisKind axis)
+        => axis == ChartAxisKind.Category ? overlay.SharesXAxisScale : overlay.SharesValueAxisScale;
+
+    // 37.0a for one axis. On a shared axis, the scale is a scatter chart's only when both charts are scatter charts.
+    private void UpdateScale(Chart chart, ChartAxisKind axis, int labelSpaces)
+    {
+        var scale = axis == ChartAxisKind.Category ? chart.XScale! : chart.ValueScale;
+        var (min, max) = GetDataRange(chart, axis);
         bool scatter = chart.Type == ChartType.Scatter;
-        if (OverlayChart is { } overlay && (xAxis ? overlay.SharesXAxisScale : overlay.SharesValueAxisScale))
+        if (OverlayChart is { } overlay && Shares(overlay, axis))
         {
             scatter &= MainChart.Type == ChartType.Scatter && overlay.Type == ChartType.Scatter;
         }
@@ -579,17 +591,14 @@ public sealed class ChartDocument
         scale.SetAutomaticValues(min, max, labelSpaces, scatter);
     }
 
-    /// <summary>
-    /// Works out the overlay's shared-scale flags as Excel 1.00 does each time it draws a chart with an overlay
-    /// (<c>37.34</c>), when both charts have series: the value axis is shared when either chart's value axis is hidden,
-    /// neither chart is a pie, and both are bars or neither, and 100% or neither; the X (category) axis when both are
-    /// scatter charts, or when either chart's category axis is hidden, neither is a pie or a scatter chart, and both
-    /// are bars or neither. The chart whose axis is hidden takes the other's logarithmic and reverse-order settings for it, and
-    /// on a shared category axis the overlay takes the main chart's crossing between categories.
-    /// </summary>
-    public void UpdateSharedScales()
+    // 37.34: with an overlay and series in both charts, whether the overlay shares each axis. The value axis is shared
+    // when either chart's value axis is hidden, neither is a pie, and both are bars or neither, and 100% or neither;
+    // the category axis when both are scatter charts, or when either's category axis is hidden, neither is a pie or a
+    // scatter chart, and both are bars or neither. The chart whose axis is hidden takes the other's logarithmic and
+    // reverse-order settings, and on a shared category axis the overlay takes the main chart's crossing.
+    private void UpdateSharedScales()
     {
-        if (OverlayChart is not { } overlay || GetSeries(MainChart).Count == 0 || GetSeries(overlay).Count == 0)
+        if (OverlayChart is not { } overlay || SeriesOf(MainChart).IsEmpty || SeriesOf(overlay).IsEmpty)
         {
             return;
         }
@@ -633,57 +642,67 @@ public sealed class ChartDocument
         }
     }
 
-    /// <summary>
-    /// Works out every automatic scale field of the document's charts as Excel 1.00 does when it draws them: the
-    /// shared-scale flags (<see cref="UpdateSharedScales"/>), then each chart's value axis and a scatter chart's X
-    /// axis (<see cref="UpdateAutomaticScale"/>).
-    /// </summary>
-    public void UpdateAutomaticScales(int labelSpaces)
+    // 37.16 for one chart.
+    private (double Minimum, double Maximum) GetOwnDataRange(Chart chart, ChartAxisKind axis)
     {
-        UpdateSharedScales();
-        foreach (var chart in Charts)
+        bool scatter = chart.Type == ChartType.Scatter;
+        bool category = axis == ChartAxisKind.Category;
+        var scale = category ? chart.XScale ?? chart.ValueScale : chart.ValueScale;
+        bool log = scale.IsLogarithmic;
+        double empty = log ? 1 : 0;
+        bool stacked = !scatter && chart.IsStacked;
+        if (stacked && chart.IsPercent)
         {
-            UpdateAutomaticScale(chart, labelSpaces);
-            if (chart.XScale is not null)
+            return (empty, 100);
+        }
+
+        var series = SeriesOf(chart);
+        double min = double.PositiveInfinity, max = double.NegativeInfinity;
+        if (stacked)
+        {
+            int points = 0;
+            foreach (var s in series)
             {
-                UpdateAutomaticScale(chart, labelSpaces, xAxis: true);
+                points = Math.Max(points, s.Values.Count);
+            }
+
+            for (int i = 0; i < points; i++)
+            {
+                double total = 0;
+                foreach (var s in series)
+                {
+                    if (i < s.Values.Count)
+                    {
+                        total += Math.Abs(s.Values[i].ToDouble());
+                    }
+                }
+
+                Add(total, ref min, ref max);
             }
         }
-    }
-
-    /// <summary>
-    /// Gets how many tick labels Excel 1.00 reckons fit along an axis of a chart Excel has drawn, from the layout it
-    /// saved (<c>37.0a</c>): the plot area it counts against is the saved one plus the room its axis labels and ticks
-    /// took (<c>37.0e</c>), measured in the axes' fonts. Category labels are taken on one line each.
-    /// </summary>
-    /// <param name="chart">The main chart or the overlay.</param>
-    /// <param name="fonts">The System's fonts, which Excel measures the labels in.</param>
-    /// <param name="xAxis">The X axis of a scatter chart instead of the value axis.</param>
-    public int GetLabelSpaces(Chart chart, Rendering.MacFontSet fonts, bool xAxis = false)
-        => ChartLabelLayout.GetLabelSpaces(this, chart, fonts, xAxis);
-
-    /// <summary>
-    /// Works out every automatic scale field of the document's charts as Excel 1.00 does when it draws them in their
-    /// saved windows, with the number of tick labels that fit along each axis (<see cref="GetLabelSpaces"/>).
-    /// </summary>
-    public void UpdateAutomaticScales(Rendering.MacFontSet fonts)
-    {
-        UpdateSharedScales();
-        foreach (var chart in Charts)
+        else
         {
-            if (chart.Type == ChartType.Pie || GetSeries(chart).Count == 0)
+            foreach (var s in series)
             {
-                continue;
+                for (int i = 0; i < s.Values.Count; i++)
+                {
+                    Add(!category ? s.Values[i].ToDouble()
+                        : s.SeriesType != 3 && i < s.CategoryValues.Count ? s.CategoryValues[i].ToDouble() : i + 1, ref min, ref max);
+                }
+            }
+        }
+
+        return min > max ? (empty, empty) : (stacked ? empty : min, max);
+
+        void Add(double value, ref double min, ref double max)
+        {
+            if (log && value <= 0)
+            {
+                return;
             }
 
-            // Both counts come from the saved layout, before either scale changes.
-            int valueSpaces = GetLabelSpaces(chart, fonts);
-            int xSpaces = chart.XScale is null ? 0 : GetLabelSpaces(chart, fonts, xAxis: true);
-            UpdateAutomaticScale(chart, valueSpaces);
-            if (chart.XScale is not null)
-            {
-                UpdateAutomaticScale(chart, xSpaces, xAxis: true);
-            }
+            min = Math.Min(min, value);
+            max = Math.Max(max, value);
         }
     }
 }
