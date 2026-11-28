@@ -1723,8 +1723,8 @@ Fonts, line formats and area formats appear in several chart records in the same
 | 0 | Not used |
 | 1 | Font |
 | 2 | Size |
-| 3, bit 5 | Bold |
-| 3, bit 4 | Italic |
+| 3, bit 5 | Bold **(inferred)** |
+| 3, bit 4 | Italic **(inferred)** |
 
 In memory bytes 1 and 2 are a Macintosh font number and point size. On disk they are Microsoft Chart codes:
 the font byte is 16 for New York (font 2), 1 for Geneva (font 3) and 32 for anything else, plus `0x40` for
@@ -1733,6 +1733,10 @@ bold and `0x80` for italic; the size byte is an index 0–2, `(size − 9) / 3` 
 with each record) and restores them on load when the version has bit 2 set; for other versions it converts the
 codes back. Font number 0 is the System font and 1 the application font, Geneva: charts Excel makes with NEW save
 1 and size 9 (the `Labels` samples), library charts 0 and 0, the System font at 12.
+
+Only `CLOCK.CH` sets the style bits in the samples: its hour labels have font byte `0xA0` and byte 3 `0xD0`, which
+the rules above make italic, but Excel 1.00 draws them bold, not italic
+([Display](Display.md#drawing-a-chart)). So one of the two marks bold in Excel 1.00 **(unknown which)**.
 
 **Line format** (4 bytes), for axis lines, gridlines, drop lines, hi-lo lines:
 
@@ -2349,6 +2353,8 @@ recalculate the sheet when it opens it (§6; five 1.00 samples and seven 1.5 sam
 None of these affects reading the samples or writing valid files.
 
 * Which build saved Microsoft's version-18 `SIMUL EQUATIONS`, whose version rule differs from the released 1.5's (§2.1).
+* Which style bits of a chart font descriptor mean bold and italic: `CLOCK.CH`'s labels are drawn bold with the
+  bits the font codes give as italic (§16.4).
 
 ---
 

@@ -452,7 +452,7 @@ slope truncated (the Mac Plus ROM's DrawLine). Excel moves to a point and draws 
 * **Gridlines** (`3a.08`, `3a.0f`) cross the plot area in their pattern, before the axes are drawn: the value
   axis's minor then major, then the category axis's. Minor gridlines on a logarithmic scale fall at 2 to 9 times
   each power of ten.
-* **The order**: gridlines, axes and ticks, then the series, then the tick labels, the legend and the text objects.
+* **The order**: the chart and plot areas, gridlines, axes and ticks, then the series, then the tick labels, the legend and the text objects.
   A tick label erases its box first, as a data label does (below), so a marker or column under a label is cut
   away (`Draw Log Point Below Axis`, `Draw Labels Column Negative`) **(inferred: the samples show it)**. The main chart is drawn first and an overlay over it.
 * **A line chart's series** (`53.03`) joins its points with segments that each start half a pen from one point and
@@ -497,6 +497,37 @@ clockwise from 12 o'clock. A radius runs from the centre to the circle's edge, a
 plus the side times Excel's sine of the angle (a table of round(32767 × sine) for each whole degree, `56.06`), and
 both ends are moved a pixel by the pen according to the radius's quadrant (`56.05`).
 
+**Drop lines and hi-lo lines** are clipped to the plot area widened by 4 pixels each side (`3c.06`). A drop line
+(`3c.04`) runs from half a pen off a point to the category axis, its length truncated to pixels, and none is drawn
+on the category axis or where the value axis stands (`3c.05`). A line chart draws each series' drop lines as it
+draws its lines, an area chart once every area is drawn, from the top series' points. Hi-lo lines (`53.01`) run, at
+each category, from half a pen off the lowest point up to the highest, after the lines and before the markers. A
+column or area chart with drop lines starts its automatic patterns 2 on, or 4 on when the drop lines are 50% grey
+(`3c.03`).
+
+**The chart and plot areas** (`31.03`, `31.07`–`31.09`) are drawn first, the chart area only for the main chart.
+Each is its box mapped as a rectangle (`38.04`): its lower left corner mapped as a point, its width and height plus
+19 twips mapped as lengths. A shadow (spec §16.5) is the rectangle moved a fortieth of the chart area's smaller
+side down and right, in black; then the box is filled with its background, white under a shadow, and framed a
+pixel inside its right and bottom edges with its border's pattern. An area with no border, background or shadow
+draws nothing.
+
+**Text objects** (`33.1b`): an unbordered object erases its box as a data label does (below); a bordered one moves
+its text in by the border's pen and narrows its room by twice the pen. Each line is aligned a pixel inside: left,
+right, or centred at (room + 1 − width) / 2. Free text is aligned up and down in its room, the box's height less a
+pixel and twice the pen (`33.03`): at the top, at the foot, or centred at (room − text height + 1) / 2. Vertical
+text stacks its characters a line apart in a column an M wide (`33.09`), the first baseline two pixels and an
+ascent below the top. The renderer draws a text object bold when bit 4 (`0x10`) of its font descriptor's byte 3 is set (spec §16.4),
+as `CLOCK.CH`'s hour labels are, though the spec's codes make them italic **(inferred: the capture shows bold)**.
+
+**Arrows** (`52.00`–`52.04`) are text objects (spec §16.7) drawn from the tail, the point of the box nearest the
+tip, to the tip, both mapped as points. A head's barbs stand (length + 1) × 100 twips back along the arrow and
+(width + 1) × 50 twips either side, mapped as lengths and turned onto the arrow by its direction over its length
+in pixels, an integer square root found by Newton's method from the larger side (`52.02`). The shaft runs to the
+middle of the barbs under a filled head and to the tip otherwise; a filled head is the triangle of the tip and the
+barbs filled with the arrow's pattern, an open one two lines from the barbs to the tip. Every line is moved half
+the shaft's weight in pixels left and down.
+
 **The legend** (`57.00`) lays its entries out as the layout does (above): stacked a spacing apart down from the
 top of its box on the right or in the corner, or across in columns as wide as the widest entry and the spacing.
 An entry's box starts a spacing in from the legend's; its key fills the first half of the key's width (the
@@ -532,6 +563,8 @@ Drawn this way, all 64 chart windows captured from Excel 1.00's screen match it 
 frame included: line, column, bar, area, scatter, logarithmic and pie charts, stacked and 100%, with overlays,
 exploded slices, legends in every position, data labels, titles, axis titles, Geneva 9 labels and windows of a
 dozen sizes, among them charts Excel made itself from a sheet (`ChartRenderer`, `tests/Data/Screens/charts.txt`).
+So do charts with drop lines, hi-lo lines, free text and a bordered, shadowed plot area, and `CLOCK.CH`'s
+arrows; five charts of other arrows still differ by 16 to 230 pixels, mostly a pixel along parts of a shaft.
 
 ## Open questions
 
@@ -540,6 +573,7 @@ dozen sizes, among them charts Excel made itself from a sheet (`ChartRenderer`, 
 * Where Excel 1.03 and 1.5 lay a chart out differently from 1.00: a pixel more for 1.03's value labels of fractions,
   its scatter X labels, and 1.5's automatic titles and axis titles (`Area Drop Lines`, `Scatter`, `BREAK CHART`,
   `Chart 102 Categories`).
-* How Excel draws what no capture has yet: drop and hi-lo lines, arrows, free text, stacked columns' and lines'
-  data labels, minor ticks, thicker lines and borders, shadows, borders and backgrounds of the chart area and
-  legend, and charts in Excel 1.03 and 1.5.
+* How Excel draws what no capture has yet: stacked columns' and lines' data labels, minor ticks, thicker lines and
+  borders, the legend's border and background, and charts in Excel 1.03 and 1.5.
+* Where an arrow's shaft steps a pixel away from the line the renderer draws, and how the wider and longer heads
+  are rounded.
