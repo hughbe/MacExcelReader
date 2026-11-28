@@ -507,7 +507,16 @@ public sealed class ChartDocument
     /// <param name="fonts">The System's fonts, in which Excel measures the labels.</param>
     /// <param name="axis">The value axis, or a scatter chart's category (X) axis.</param>
     public int GetLabelSpaces(Chart chart, Rendering.MacFontSet fonts, ChartAxisKind axis = ChartAxisKind.Value)
-        => ChartLabelLayout.GetLabelSpaces(this, chart, fonts, axis == ChartAxisKind.Category);
+        => new ChartLayoutEngine(this, chart, fonts).GetLabelSpacesFromSaved(axis == ChartAxisKind.Category);
+
+    /// <summary>
+    /// Lays a chart out as Excel 1.00 does when it draws it, from its chart area (or, for a chart Excel has not
+    /// drawn, the default 15/16 of the drawing's width by 23/25 of its height): the border, the title, the tick
+    /// length, how many tick labels fit, and the plot area left when the labels have taken their room. The labels are
+    /// measured from the scales as they are; <see cref="UpdateAutomaticScales(Rendering.MacFontSet)"/> works them out.
+    /// Legends and axis titles are not covered.
+    /// </summary>
+    public ChartLayout LayOut(Chart chart, Rendering.MacFontSet fonts) => new ChartLayoutEngine(this, chart, fonts).LayOut();
 
     /// <summary>
     /// Gets the size, in twips, of the box Excel 1.00 lays out for an axis's largest tick label (<c>37.09</c>): its
@@ -521,11 +530,11 @@ public sealed class ChartDocument
     /// <param name="fonts">The System's fonts, in which Excel measures the labels.</param>
     /// <param name="axis">The value axis, or the category axis (a scatter chart's X axis).</param>
     public (int Height, int Width) GetTickLabelSize(Chart chart, Rendering.MacFontSet fonts, ChartAxisKind axis = ChartAxisKind.Value)
-        => ChartLabelLayout.GetTickLabelSize(this, chart, fonts, axis == ChartAxisKind.Category);
+        => new ChartLayoutEngine(this, chart, fonts).GetTickLabelSize(axis == ChartAxisKind.Category);
 
     /// <summary>
     /// Works out every automatic scale field of the document's charts as Excel 1.00 does when it draws them in their
-    /// saved windows: first whether the overlay shares the main chart's scales (<c>37.34</c>), then each value axis and
+    /// windows (a chart Excel has not drawn, at the default layout of <see cref="LayOut"/>): first whether the overlay shares the main chart's scales (<c>37.34</c>), then each value axis and
     /// scatter X axis from its data (<see cref="GetDataRange"/>) and the tick labels that fit along it
     /// (<see cref="GetLabelSpaces"/>). Fixed fields stay as they are. A pie chart, which has no axes, and a chart with
     /// no series keep their scales.
@@ -539,9 +548,20 @@ public sealed class ChartDocument
         {
             if (HasScales(chart))
             {
-                // Both counts come from the saved layout, before either scale changes.
-                int value = GetLabelSpaces(chart, fonts);
-                int category = chart.XScale is null ? 0 : GetLabelSpaces(chart, fonts, ChartAxisKind.Category);
+                // Both counts come from the saved layout, before either scale changes; a chart Excel has not drawn is
+                // laid out afresh, which the counts do not depend on the scales for.
+                int value, category;
+                if (chart.PlotArea.Box.Height > 0 && chart.PlotArea.Box.Width > 0)
+                {
+                    value = GetLabelSpaces(chart, fonts);
+                    category = chart.XScale is null ? 0 : GetLabelSpaces(chart, fonts, ChartAxisKind.Category);
+                }
+                else
+                {
+                    var layout = LayOut(chart, fonts);
+                    (value, category) = (layout.ValueLabelSpaces, layout.CategoryLabelSpaces);
+                }
+
                 UpdateScale(chart, ChartAxisKind.Value, value);
                 if (chart.XScale is not null)
                 {

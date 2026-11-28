@@ -1864,6 +1864,71 @@ public class ExperimentTests
         Assert.Equal(expected, document.GetLabelSpaces(document.MainChart, fonts));
     }
 
+    public static TheoryData<string> PlainCharts() => new(AllSamples().Where(path => File.ReadAllBytes(SampleFile(path))[0] == 0x01).Where(path =>
+    {
+        var document = ChartDocument.Load(SampleFile(path));
+        var chart = document.MainChart;
+        return chart.Type != ChartType.Pie && document.Series.Count > 0
+            && !path.StartsWith("Excel 1.5", StringComparison.Ordinal) && document.OverlayChart is null && !chart.HasLegend
+            && !chart.Texts.Any(t => t.Kind is ChartTextKind.ValueAxisTitle or ChartTextKind.CategoryAxisTitle);
+    }));
+
+    [Theory]
+    [MemberData(nameof(PlainCharts))]
+    public void LayOut_IsExcels(string path)
+    {
+        // Needs Excel's fonts (MACEXCEL_SYSTEM). Laid out from its chart area as Excel 1.00 draws it (37.03-37.10):
+        // the border, the title, the tick length, and the plot area left when the labels have taken their room come
+        // out as Excel saved them, for every chart sample without a legend, axis titles or an overlay.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var document = ChartDocument.Load(SampleFile(path));
+        var chart = document.MainChart;
+        var layout = document.LayOut(chart, fonts);
+        Assert.Equal(chart.PlotArea.Box, layout.PlotArea);
+        Assert.Equal(chart.ValueAxis.TickLength, layout.TickLength);
+        Assert.Equal(chart.ChartArea.Box, layout.ChartArea);
+    }
+
+    [Theory]
+    [InlineData("Library Line")]
+    [InlineData("Library Scatter")]
+    [InlineData("Library Column")]
+    public void LayOut_OfANewChart_IsExcels(string name)
+    {
+        // A chart the library builds has no layout until Excel draws it. Laid out from the default chart area, 15/16
+        // of the drawing's width by 23/25 of its height, it comes out as Excel drew and saved the same chart, and so
+        // do its automatic scales.
+        if (SystemFonts.Value is not { } fonts)
+        {
+            return;
+        }
+
+        var saved = ChartDocument.Load(SamplePath(name));
+        var built = ChartDocument.Create(saved.MainChart.Type);
+        foreach (var series in saved.Series)
+        {
+            built.Series.Add(ChartSeries.Create(series.Name, series.Values.Select(v => v.ToDouble()), series.SourceDocument, series.ValuesReference));
+        }
+
+        foreach (var text in saved.MainChart.Texts)
+        {
+            built.MainChart.Texts.Add(ChartText.Create(text.Kind, text.Text!));
+        }
+
+        built.UpdateAutomaticScales(fonts);
+        var layout = built.LayOut(built.MainChart, fonts);
+        Assert.Equal(saved.MainChart.ChartArea.Box, layout.ChartArea);
+        Assert.Equal(saved.MainChart.DrawingMargins, ((short)layout.TopMargin, (short)layout.LeftMargin));
+        Assert.Equal(saved.MainChart.PlotArea.Box, layout.PlotArea);
+        Assert.Equal(saved.MainChart.ValueAxis.TickLength, layout.TickLength);
+        Assert.Equal(saved.MainChart.ValueScale.MajorUnit, built.MainChart.ValueScale.MajorUnit);
+        Assert.Equal(saved.MainChart.ValueScale.Maximum, built.MainChart.ValueScale.Maximum);
+    }
+
     [Theory]
     [InlineData("Labels Short", 1, 280)]
     [InlineData("Labels Long Word", 2, 520)]

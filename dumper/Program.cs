@@ -754,6 +754,12 @@ sealed class ChartCommand : Command<ChartSettings>
                 table.AddRow("Tick labels (twips)", $"value {Labels(ChartAxisKind.Value)}, category {Labels(ChartAxisKind.Category)}; "
                     + $"{document.GetLabelSpaces(chart, fonts)} fit up the value axis"
                     + (chart.XScale is null ? string.Empty : $", {document.GetLabelSpaces(chart, fonts, ChartAxisKind.Category)} along the X axis"));
+                if (document.GetSeries(chart).Count > 0)
+                {
+                    var layout = document.LayOut(chart, fonts);
+                    table.AddRow("Laid out (twips)", $"chart area {Box(layout.ChartArea)}; plot area {Box(layout.PlotArea)}; tick length {layout.TickLength}; "
+                        + $"{layout.ValueLabelSpaces} labels fit up the value axis (legends and axis titles not covered)");
+                }
             }
 
             table.AddRow("Default series format", PointFormat(chart.DefaultSeriesFormat));

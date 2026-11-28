@@ -441,6 +441,9 @@ var (min, max) = chart.GetDataRange(chart.MainChart);                     // the
 var (height, width) = chart.GetTickLabelSize(chart.MainChart, fonts, ChartAxisKind.Category);   // in twips
 ```
 
+`LayOut` gives the layout Excel draws a chart with (chart area, margins, plot area, tick length and the label
+counts), including for a chart Excel has not drawn; legends and axis titles are not yet covered.
+
 `ChartAxisKind.Category` is a scatter chart's X axis where a method takes an axis. `GetLabelFont` gives an axis's
 font as Excel opens it.
 

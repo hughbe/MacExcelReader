@@ -329,10 +329,16 @@ height for each line more.
 **The room the labels take** (`37.0e`), on each side of the plot area in turn:
 
 * An axis's labels measure as the largest label's box: its lines of text (each the font's ascent, descent and
-  leading) and its widest line, with a pixel of margin all round (`37.09`, `33.1d`). Number labels run from the
-  scale's minimum to its maximum in major units, in General, on one line each. Category labels are the first
+  leading) and its widest line, with a pixel of margin all round (`37.09`, `33.1d`). Category labels are the first
   series' categories, every so many as the category axis says, each wrapped to its slot. A hidden axis, or one
   without labels, takes no room.
+* Number labels (`37.2a`, `37.2c`) are not all measured. Excel formats the scale's minimum and maximum, and when the
+  major unit is not whole the minimum plus a unit and the maximum less one, as General shows them in a cell as wide
+  as the label's slot in pixels (at least four 0s wide: `33.01` calls the cell routine `19.0d`), and lays out the one
+  with the most characters, wrapped to the slot. A horizontal axis shares the plot area's width among its intervals;
+  a vertical one has a quarter of the chart area's width. A logarithmic scale's labels are the powers of ten at its
+  ends; one too large for a number has none. Categories that are numbers are labelled 1 to the number of categories,
+  in slots of at least 210 twips.
 * Along the top and bottom of a column or line chart the category axis's labels lie (a bar chart's value axis);
   along the left and right the value axis's, with 100 twips more.
 * On the side the labels are on (the low side, or the high side when the scale runs in reverse): labels next to
@@ -341,6 +347,10 @@ height for each line more.
 * The other axis's labels overhang the ends: each side takes at least half the other axis's label size, except
   the value axis's labels on a chart whose value axis crosses between categories (and is not a scatter chart).
 * Each side also takes twice the axis's tick length.
+
+`37.08` takes the room off the left and right first, measuring the labels in the provisional plot area's width;
+then it measures again the labels along the top and bottom (a bar chart's value labels, otherwise the category
+labels) in the narrower width, and takes the room off the bottom and top.
 
 The saved plot area is the provisional one less this room, so a chart Excel has drawn gives back the provisional
 plot area and with it *n* (`ChartDocument.GetLabelSpaces`; `GetTickLabelSize` gives the label box). Label counts worked out this way reproduce Excel's
@@ -376,7 +386,36 @@ in the logarithm, and the minimum ⌊log₁₀ |min|⌋: 0.5 to 30 gives −1 to
 is (⌊range⌋ − 1) ÷ (*n* − 1) + 1 in whole numbers, where *n* is not limited to 10. An automatic maximum is then
 the minimum plus the range moved up to a whole number of major units.
 
+## Laying out a chart
+
+When Excel 1.00 draws a chart it lays it out from the outside in (`37.03`), in twips, with vertical coordinates
+running upwards from the chart area's foot (so a box's top field is its lower edge, spec §16.5):
+
+1. **The chart area** fills the drawing less its margins. A chart Excel has not drawn gets 15/16 of the drawing's
+   width and 23/25 of its height, centred: 9075 by 4784 twips in the 9680 by 5200 drawing of a new chart, with
+   margins of 302 and 208. After that Excel scales the saved chart area with the window, so a chart's layout
+   follows its history; the saved one is the one to start from.
+2. **The border and shadow** (`37.04`): a border takes its weight plus two pixels off each side, and a shadow a
+   fortieth of the chart area's smaller side more off the right and bottom **(inferred: no sample has either)**.
+3. **The title** (`37.07`), laid out in four-fifths of the chart area's width, takes its box and 5% of the chart
+   area's height off the top. A chart without a title of its own but with a single named series is titled with the
+   series' name, in Geneva 9 **(inferred)**: library charts lose 280 + 5% at every window size. Excel's own charts
+   made from unnamed series have no title.
+4. **The legend** (`57.03`, `57.04`) and **the axis titles** (`37.05`, `37.06`) take their boxes and a spacing off
+   their sides; these are not yet worked out.
+5. **The tick length** of both axes is the smaller side of what is left, divided by 70.
+6. **The provisional plot area** is what is left: Excel counts the tick labels that fit against it (`37.0a`, below),
+   works out the scales, and takes the labels' room off it (`37.0e`) to leave the plot area.
+
+Each step takes its room off one side (`37.0f`), but never leaves less than a quarter of the chart area's width or
+height; below the plot area the top first moves up as far as the chart area allows. Laid out this way, every chart
+Excel 1.00 saved in the experiments without a legend, axis titles or an overlay comes out with the plot area and
+tick length it saved, 716 charts in all, as do library charts that Excel had not drawn before (`ChartDocument.LayOut`). Excel 1.5's
+automatic titles take a pixel more (`Chart 102 Categories`).
+
 ## Open questions
 
 * How the 64K ROM that Excel 1.00 also ran on draws a font size with no bitmap. Running it needs the 64K ROM and
   MAME's `mac512k`, neither of which this project has, and a 400K boot disk, which the 64K ROM needs.
+* How Excel 1.00 sizes and places a legend and axis titles (`57.00`–`57.04`, `37.05`, `37.06`), and the fonts of
+  Excel's own text objects (spec §16.7).
