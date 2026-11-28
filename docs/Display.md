@@ -398,24 +398,41 @@ running upwards from the chart area's foot (so a box's top field is its lower ed
 2. **The border and shadow** (`37.04`): a border takes its weight plus two pixels off each side, and a shadow a
    fortieth of the chart area's smaller side more off the right and bottom **(inferred: no sample has either)**.
 3. **The title** (`37.07`), laid out in four-fifths of the chart area's width, takes its box and 5% of the chart
-   area's height off the top. A chart without a title of its own but with a single named series is titled with the
+   area's height off the top. A text object's box (`33.1d`) is its lines and widest line with a pixel of margin all
+   round, a pixel more each side for a border; a shadow adds a fortieth of the chart area's smaller side to the
+   room it takes (`38.02`). Its font is the Macintosh number and size at mem 20 and 21 (spec §16.7): Geneva 10 in
+   Excel's own charts, 0 and 0, the System font at 12, in the library's. A chart without a title of its own but with a single named series is titled with the
    series' name, in Geneva 9 **(inferred)**: library charts lose 280 + 5% at every window size. Excel's own charts
    made from unnamed series have no title.
-4. **The legend** (`57.03`, `57.04`) and **the axis titles** (`37.05`, `37.06`) take their boxes and a spacing off
-   their sides; these are not yet worked out.
+4. **The legend** (`57.00`–`57.04`): its entries are the series' names, or a single series' categories (not in an
+   area chart, or with an overlay's series). Each entry is a key, as wide as the legend font's ascent and widest
+   character, and its text, wrapped beside it, with a pixel of margin all round; entries are 80 twips apart (the
+   spacing is (bits 12–10 of the legend word + 2) × 40). A legend on the right or in the corner stacks them, the text
+   wrapped in a third of the chart area's width; at the top or bottom they go in as many columns as fit the chart
+   area's width (the text in a fifth of it, or its share), rows as even as they can be, no more than half the
+   chart area high. A legend of fixed size keeps its saved box. The box and a pixel (20 twips) come off the bottom,
+   the top or the right; a corner legend takes them off the right and the top, unless it is more than half the chart
+   area high, when it goes on the right.
 5. **The tick length** of both axes is the smaller side of what is left, divided by 70.
-6. **The provisional plot area** is what is left: Excel counts the tick labels that fit against it (`37.0a`, below),
+6. **The axis titles** (`37.05`, `37.06`), the category axis's first: a title beside the plot area (the value
+   axis's, or a bar chart's category axis's) is laid out in a fifth of the chart area's width and takes its box's
+   width and 20 twips off the left; one below it, in half the width, takes its box's height and 20 twips off the
+   bottom. Vertical text swaps the widths, and stacks its characters, each a line high, in columns an M wide with an
+   n between them.
+7. **The provisional plot area** is what is left: Excel counts the tick labels that fit against it (`37.0a`, below),
    works out the scales, and takes the labels' room off it (`37.0e`) to leave the plot area.
 
 Each step takes its room off one side (`37.0f`), but never leaves less than a quarter of the chart area's width or
 height; below the plot area the top first moves up as far as the chart area allows. Laid out this way, every chart
-Excel 1.00 saved in the experiments without a legend, axis titles or an overlay comes out with the plot area and
-tick length it saved, 716 charts in all, as do library charts that Excel had not drawn before (`ChartDocument.LayOut`). Excel 1.5's
-automatic titles take a pixel more (`Chart 102 Categories`).
+Excel 1.00 saved without an overlay comes out with the plot area and tick length it saved: 745 charts, with titles,
+legends in every position and axis titles among them, and library charts Excel had not drawn before
+(`ChartDocument.LayOut`). Charts Excel 1.03 and 1.5 saved differ by a pixel or so in places: 1.03's value labels of
+fractions and its scatter X labels, 1.5's automatic titles and automatic axis titles.
 
 ## Open questions
 
 * How the 64K ROM that Excel 1.00 also ran on draws a font size with no bitmap. Running it needs the 64K ROM and
   MAME's `mac512k`, neither of which this project has, and a 400K boot disk, which the 64K ROM needs.
-* How Excel 1.00 sizes and places a legend and axis titles (`57.00`–`57.04`, `37.05`, `37.06`), and the fonts of
-  Excel's own text objects (spec §16.7).
+* Where Excel 1.03 and 1.5 lay a chart out differently from 1.00: a pixel more for 1.03's value labels of fractions,
+  its scatter X labels, and 1.5's automatic titles and axis titles (`Area Drop Lines`, `Scatter`, `BREAK CHART`,
+  `Chart 102 Categories`).

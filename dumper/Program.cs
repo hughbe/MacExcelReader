@@ -758,7 +758,7 @@ sealed class ChartCommand : Command<ChartSettings>
                 {
                     var layout = document.LayOut(chart, fonts);
                     table.AddRow("Laid out (twips)", $"chart area {Box(layout.ChartArea)}; plot area {Box(layout.PlotArea)}; tick length {layout.TickLength}; "
-                        + $"{layout.ValueLabelSpaces} labels fit up the value axis (legends and axis titles not covered)");
+                        + $"{layout.ValueLabelSpaces} labels fit up the value axis");
                 }
             }
 
@@ -1156,6 +1156,18 @@ sealed class NewChartSettings : CommandSettings
     [Description("Hide the overlay's axes, as Excel does when it makes an overlay.")]
     public bool HideOverlayAxes { get; init; }
 
+    [CommandOption("--legend <POSITION>")]
+    [Description("Add a legend, sized automatically: Bottom, Corner, Top or Vertical (right).")]
+    public LegendPosition? Legend { get; init; }
+
+    [CommandOption("--value-title <TEXT>")]
+    [Description("A value-axis title.")]
+    public string? ValueTitle { get; init; }
+
+    [CommandOption("--category-title <TEXT>")]
+    [Description("A category-axis title.")]
+    public string? CategoryTitle { get; init; }
+
     [CommandOption("--axis-font <FONT_SIZE>")]
     [Description("Both axes' tick-label font, as a Macintosh font number and size: 3:9 for Geneva 9.")]
     public string? AxisFont { get; init; }
@@ -1188,6 +1200,23 @@ sealed class NewChartCommand : Command<NewChartSettings>
 
         var scale = document.MainChart.ValueScale;
         scale.IsLogarithmic = settings.Log;
+        if (settings.Legend is { } legend)
+        {
+            document.MainChart.HasLegend = true;
+            document.MainChart.LegendPosition = legend;
+            document.MainChart.LegendArea.AutomaticSize = true;
+        }
+
+        if (settings.ValueTitle is { } valueTitle)
+        {
+            document.MainChart.Texts.Add(ChartText.Create(ChartTextKind.ValueAxisTitle, valueTitle));
+        }
+
+        if (settings.CategoryTitle is { } categoryTitle)
+        {
+            document.MainChart.Texts.Add(ChartText.Create(ChartTextKind.CategoryAxisTitle, categoryTitle));
+        }
+
         if (settings.AxisFont is { } axisFont)
         {
             // The disk's Microsoft Chart codes (spec §16.4), and the real number and size Excel restores from bits 9-2

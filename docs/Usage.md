@@ -442,7 +442,7 @@ var (height, width) = chart.GetTickLabelSize(chart.MainChart, fonts, ChartAxisKi
 ```
 
 `LayOut` gives the layout Excel draws a chart with (chart area, margins, plot area, tick length and the label
-counts), including for a chart Excel has not drawn; legends and axis titles are not yet covered.
+counts), including for a chart Excel has not drawn, with its title, legend and axis titles.
 
 `ChartAxisKind.Category` is a scatter chart's X axis where a method takes an axis. `GetLabelFont` gives an axis's
 font as Excel opens it.

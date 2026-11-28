@@ -1787,6 +1787,7 @@ public class ExperimentTests
         ["Scale Window Geneva 9"] = 6,
         ["Scale Window New York 9"] = 5,
         ["Labels Small Window"] = 7,
+        ["Layout Legend Corner Categories"] = 6,
     };
 
     public static TheoryData<string> AxisCharts() => new(AllSamples()
@@ -1868,9 +1869,8 @@ public class ExperimentTests
     {
         var document = ChartDocument.Load(SampleFile(path));
         var chart = document.MainChart;
-        return chart.Type != ChartType.Pie && document.Series.Count > 0
-            && !path.StartsWith("Excel 1.5", StringComparison.Ordinal) && document.OverlayChart is null && !chart.HasLegend
-            && !chart.Texts.Any(t => t.Kind is ChartTextKind.ValueAxisTitle or ChartTextKind.CategoryAxisTitle);
+        return chart.Type != ChartType.Pie && document.Series.Count > 0 && document.OverlayChart is null
+            && path.StartsWith("Excel 1.00", StringComparison.Ordinal);
     }));
 
     [Theory]
@@ -1878,8 +1878,9 @@ public class ExperimentTests
     public void LayOut_IsExcels(string path)
     {
         // Needs Excel's fonts (MACEXCEL_SYSTEM). Laid out from its chart area as Excel 1.00 draws it (37.03-37.10):
-        // the border, the title, the tick length, and the plot area left when the labels have taken their room come
-        // out as Excel saved them, for every chart sample without a legend, axis titles or an overlay.
+        // the border, the title, the legend, the tick length, the axis titles, and the plot area left when the labels
+        // have taken their room come out as Excel 1.00 saved them, for every chart it saved without an overlay. The
+        // "Layout" samples are library charts with legends in every position and axis titles.
         if (SystemFonts.Value is not { } fonts)
         {
             return;
@@ -1897,6 +1898,10 @@ public class ExperimentTests
     [InlineData("Library Line")]
     [InlineData("Library Scatter")]
     [InlineData("Library Column")]
+    [InlineData("Layout Legend Corner Five")]
+    [InlineData("Layout Legend Categories")]
+    [InlineData("Layout Bar Titles")]
+    [InlineData("Layout Title Legend And Value Title")]
     public void LayOut_OfANewChart_IsExcels(string name)
     {
         // A chart the library builds has no layout until Excel draws it. Laid out from the default chart area, 15/16
@@ -1909,6 +1914,10 @@ public class ExperimentTests
 
         var saved = ChartDocument.Load(SamplePath(name));
         var built = ChartDocument.Create(saved.MainChart.Type);
+        built.MainChart.IsBar = saved.MainChart.IsBar;
+        built.MainChart.HasLegend = saved.MainChart.HasLegend;
+        built.MainChart.LegendPosition = saved.MainChart.LegendPosition;
+        built.MainChart.LegendArea.AutomaticSize = saved.MainChart.HasLegend;
         foreach (var series in saved.Series)
         {
             built.Series.Add(ChartSeries.Create(series.Name, series.Values.Select(v => v.ToDouble()), series.SourceDocument, series.ValuesReference));

@@ -45,6 +45,9 @@ public sealed class MacBitmapFont
     /// <summary>Gets the leading: the pixels the font asks for between lines.</summary>
     public int Leading { get; }
 
+    /// <summary>Gets the widest character's width in pixels (the font's <c>widMax</c>, as <c>GetFontInfo</c> gives it).</summary>
+    public int WidMax { get; private init; }
+
     /// <summary>Gets whether the size came from a bitmap of its own, rather than being scaled from another size.</summary>
     public bool IsReal { get; }
 
@@ -65,7 +68,7 @@ public sealed class MacBitmapFont
         }
 
         int firstChar = Word(resource, 2), lastChar = Word(resource, 4);
-        int kernMax = Word(resource, 8);
+        int widMax = Word(resource, 6), kernMax = Word(resource, 8);
         int rectHeight = Word(resource, 14);
         int owTableOffset = 16 + 2 * (Word(resource, 16) & 0xFFFF);
         int ascent = Word(resource, 18), descent = Word(resource, 20), leading = Word(resource, 22), rowWords = Word(resource, 24);
@@ -83,7 +86,7 @@ public sealed class MacBitmapFont
             throw new ExcelFormatException("A FONT resource's tables run past its end.");
         }
 
-        var font = new MacBitmapFont(family, size, ascent, descent, leading, rectHeight, new ulong[256 * rectHeight], isReal: true);
+        var font = new MacBitmapFont(family, size, ascent, descent, leading, rectHeight, new ulong[256 * rectHeight], isReal: true) { WidMax = widMax };
         var strike = resource.Slice(strikeOffset, rowBytes * rectHeight);
         int missing = glyphs - 1;
         for (int c = 0; c < 256; c++)
@@ -145,6 +148,7 @@ public sealed class MacBitmapFont
         return new MacBitmapFont(Family, size, MacFontScale.Round(Ascent, numer), MacFontScale.Round(Descent, numer),
             MacFontScale.Round(Leading, numer), Height, _rows, isReal: false)
         {
+            WidMax = MacFontScale.Round(WidMax, numer),
             _source = this,
             _numer = numer,
         };

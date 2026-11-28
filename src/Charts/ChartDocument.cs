@@ -512,9 +512,9 @@ public sealed class ChartDocument
     /// <summary>
     /// Lays a chart out as Excel 1.00 does when it draws it, from its chart area (or, for a chart Excel has not
     /// drawn, the default 15/16 of the drawing's width by 23/25 of its height): the border, the title, the tick
-    /// length, how many tick labels fit, and the plot area left when the labels have taken their room. The labels are
-    /// measured from the scales as they are; <see cref="UpdateAutomaticScales(Rendering.MacFontSet)"/> works them out.
-    /// Legends and axis titles are not covered.
+    /// length, the legend, the axis titles, how many tick labels fit, and the plot area left when the labels have
+    /// taken their room. The labels are measured from the scales as they are;
+    /// <see cref="UpdateAutomaticScales(Rendering.MacFontSet)"/> works them out. An overlay's own layout is not covered.
     /// </summary>
     public ChartLayout LayOut(Chart chart, Rendering.MacFontSet fonts) => new ChartLayoutEngine(this, chart, fonts).LayOut();
 

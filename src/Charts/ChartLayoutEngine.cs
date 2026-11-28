@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using MacExcelReader.Rendering;
 
 namespace MacExcelReader.Charts;
@@ -58,7 +59,9 @@ internal sealed class ChartLayoutEngine
         var rect = new Rect(area.Height, 0, 0, area.Width);
         Border(ref rect, area);
         Title(ref rect, area);
+        Legend(ref rect, area);
         int tick = Math.Min(rect.Height, rect.Width) / 70;
+        AxisTitles(ref rect, area);
         var provisional = rect;
         int valueSpaces = Count(category: false, provisional.Height, provisional.Width);
         int categorySpaces = Count(category: true, provisional.Height, provisional.Width);
@@ -201,9 +204,185 @@ internal sealed class ChartLayoutEngine
             font = title is null ? GetFont(3, 9, bold: false) : GetTextFont(title);
         }
 
-        var (lines, _) = Wrap(content, area.Width * 4 / 5 / TwipsPerPixel, font);
-        int box = (lines * font.LineHeight + 2) * TwipsPerPixel;
+        int box = title is null
+            ? (Wrap(content, area.Width * 4 / 5 / TwipsPerPixel, font).Lines * font.LineHeight + 2) * TwipsPerPixel
+            : TextBox(title, content, area.Width * 4 / 5, font).Height + Shadow(title.Area, area);
         Shrink(ref rect, area, box + area.Height * 5 / 100, vertical: true, highSide: true);
+    }
+
+    // 57.03, 57.04: the legend. Its entries are the series' names, or a single series' categories (not in an area chart
+    // or with an overlay's series); each is a key, as wide as the font's ascent and widest character, and the text,
+    // with a pixel of margin all round. Spaced 80 twips apart, a vertical legend (right, or in the corner) stacks them;
+    // otherwise they go in as many columns as fit the chart area's width, rows as even as they can be, no more than
+    // half the chart area high. The legend's box and 20 twips come off the bottom, the top, the right, or in the corner
+    // the right and the top; a corner legend more than half the chart area high goes on the right.
+    private void Legend(ref Rect rect, ChartBox area)
+    {
+        if (!_chart.HasLegend || !HasAnySeries())
+        {
+            return;
+        }
+
+        var position = _chart.LegendPosition;
+        int height, width;
+        var saved = _chart.LegendArea.Box;
+        if (!_chart.LegendArea.AutomaticSize && saved.Height > 0)
+        {
+            (height, width) = (saved.Height, saved.Width);
+        }
+        else
+        {
+            (height, width) = LegendSize(area, position is LegendPosition.Vertical or LegendPosition.Corner);
+        }
+
+        int down = height + TwipsPerPixel, across = width + TwipsPerPixel;
+        switch (position)
+        {
+            case LegendPosition.Bottom:
+                Shrink(ref rect, area, down, vertical: true, highSide: false);
+                break;
+            case LegendPosition.Top:
+                Shrink(ref rect, area, down, vertical: true, highSide: true);
+                break;
+            case LegendPosition.Corner when area.Height / 2 > height:
+                Shrink(ref rect, area, across, vertical: false, highSide: true);
+                Shrink(ref rect, area, down, vertical: true, highSide: true);
+                break;
+            default:
+                Shrink(ref rect, area, across, vertical: false, highSide: true);
+                break;
+        }
+    }
+
+    private (int Height, int Width) LegendSize(ChartBox area, bool stacked)
+    {
+        var font = GetLegendFont();
+        int spacing = (((BinaryPrimitives.ReadUInt16BigEndian(_chart.Record.AsSpan(154)) >> 10) & 7) + 2) * 40;
+        int key = font.Font.Ascent + font.Font.WidMax;
+        bool categories = LegendShowsCategories();
+        int entries = categories ? CategoryCount() : CountLegendSeries();
+        int limit = stacked ? area.Width / 3 : Math.Max(area.Width / 5, (area.Width - spacing) / Math.Max(1, entries) - spacing);
+
+        // Each entry's box (57.01): the text wrapped beside its key, a pixel of margin all round.
+        int total = 0, tallest = 0, widest = 0;
+        Span<char> number = stackalloc char[ExcelValueFormatter.GeneralSize(20)];
+        for (int i = 0; i < entries; i++)
+        {
+            scoped ReadOnlySpan<char> text = categories ? CategoryLabel(i, number) : LegendSeriesName(i);
+            var (lines, textWidth) = Wrap(text, limit / TwipsPerPixel - key, font);
+            int boxHeight = ((lines == 0 ? font.Font.Ascent : lines * font.LineHeight) + 2) * TwipsPerPixel;
+            int boxWidth = (textWidth + key + 2) * TwipsPerPixel;
+            total = Math.Min(total + spacing + boxHeight, short.MaxValue);
+            tallest = Math.Max(tallest, boxHeight);
+            widest = Math.Max(widest, boxWidth);
+        }
+
+        if (stacked)
+        {
+            return (Math.Min(total + spacing, short.MaxValue), widest + 2 * spacing);
+        }
+
+        int columns = Math.Clamp((area.Width - spacing) / (spacing + widest), 1, Math.Max(1, entries));
+        int rows = (entries - 1) / columns + 1;
+        if (columns > 1 && (entries - 1) / (columns - 1) + 1 == rows)
+        {
+            columns--;
+        }
+
+        return (Math.Min(rows * (spacing + tallest) + spacing, area.Height / 2), columns * (spacing + widest) + spacing);
+    }
+
+    // A single series' legend lists its categories, unless the chart is an area chart or an overlay has series.
+    private bool LegendShowsCategories()
+        => _document.SeriesOf(_document.MainChart).Length == 1 && _document.MainChart.Type != ChartType.Area
+            && (_document.OverlayChart is null || _document.SeriesOf(_document.OverlayChart).IsEmpty);
+
+    private bool HasAnySeries()
+    {
+        foreach (var chart in _document.Charts)
+        {
+            if (!_document.SeriesOf(chart).IsEmpty)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private int CountLegendSeries()
+    {
+        int count = 0;
+        foreach (var chart in _document.Charts)
+        {
+            count += _document.SeriesOf(chart).Length;
+        }
+
+        return count;
+    }
+
+    // The legend lists the main chart's series, then the overlay's.
+    private ReadOnlySpan<char> LegendSeriesName(int index)
+    {
+        var main = _document.SeriesOf(_document.MainChart);
+        if (index < main.Length)
+        {
+            return main[index].Name;
+        }
+
+        return _document.OverlayChart is { } overlay ? _document.SeriesOf(overlay)[index - main.Length].Name : default;
+    }
+
+    // A category's label: its text, or its number in General.
+    private ReadOnlySpan<char> CategoryLabel(int index, Span<char> number)
+    {
+        var first = _document.SeriesOf(_document.MainChart)[0];
+        if (first.SeriesType == 3)
+        {
+            return index < first.CategoryTexts.Count ? first.CategoryTexts[index] : default;
+        }
+
+        double value = index < first.CategoryValues.Count ? first.CategoryValues[index].ToDouble() : index + 1;
+        return number[..ExcelValueFormatter.FormatGeneral(value, 20, number)];
+    }
+
+    // 37.05, 37.06: the axis titles, the category axis's first. A title beside the plot area (the value axis's,
+    // or a bar chart's category axis's) is laid out a fifth of the chart area wide and takes its width and 20
+    // twips off the left; one below it, half the chart area wide, takes its height and 20 twips off the bottom.
+    // Vertical text swaps the widths.
+    private void AxisTitles(ref Rect rect, ChartBox area)
+    {
+        AxisTitle(ref rect, area, ChartTextKind.CategoryAxisTitle, beside: _chart.IsBar);
+        AxisTitle(ref rect, area, ChartTextKind.ValueAxisTitle, beside: !_chart.IsBar);
+    }
+
+    private void AxisTitle(ref Rect rect, ChartBox area, ChartTextKind kind, bool beside)
+    {
+        ChartText? title = null;
+        foreach (var text in _chart.Texts)
+        {
+            if (text.Kind == kind)
+            {
+                title = text;
+                break;
+            }
+        }
+
+        if (title is null || title.IsAutomaticText || title.Text is not { } content)
+        {
+            return;
+        }
+
+        var box = TextBox(title, content, area.Width / (beside ^ title.IsVertical ? 5 : 2), GetTextFont(title));
+        int shadow = Shadow(title.Area, area);
+        if (beside)
+        {
+            Shrink(ref rect, area, box.Width + shadow + TwipsPerPixel, vertical: false, highSide: false);
+        }
+        else
+        {
+            Shrink(ref rect, area, box.Height + shadow + TwipsPerPixel, vertical: true, highSide: false);
+        }
     }
 
     // The plot length along one dimension before the labels were laid out: the saved length plus the room 37.0e took
@@ -494,19 +673,37 @@ internal sealed class ChartLayoutEngine
 
         int step = Math.Max(1, (int)_chart.CategoriesBetweenTickLabels);
         var first = series[0];
-        if (first.SeriesType != 3)
+        int categoriesWord = BinaryPrimitives.ReadUInt16BigEndian(first.Header.AsSpan(14));
+        if (first.SeriesType != 3 && categoriesWord >> 14 == 0)
         {
-            // Number categories are labelled 1 to the number of categories, in slots of at least 210 twips.
+            // Number categories with no reference behind them are labelled 1 to the number of categories, in slots
+            // of at least 210 twips.
             int labels = Math.Max(1, ((_chart.ValueAxisCrossesBetweenCategories ? 1 : 0) + CategoryCount() - 1) / step);
             int numberSlot = _chart.IsBar ? area.Width / 3 : Math.Max(plotWidth / labels, 210);
             return MeasureLongestNumber(_categoryFont, numberSlot, 1, CategoryCount() / step * step, 1);
         }
 
+        // Otherwise each label is its category: text, or a number in the series' format for them (bits 13-8 of
+        // header word 14; General with the slot's room).
         int slot = SlotWidth(plotWidth, area, step) / TwipsPerPixel;
+        int format = (categoriesWord >> 8) & 0x3F;
+        Span<char> number = stackalloc char[ExcelValueFormatter.GeneralSize(64)];
         int lines = 0, widest = 0;
         for (int i = 0; i < first.PointCount; i += step)
         {
-            var text = i < first.CategoryTexts.Count ? first.CategoryTexts[i].AsSpan() : default;
+            scoped ReadOnlySpan<char> text;
+            if (first.SeriesType == 3)
+            {
+                text = i < first.CategoryTexts.Count ? first.CategoryTexts[i] : default;
+            }
+            else
+            {
+                double value = i < first.CategoryValues.Count ? first.CategoryValues[i].ToDouble() : i + 1;
+                text = format == 0
+                    ? number[..FormatInRoom(value, Math.Max(slot, 4 * _categoryFont.Measure("0")), _categoryFont, number)]
+                    : ExcelValueFormatter.Format(value, format);
+            }
+
             var (labelLines, labelWidth) = Wrap(text, slot, _categoryFont);
             lines = Math.Max(lines, labelLines);
             widest = Math.Max(widest, labelWidth);
@@ -625,8 +822,53 @@ internal sealed class ChartLayoutEngine
         return GetFont(font.Family, font.Size, font.Bold);
     }
 
-    // A text object's font: its saved number and size, the System font at 12 when they are 0 (inferred).
-    private LabelFont GetTextFont(ChartText text) => GetFont(text.Record[20], text.Record[21] == 0 ? 12 : text.Record[21], bold: false);
+    // The legend's font: the number Excel hides in bits 8-1 of the legend word and the size in the legend area's
+    // byte 7 (spec §16.5), or the Microsoft Chart codes of its descriptor.
+    private LabelFont GetLegendFont()
+    {
+        var record = _chart.Record;
+        if ((_document.Version & 4) != 0)
+        {
+            int number = (BinaryPrimitives.ReadUInt16BigEndian(record.AsSpan(154)) >> 1) & 0xFF;
+            return GetFont(number, record[167] == 0 ? 12 : record[167], (record[157] & 0x40) != 0);
+        }
+
+        int code = record[157] & 0x3F, index = record[158];
+        return code switch
+        {
+            16 => GetFont(2, 9 + 3 * index, false),
+            1 => GetFont(3, 9 + 3 * index, false),
+            _ => GetFont(0, 12 + 6 * index, false),
+        };
+    }
+
+    // A text object's font: the Macintosh font number and size at record bytes 18 and 19 (mem 20 and 21, spec §16.7);
+    // 0 and 0, as the library writes, are the System font at 12.
+    private LabelFont GetTextFont(ChartText text) => GetFont(text.Record[18], text.Record[19] == 0 ? 12 : text.Record[19], bold: false);
+
+    // 33.1d: a text object's box: its lines and widest line, or for vertical text its stacked columns, with a pixel of
+    // margin all round and a pixel more each side for a border.
+    private static Extent TextBox(ChartText text, ReadOnlySpan<char> content, int widthTwips, LabelFont font)
+    {
+        int border = text.Area.Border.Pattern == ChartPattern.None ? 0 : 2;
+        if (text.IsVertical)
+        {
+            // 33.1e, 33.20: each character takes a line's height down a column; columns are as wide as an M, with an n
+            // between them.
+            int perChar = font.LineHeight;
+            int column = Math.Max(1, widthTwips / TwipsPerPixel / Math.Max(1, perChar));
+            int columns = Math.Max(1, (content.Length + column - 1) / column);
+            int tallest = Math.Min(content.Length, column) * perChar;
+            int width = columns * (font.Measure("M") + font.Measure("n")) - font.Measure("n");
+            return new((tallest + 2 + border) * TwipsPerPixel, (width + 2 + border) * TwipsPerPixel);
+        }
+
+        var (lines, textWidth) = Wrap(content, widthTwips / TwipsPerPixel, font);
+        return new((lines * font.LineHeight + 2 + border) * TwipsPerPixel, (textWidth + 2 + border) * TwipsPerPixel);
+    }
+
+    // 38.02: a box with a shadow takes a fortieth of the chart area's smaller side more.
+    private static int Shadow(ChartAreaFormat format, ChartBox area) => format.HasShadow ? Math.Min(area.Width, area.Height) / 40 : 0;
 
     // Font 1 is the application font, which the Font Manager draws in Geneva; a font the System has no bitmap family
     // for is drawn in the System font.
